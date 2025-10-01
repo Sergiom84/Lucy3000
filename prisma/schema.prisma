@@ -1,0 +1,322 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USUARIOS Y AUTENTICACIÓN
+// ============================================
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  password      String
+  name          String
+  role          UserRole @default(EMPLOYEE)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  // Relaciones
+  appointments  Appointment[]
+  cashMovements CashMovement[]
+  sales         Sale[]
+  
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+}
+
+// ============================================
+// CLIENTES
+// ============================================
+
+model Client {
+  id              String    @id @default(uuid())
+  firstName       String
+  lastName        String
+  email           String?   @unique
+  phone           String
+  birthDate       DateTime?
+  address         String?
+  city            String?
+  postalCode      String?
+  notes           String?
+  photoUrl        String?
+  loyaltyPoints   Int       @default(0)
+  totalSpent      Decimal   @default(0) @db.Decimal(10, 2)
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  // Relaciones
+  appointments    Appointment[]
+  sales           Sale[]
+  clientHistory   ClientHistory[]
+  
+  @@map("clients")
+}
+
+model ClientHistory {
+  id          String   @id @default(uuid())
+  clientId    String
+  date        DateTime @default(now())
+  service     String
+  notes       String?
+  photoUrl    String?
+  amount      Decimal  @db.Decimal(10, 2)
+  
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  
+  @@map("client_history")
+}
+
+// ============================================
+// SERVICIOS
+// ============================================
+
+model Service {
+  id              String   @id @default(uuid())
+  name            String
+  description     String?
+  price           Decimal  @db.Decimal(10, 2)
+  duration        Int      // en minutos
+  category        String
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relaciones
+  appointments    Appointment[]
+  saleItems       SaleItem[]
+  
+  @@map("services")
+}
+
+// ============================================
+// CITAS
+// ============================================
+
+model Appointment {
+  id          String            @id @default(uuid())
+  clientId    String
+  userId      String
+  serviceId   String
+  date        DateTime
+  startTime   String
+  endTime     String
+  status      AppointmentStatus @default(SCHEDULED)
+  notes       String?
+  reminder    Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id])
+  service     Service  @relation(fields: [serviceId], references: [id])
+  
+  @@map("appointments")
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+// ============================================
+// PRODUCTOS Y ALMACÉN
+// ============================================
+
+model Product {
+  id              String   @id @default(uuid())
+  name            String
+  description     String?
+  sku             String   @unique
+  barcode         String?
+  category        String
+  brand           String?
+  price           Decimal  @db.Decimal(10, 2)
+  cost            Decimal  @db.Decimal(10, 2)
+  stock           Int      @default(0)
+  minStock        Int      @default(5)
+  maxStock        Int?
+  unit            String   @default("unidad")
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relaciones
+  stockMovements  StockMovement[]
+  saleItems       SaleItem[]
+  
+  @@map("products")
+}
+
+model StockMovement {
+  id          String            @id @default(uuid())
+  productId   String
+  type        StockMovementType
+  quantity    Int
+  reason      String?
+  reference   String?
+  date        DateTime          @default(now())
+  
+  product     Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  @@map("stock_movements")
+}
+
+enum StockMovementType {
+  PURCHASE
+  SALE
+  ADJUSTMENT
+  RETURN
+  DAMAGED
+}
+
+// ============================================
+// VENTAS
+// ============================================
+
+model Sale {
+  id              String        @id @default(uuid())
+  clientId        String?
+  userId          String
+  saleNumber      String        @unique
+  date            DateTime      @default(now())
+  subtotal        Decimal       @db.Decimal(10, 2)
+  discount        Decimal       @default(0) @db.Decimal(10, 2)
+  tax             Decimal       @default(0) @db.Decimal(10, 2)
+  total           Decimal       @db.Decimal(10, 2)
+  paymentMethod   PaymentMethod
+  status          SaleStatus    @default(COMPLETED)
+  notes           String?
+  
+  client          Client?    @relation(fields: [clientId], references: [id])
+  user            User       @relation(fields: [userId], references: [id])
+  items           SaleItem[]
+  
+  @@map("sales")
+}
+
+model SaleItem {
+  id          String  @id @default(uuid())
+  saleId      String
+  productId   String?
+  serviceId   String?
+  description String
+  quantity    Int
+  price       Decimal @db.Decimal(10, 2)
+  subtotal    Decimal @db.Decimal(10, 2)
+  
+  sale        Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product     Product? @relation(fields: [productId], references: [id])
+  service     Service? @relation(fields: [serviceId], references: [id])
+  
+  @@map("sale_items")
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  TRANSFER
+  MIXED
+}
+
+enum SaleStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+  REFUNDED
+}
+
+// ============================================
+// CAJA
+// ============================================
+
+model CashRegister {
+  id              String   @id @default(uuid())
+  date            DateTime @default(now())
+  openingBalance  Decimal  @db.Decimal(10, 2)
+  closingBalance  Decimal? @db.Decimal(10, 2)
+  expectedBalance Decimal? @db.Decimal(10, 2)
+  difference      Decimal? @db.Decimal(10, 2)
+  status          String   @default("OPEN") // OPEN, CLOSED
+  notes           String?
+  openedAt        DateTime @default(now())
+  closedAt        DateTime?
+  
+  movements       CashMovement[]
+  
+  @@map("cash_registers")
+}
+
+model CashMovement {
+  id              String         @id @default(uuid())
+  cashRegisterId  String
+  userId          String
+  type            CashMovementType
+  amount          Decimal        @db.Decimal(10, 2)
+  category        String
+  description     String
+  reference       String?
+  date            DateTime       @default(now())
+  
+  cashRegister    CashRegister @relation(fields: [cashRegisterId], references: [id], onDelete: Cascade)
+  user            User         @relation(fields: [userId], references: [id])
+  
+  @@map("cash_movements")
+}
+
+enum CashMovementType {
+  INCOME
+  EXPENSE
+  WITHDRAWAL
+  DEPOSIT
+}
+
+// ============================================
+// NOTIFICACIONES
+// ============================================
+
+model Notification {
+  id          String   @id @default(uuid())
+  type        String   // BIRTHDAY, LOW_STOCK, APPOINTMENT, PAYMENT
+  title       String
+  message     String
+  isRead      Boolean  @default(false)
+  priority    String   @default("NORMAL") // LOW, NORMAL, HIGH
+  createdAt   DateTime @default(now())
+  
+  @@map("notifications")
+}
+
+// ============================================
+// CONFIGURACIÓN
+// ============================================
+
+model Setting {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+  
+  @@map("settings")
+}
+

@@ -1,0 +1,94 @@
+{
+  "name": "lucy3000-accounting",
+  "version": "1.0.0",
+  "description": "Sistema de contabilidad avanzado para tiendas de estética",
+  "main": "dist/main/main.js",
+  "author": "Sergio Hernández Lara",
+  "license": "MIT",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:electron\"",
+    "dev:backend": "nodemon --watch src/backend --ext ts,json --exec ts-node --project tsconfig.backend.dev.json src/backend/server.ts",
+    "dev:electron": "vite",
+    "build": "tsc && vite build && electron-builder",
+    "build:backend": "tsc -p tsconfig.backend.json",
+    "preview": "vite preview",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.8.0",
+    "@supabase/supabase-js": "^2.39.0",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "date-fns": "^3.0.6",
+    "zod": "^3.22.4",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.21.1",
+    "zustand": "^4.4.7",
+    "axios": "^1.6.5",
+    "recharts": "^2.10.3",
+    "react-hot-toast": "^2.4.1",
+    "lucide-react": "^0.303.0",
+    "clsx": "^2.1.0",
+    "tailwind-merge": "^2.2.0",
+    "jspdf": "^2.5.1",
+    "jspdf-autotable": "^3.8.2",
+    "xlsx": "^0.18.5",
+    "react-big-calendar": "^1.8.5",
+    "react-hook-form": "^7.49.3",
+    "@hookform/resolvers": "^3.3.4"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.47",
+    "@types/react-dom": "^18.2.18",
+    "@types/node": "^20.10.6",
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.5",
+    "@vitejs/plugin-react": "^4.2.1",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.10",
+    "vite-plugin-electron": "^0.28.1",
+    "vite-plugin-electron-renderer": "^0.14.5",
+    "electron": "^28.1.0",
+    "electron-builder": "^24.9.1",
+    "prisma": "^5.8.0",
+    "tailwindcss": "^3.4.0",
+    "postcss": "^8.4.32",
+    "autoprefixer": "^10.4.16",
+    "concurrently": "^8.2.2",
+    "nodemon": "^3.0.2",
+    "ts-node": "^10.9.2"
+  },
+  "build": {
+    "appId": "com.lucy3000.accounting",
+    "productName": "Lucy3000 Accounting",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": ["nsis"],
+      "icon": "public/icon.ico"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "icon": "public/icon.icns"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "icon": "public/icon.png"
+    }
+  }
+}
+
