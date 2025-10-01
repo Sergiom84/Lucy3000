@@ -8,8 +8,7 @@ services:
       npm ci
       npm run build:backend
       npx prisma generate
-      chmod +x scripts/deploy.sh
-    startCommand: bash scripts/deploy.sh
+    startCommand: npx prisma migrate deploy && node dist/backend/server.js
     envVars:
       - key: NODE_VERSION
         value: 20
