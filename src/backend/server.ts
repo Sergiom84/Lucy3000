@@ -47,7 +47,7 @@ app.use('/api/notifications', notificationRoutes)
 app.use('/api/reports', reportRoutes)
 app.use('/api/dashboard', dashboardRoutes)
 // Static frontend build (Vite)
-const clientDir = path.resolve(__dirname, '..', '..')
+const clientDir = path.resolve(__dirname, '..')
 app.use(express.static(clientDir))
 
 // SPA fallback: send index.html for non-API routes
