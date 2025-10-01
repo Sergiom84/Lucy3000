@@ -2,16 +2,17 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "module": "commonjs",
+    "moduleResolution": "node",
     "target": "ES2020",
     "outDir": "./dist/backend",
     "rootDir": "./src/backend",
     "noEmit": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "allowImportingTsExtensions": false,
     "noUnusedLocals": false,
     "noUnusedParameters": false
   },
   "include": ["src/backend/**/*"],
   "exclude": ["node_modules", "dist"]
 }
-

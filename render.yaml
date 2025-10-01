@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: lucy3000-api
+    env: node
+    plan: free
+    autoDeploy: true
+    buildCommand: |
+      npm ci
+      npm run build:backend
+      npx prisma generate
+    startCommand: npx prisma migrate deploy && node dist/backend/server.js
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+    healthCheckPath: /health
