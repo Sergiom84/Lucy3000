@@ -4,7 +4,7 @@ services:
     env: node
     plan: free
     autoDeploy: true
-    buildCommand: npm install && npm run build:backend && npx prisma generate
+    buildCommand: npm ci --include=dev && npx prisma generate && npx vite build && npm run build:backend
     startCommand: npx prisma migrate deploy && node dist/backend/server.js
     envVars:
       - key: NODE_VERSION
@@ -17,4 +17,7 @@ services:
         sync: false
       - key: PORT
         value: 10000
+      - key: VITE_API_URL
+        value: /api
+
     healthCheckPath: /health
