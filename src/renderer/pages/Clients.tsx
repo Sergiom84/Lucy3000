@@ -4,6 +4,8 @@ import { Plus, Search, Edit, Trash2, Eye, Phone, Mail, Calendar } from 'lucide-r
 import api from '../utils/api'
 import { formatCurrency, formatDate, formatPhone } from '../utils/format'
 import toast from 'react-hot-toast'
+import Modal from '../components/Modal'
+import ClientForm from '../components/ClientForm'
 
 export default function Clients() {
   const navigate = useNavigate()
@@ -48,6 +50,16 @@ export default function Clients() {
 
   const handleView = (id: string) => {
     navigate(`/clients/${id}`)
+  }
+
+  const handleCloseModal = () => {
+    setShowModal(false)
+    setEditingClient(null)
+  }
+
+  const handleFormSuccess = () => {
+    handleCloseModal()
+    fetchClients()
   }
 
   if (loading) {
@@ -251,6 +263,20 @@ export default function Clients() {
           </table>
         </div>
       </div>
+
+      {/* Modal de Formulario */}
+      <Modal
+        isOpen={showModal}
+        onClose={handleCloseModal}
+        title={editingClient ? 'Editar Cliente' : 'Nuevo Cliente'}
+        maxWidth="2xl"
+      >
+        <ClientForm
+          client={editingClient}
+          onSuccess={handleFormSuccess}
+          onCancel={handleCloseModal}
+        />
+      </Modal>
     </div>
   )
 }

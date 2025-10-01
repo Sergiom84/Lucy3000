@@ -1,5 +1,6 @@
 import { Request, Response } from 'express'
 import { prisma } from '../server'
+import * as XLSX from 'xlsx'
 
 export const getProducts = async (req: Request, res: Response) => {
   try {
@@ -181,6 +182,92 @@ export const addStockMovement = async (req: Request, res: Response) => {
     res.status(201).json(movement)
   } catch (error) {
     console.error('Add stock movement error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const importProductsFromExcel = async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' })
+    }
+
+    // Leer el archivo Excel
+    const workbook = XLSX.read(req.file.buffer, { type: 'buffer' })
+    const sheetName = workbook.SheetNames[0]
+    const worksheet = workbook.Sheets[sheetName]
+    const data = XLSX.utils.sheet_to_json(worksheet)
+
+    const results = {
+      success: 0,
+      errors: [] as any[],
+      skipped: 0
+    }
+
+    // Procesar cada fila
+    for (let i = 0; i < data.length; i++) {
+      const row: any = data[i]
+
+      try {
+        // Validar campos requeridos
+        if (!row.nombre || !row.sku || !row.precio || !row.costo) {
+          results.errors.push({
+            row: i + 2, // +2 porque Excel empieza en 1 y tiene header
+            error: 'Faltan campos requeridos (nombre, sku, precio, costo)'
+          })
+          results.skipped++
+          continue
+        }
+
+        // Verificar si el SKU ya existe
+        const existingProduct = await prisma.product.findFirst({
+          where: { sku: String(row.sku).trim() }
+        })
+
+        if (existingProduct) {
+          results.errors.push({
+            row: i + 2,
+            error: `SKU ${row.sku} ya existe`
+          })
+          results.skipped++
+          continue
+        }
+
+        // Crear producto
+        await prisma.product.create({
+          data: {
+            name: String(row.nombre).trim(),
+            description: row.descripcion ? String(row.descripcion).trim() : null,
+            sku: String(row.sku).trim(),
+            barcode: row.codigoBarras ? String(row.codigoBarras).trim() : null,
+            category: row.categoria ? String(row.categoria).trim() : 'Otros',
+            brand: row.marca ? String(row.marca).trim() : null,
+            price: parseFloat(row.precio),
+            cost: parseFloat(row.costo),
+            stock: row.stock ? parseInt(row.stock) : 0,
+            minStock: row.stockMinimo ? parseInt(row.stockMinimo) : 5,
+            maxStock: row.stockMaximo ? parseInt(row.stockMaximo) : null,
+            unit: row.unidad ? String(row.unidad).trim() : 'unidad',
+            isActive: row.activo === undefined ? true : Boolean(row.activo)
+          }
+        })
+
+        results.success++
+      } catch (error: any) {
+        results.errors.push({
+          row: i + 2,
+          error: error.message
+        })
+        results.skipped++
+      }
+    }
+
+    res.json({
+      message: 'Import completed',
+      results
+    })
+  } catch (error) {
+    console.error('Import products error:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 }

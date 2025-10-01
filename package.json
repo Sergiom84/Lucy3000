@@ -17,54 +17,57 @@
     "prisma:studio": "prisma studio"
   },
   "dependencies": {
+    "@hookform/resolvers": "^3.3.4",
     "@prisma/client": "^5.8.0",
     "@supabase/supabase-js": "^2.39.0",
-    "express": "^4.18.2",
-    "cors": "^2.8.5",
-    "dotenv": "^16.3.1",
-    "bcryptjs": "^2.4.3",
-    "jsonwebtoken": "^9.0.2",
-    "date-fns": "^3.0.6",
-    "zod": "^3.22.4",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-router-dom": "^6.21.1",
-    "zustand": "^4.4.7",
+    "@types/multer": "^2.0.0",
     "axios": "^1.6.5",
-    "recharts": "^2.10.3",
-    "react-hot-toast": "^2.4.1",
-    "lucide-react": "^0.303.0",
+    "bcryptjs": "^2.4.3",
     "clsx": "^2.1.0",
-    "tailwind-merge": "^2.2.0",
+    "cors": "^2.8.5",
+    "date-fns": "^3.0.6",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2",
     "jspdf": "^2.5.1",
     "jspdf-autotable": "^3.8.2",
-    "xlsx": "^0.18.5",
+    "lucide-react": "^0.303.0",
+    "moment": "^2.30.1",
+    "multer": "^2.0.2",
+    "react": "^18.2.0",
     "react-big-calendar": "^1.8.5",
+    "react-dom": "^18.2.0",
     "react-hook-form": "^7.49.3",
-    "@hookform/resolvers": "^3.3.4"
+    "react-hot-toast": "^2.4.1",
+    "react-router-dom": "^6.21.1",
+    "recharts": "^2.10.3",
+    "tailwind-merge": "^2.2.0",
+    "xlsx": "^0.18.5",
+    "zod": "^3.22.4",
+    "zustand": "^4.4.7"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/node": "^20.10.6",
     "@types/react": "^18.2.47",
     "@types/react-dom": "^18.2.18",
-    "@types/node": "^20.10.6",
-    "@types/express": "^4.17.21",
-    "@types/cors": "^2.8.17",
-    "@types/bcryptjs": "^2.4.6",
-    "@types/jsonwebtoken": "^9.0.5",
     "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.16",
+    "concurrently": "^8.2.2",
+    "electron": "^28.1.0",
+    "electron-builder": "^24.9.1",
+    "nodemon": "^3.0.2",
+    "postcss": "^8.4.32",
+    "prisma": "^5.8.0",
+    "tailwindcss": "^3.4.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.3.3",
     "vite": "^5.0.10",
     "vite-plugin-electron": "^0.28.1",
-    "vite-plugin-electron-renderer": "^0.14.5",
-    "electron": "^28.1.0",
-    "electron-builder": "^24.9.1",
-    "prisma": "^5.8.0",
-    "tailwindcss": "^3.4.0",
-    "postcss": "^8.4.32",
-    "autoprefixer": "^10.4.16",
-    "concurrently": "^8.2.2",
-    "nodemon": "^3.0.2",
-    "ts-node": "^10.9.2"
+    "vite-plugin-electron-renderer": "^0.14.5"
   },
   "build": {
     "appId": "com.lucy3000.accounting",
@@ -78,17 +81,22 @@
       "package.json"
     ],
     "win": {
-      "target": ["nsis"],
+      "target": [
+        "nsis"
+      ],
       "icon": "public/icon.ico"
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "icon": "public/icon.icns"
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "icon": "public/icon.png"
     }
   }
 }
-

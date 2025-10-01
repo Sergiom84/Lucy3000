@@ -80,6 +80,9 @@ export const openCashRegister = async (req: Request, res: Response) => {
       data: {
         openingBalance,
         notes
+      },
+      include: {
+        movements: true
       }
     })
 
