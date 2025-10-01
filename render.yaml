@@ -8,7 +8,8 @@ services:
       npm ci
       npm run build:backend
       npx prisma generate
-    startCommand: npx prisma migrate deploy && node dist/backend/server.js
+      chmod +x scripts/deploy.sh
+    startCommand: bash scripts/deploy.sh
     envVars:
       - key: NODE_VERSION
         value: 20
@@ -18,4 +19,6 @@ services:
         sync: false
       - key: JWT_SECRET
         sync: false
+      - key: PORT
+        value: 10000
     healthCheckPath: /health
