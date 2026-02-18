@@ -33,7 +33,7 @@
       "@backend/*": ["src/backend/*"]
     }
   },
-  "include": ["src/renderer", "src/main", "src/preload.ts"],
+  "include": ["src/renderer", "src/main", "src/preload.ts", "src/vite-env.d.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
 

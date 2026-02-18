@@ -228,7 +228,7 @@ Lucy3000/
 ├── 📄 README.md               # Documentación principal
 ├── 📄 QUICK_START.md          # Guía rápida
 ├── 📄 DEPLOYMENT.md           # Guía de deployment
-├── 📄 API_EXAMPLES.md         # Ejemplos de API
+├── 📄 ROADMAP.md              # Estado y plan de trabajo
 └── 📄 ARCHITECTURE.md         # Este archivo
 ```
 

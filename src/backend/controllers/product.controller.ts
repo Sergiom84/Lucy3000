@@ -1,5 +1,5 @@
 import { Request, Response } from 'express'
-import { prisma } from '../server'
+import { prisma } from '../db'
 import * as XLSX from 'xlsx'
 
 export const getProducts = async (req: Request, res: Response) => {
@@ -17,7 +17,7 @@ export const getProducts = async (req: Request, res: Response) => {
     }
 
     if (isActive !== undefined) {
-      where.isActive = isActive === 'true'
+      where.isActive = typeof isActive === 'boolean' ? isActive : isActive === 'true'
     }
 
     if (category) {
@@ -112,29 +112,54 @@ export const getLowStockProducts = async (req: Request, res: Response) => {
   try {
     const products = await prisma.product.findMany({
       where: {
+        isActive: true
+      },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        sku: true,
+        barcode: true,
+        category: true,
+        brand: true,
+        price: true,
+        cost: true,
+        stock: true,
+        minStock: true,
+        maxStock: true,
+        unit: true,
         isActive: true,
-        stock: {
-          lte: prisma.product.fields.minStock
-        }
+        createdAt: true,
+        updatedAt: true
       },
       orderBy: { stock: 'asc' }
     })
+    const lowStockProducts = products.filter((product) => product.stock <= product.minStock)
 
     // Crear notificaciones para productos con stock bajo
-    for (const product of products) {
-      if (product.stock <= product.minStock) {
+    for (const product of lowStockProducts) {
+      const notificationTitle = `Stock bajo: ${product.name}`
+      const existingNotification = await prisma.notification.findFirst({
+        where: {
+          type: 'LOW_STOCK',
+          isRead: false,
+          title: notificationTitle
+        }
+      })
+
+      if (!existingNotification) {
         await prisma.notification.create({
           data: {
             type: 'LOW_STOCK',
-            title: 'Stock bajo',
-            message: `El producto "${product.name}" tiene stock bajo (${product.stock} ${product.unit})`,
+            title: notificationTitle,
+            message: `Stock actual: ${product.stock} ${product.unit}. Stock mínimo: ${product.minStock}.`,
             priority: 'HIGH'
           }
         })
       }
     }
 
-    res.json(products)
+    res.json(lowStockProducts)
   } catch (error) {
     console.error('Get low stock products error:', error)
     res.status(500).json({ error: 'Internal server error' })
@@ -145,17 +170,20 @@ export const addStockMovement = async (req: Request, res: Response) => {
   try {
     const { id } = req.params
     const { type, quantity, reason, reference } = req.body
+    const parsedQuantity = Number(quantity)
+    const allowedTypes = ['PURCHASE', 'SALE', 'ADJUSTMENT', 'RETURN', 'DAMAGED']
 
-    // Crear movimiento de stock
-    const movement = await prisma.stockMovement.create({
-      data: {
-        productId: id,
-        type,
-        quantity,
-        reason,
-        reference
-      }
-    })
+    if (!allowedTypes.includes(type)) {
+      return res.status(400).json({ error: 'Invalid stock movement type' })
+    }
+
+    if (!Number.isInteger(parsedQuantity) || parsedQuantity === 0) {
+      return res.status(400).json({ error: 'Quantity must be a non-zero integer' })
+    }
+
+    if (type !== 'ADJUSTMENT' && parsedQuantity < 0) {
+      return res.status(400).json({ error: 'Quantity must be positive for this movement type' })
+    }
 
     // Actualizar stock del producto
     const product = await prisma.product.findUnique({
@@ -168,15 +196,35 @@ export const addStockMovement = async (req: Request, res: Response) => {
 
     let newStock = product.stock
 
-    if (type === 'PURCHASE' || type === 'RETURN' || type === 'ADJUSTMENT') {
-      newStock += quantity
+    if (type === 'ADJUSTMENT') {
+      newStock += parsedQuantity
+    } else if (type === 'PURCHASE' || type === 'RETURN') {
+      newStock += parsedQuantity
     } else if (type === 'SALE' || type === 'DAMAGED') {
-      newStock -= quantity
+      newStock -= parsedQuantity
     }
 
-    await prisma.product.update({
-      where: { id },
-      data: { stock: newStock }
+    if (newStock < 0) {
+      return res.status(400).json({ error: 'Stock cannot be negative after this movement' })
+    }
+
+    const movement = await prisma.$transaction(async (tx) => {
+      const createdMovement = await tx.stockMovement.create({
+        data: {
+          productId: id,
+          type,
+          quantity: parsedQuantity,
+          reason,
+          reference
+        }
+      })
+
+      await tx.product.update({
+        where: { id },
+        data: { stock: newStock }
+      })
+
+      return createdMovement
     })
 
     res.status(201).json(movement)

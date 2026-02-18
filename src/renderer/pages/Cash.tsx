@@ -203,7 +203,7 @@ export default function Cash() {
 
     try {
       setLoading(true)
-      const response = await api.post(`/cash/${activeCashRegister.id}/movements`, {
+      await api.post(`/cash/${activeCashRegister.id}/movements`, {
         type: movementType,
         amount: Number(movementAmount),
         category: movementCategory,

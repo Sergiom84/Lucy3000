@@ -2,6 +2,9 @@
 
 Sistema de contabilidad y gestión completo para tiendas de estética, desarrollado con Electron, React, TypeScript, Node.js y Supabase.
 
+Estado actual del proyecto y plan de trabajo: [ROADMAP.md](ROADMAP.md)
+Guía de recuperación de base de datos: [BACKUP_RESTORE.md](BACKUP_RESTORE.md)
+
 ## 📋 Características Principales
 
 ### ✨ Funcionalidades Implementadas
@@ -47,7 +50,7 @@ Sistema de contabilidad y gestión completo para tiendas de estética, desarroll
   - Clientes top
   - Productos más vendidos
   - Flujo de caja
-  - Exportación a PDF y Excel
+  - Exportación (en desarrollo)
   
 - **Sistema de Notificaciones**:
   - Cumpleaños de clientes
@@ -58,7 +61,7 @@ Sistema de contabilidad y gestión completo para tiendas de estética, desarroll
 - **Características Adicionales**:
   - Modo oscuro/claro
   - Sistema de roles (Admin, Manager, Employee)
-  - Backups automáticos
+  - Backups (en desarrollo)
   - Multi-sucursal (preparado)
   - Responsive design
 

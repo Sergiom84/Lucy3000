@@ -1,12 +1,9 @@
 import { useEffect, useState } from 'react'
 import {
-  TrendingUp,
   Users,
   Calendar,
   DollarSign,
-  AlertTriangle,
-  Bell,
-  ShoppingCart
+  AlertTriangle
 } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import api from '../utils/api'

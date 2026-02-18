@@ -212,7 +212,7 @@ export default function Sales() {
     try {
       setLoading(true)
 
-      const { subtotal, discountAmount, total } = calculateTotals()
+      const { subtotal, discountAmount } = calculateTotals()
 
       const saleData = {
         clientId: selectedClient?.id || null,

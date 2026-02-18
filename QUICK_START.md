@@ -101,7 +101,8 @@ Una vez que la aplicación esté funcionando:
 
 - [README Completo](README.md) - Documentación detallada
 - [Guía de Deployment](DEPLOYMENT.md) - Subir a producción
-- [Proyecto Completado](PROYECTO_COMPLETADO.md) - Estado del proyecto
+- [Roadmap](ROADMAP.md) - Estado real y próximos pasos
+- [Backup y Restauración](BACKUP_RESTORE.md) - Recuperación de base de datos
 
 ## 💡 Consejos
 

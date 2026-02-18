@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react'
-import { TrendingUp, TrendingDown, Users, Package, DollarSign, ShoppingCart, Calendar, Download, Filter, BarChart3, PieChart, Activity } from 'lucide-react'
+import { TrendingUp, TrendingDown, Users, Package, DollarSign, ShoppingCart, Download, Filter, Activity } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
 import { format, subDays, startOfMonth, endOfMonth } from 'date-fns'
-import { es } from 'date-fns/locale'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart as RePieChart, Pie, Cell, LineChart, Line } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart as RePieChart, Pie, Cell } from 'recharts'
 
 interface DateRange {
   startDate: string
@@ -277,7 +276,7 @@ export default function Reports() {
                         fill="#8884d8"
                         dataKey="value"
                       >
-                        {paymentMethodsData.map((entry, index) => (
+                        {paymentMethodsData.map((_, index) => (
                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                         ))}
                       </Pie>

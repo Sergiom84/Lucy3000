@@ -1,5 +1,5 @@
 import { Request, Response } from 'express'
-import { prisma } from '../server'
+import { prisma } from '../db'
 
 export const getDashboardStats = async (req: Request, res: Response) => {
   try {
@@ -10,7 +10,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     tomorrow.setDate(tomorrow.getDate() + 1)
 
     const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
-    const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0)
+    const startOfNextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1)
 
     // Citas de hoy
     const todayAppointments = await prisma.appointment.count({
@@ -40,7 +40,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       where: {
         date: {
           gte: startOfMonth,
-          lte: endOfMonth
+          lt: startOfNextMonth
         },
         status: 'COMPLETED'
       }
@@ -54,14 +54,16 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     })
 
     // Productos con stock bajo
-    const lowStockProducts = await prisma.product.count({
+    const activeProducts = await prisma.product.findMany({
       where: {
-        isActive: true,
-        stock: {
-          lte: prisma.product.fields.minStock
-        }
+        isActive: true
+      },
+      select: {
+        stock: true,
+        minStock: true
       }
     })
+    const lowStockProducts = activeProducts.filter((product) => product.stock <= product.minStock).length
 
     // Notificaciones no leídas
     const unreadNotifications = await prisma.notification.count({

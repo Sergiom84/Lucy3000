@@ -15,15 +15,22 @@ INSERT INTO users (
   "updatedAt"
 )
 VALUES (
-  gen_random_uuid(),
+  COALESCE((SELECT id FROM users WHERE email = 'admin@lucy3000.com'), gen_random_uuid()::text),
   'admin@lucy3000.com',
-  '$2a$10$YQiQVkMsSppeYkUlCuvIseZkNyGfqsgAOBSxiitW4gluuK2zp.W6e', -- admin123
+  '$2a$10$GgyHgpemOouirZKs6I8qJOAwQTyDntonwZylGH/ZLqH1damirm9D6', -- admin123
   'Administrador',
   'ADMIN',
   true,
   NOW(),
   NOW()
-);
+)
+ON CONFLICT (email) DO UPDATE
+SET
+  password = EXCLUDED.password,
+  name = EXCLUDED.name,
+  role = EXCLUDED.role,
+  "isActive" = true,
+  "updatedAt" = NOW();
 
 -- Verificar que se creó correctamente
 SELECT id, email, name, role, "isActive" FROM users WHERE email = 'admin@lucy3000.com';

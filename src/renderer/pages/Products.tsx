@@ -458,15 +458,23 @@ function StockMovementForm({ product, onSuccess, onCancel }: any) {
     setLoading(true)
 
     try {
-      if (!formData.quantity || parseInt(formData.quantity) <= 0) {
-        toast.error('La cantidad debe ser mayor a 0')
+      const parsedQuantity = parseInt(formData.quantity, 10)
+
+      if (!Number.isInteger(parsedQuantity) || parsedQuantity === 0) {
+        toast.error('La cantidad debe ser un número entero distinto de 0')
+        setLoading(false)
+        return
+      }
+
+      if (formData.type !== 'ADJUSTMENT' && parsedQuantity < 0) {
+        toast.error('La cantidad debe ser positiva para este tipo de movimiento')
         setLoading(false)
         return
       }
 
       await api.post(`/products/${product.id}/stock-movements`, {
         type: formData.type,
-        quantity: parseInt(formData.quantity),
+        quantity: parsedQuantity,
         reason: formData.reason.trim() || null,
         reference: formData.reference.trim() || null
       })
@@ -515,10 +523,15 @@ function StockMovementForm({ product, onSuccess, onCancel }: any) {
           value={formData.quantity}
           onChange={(e) => setFormData(prev => ({ ...prev, quantity: e.target.value }))}
           className="input"
-          placeholder="10"
-          min="1"
+          placeholder={formData.type === 'ADJUSTMENT' ? '-5 o 5' : '10'}
+          min={formData.type === 'ADJUSTMENT' ? undefined : '1'}
           required
         />
+        {formData.type === 'ADJUSTMENT' && (
+          <p className="text-xs text-gray-500 mt-1">
+            Usa negativo para disminuir stock y positivo para aumentarlo.
+          </p>
+        )}
       </div>
 
       <div>

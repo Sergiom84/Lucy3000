@@ -1,5 +1,5 @@
 import { Request, Response } from 'express'
-import { prisma } from '../server'
+import { prisma } from '../db'
 
 export const getNotifications = async (req: Request, res: Response) => {
   try {

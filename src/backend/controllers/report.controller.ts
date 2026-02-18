@@ -1,5 +1,6 @@
 import { Request, Response } from 'express'
-import { prisma } from '../server'
+import { prisma } from '../db'
+import { buildInclusiveDateRange } from '../utils/date-range'
 
 export const getSalesReport = async (req: Request, res: Response) => {
   try {
@@ -10,10 +11,7 @@ export const getSalesReport = async (req: Request, res: Response) => {
     }
 
     if (startDate && endDate) {
-      where.date = {
-        gte: new Date(startDate as string),
-        lte: new Date(endDate as string)
-      }
+      where.date = buildInclusiveDateRange(startDate as string, endDate as string)
     }
 
     const sales = await prisma.sale.findMany({
@@ -170,10 +168,7 @@ export const getCashReport = async (req: Request, res: Response) => {
     const where: any = {}
 
     if (startDate && endDate) {
-      where.date = {
-        gte: new Date(startDate as string),
-        lte: new Date(endDate as string)
-      }
+      where.date = buildInclusiveDateRange(startDate as string, endDate as string)
     }
 
     const cashRegisters = await prisma.cashRegister.findMany({
