@@ -2,6 +2,55 @@ param()
 
 $ErrorActionPreference = "Stop"
 
+function Get-DatabaseHostPort {
+  param(
+    [string]$DatabaseUrl
+  )
+
+  try {
+    $uri = [System.Uri]$DatabaseUrl
+  } catch {
+    return $null
+  }
+
+  if ([string]::IsNullOrWhiteSpace($uri.Host)) {
+    return $null
+  }
+
+  $port = if ($uri.Port -gt 0) { $uri.Port } else { 5432 }
+  return @{
+    Host = $uri.Host
+    Port = $port
+  }
+}
+
+function Test-TcpPort {
+  param(
+    [string]$ComputerName,
+    [int]$Port,
+    [int]$TimeoutMs = 3000
+  )
+
+  $client = New-Object System.Net.Sockets.TcpClient
+
+  try {
+    $connect = $client.BeginConnect($ComputerName, $Port, $null, $null)
+    if (-not $connect.AsyncWaitHandle.WaitOne($TimeoutMs, $false)) {
+      return $false
+    }
+
+    $client.EndConnect($connect) | Out-Null
+    return $true
+  } catch {
+    return $false
+  } finally {
+    if ($connect -and $connect.AsyncWaitHandle) {
+      $connect.AsyncWaitHandle.Close()
+    }
+    $client.Close()
+  }
+}
+
 function Set-DatabaseUrlFromSupabaseLink {
   Write-Host "DATABASE_URL not found. Resolving temporary DB credentials from linked Supabase project..."
 
@@ -30,8 +79,30 @@ function Set-DatabaseUrlFromSupabaseLink {
   Write-Host "DATABASE_URL loaded from Supabase link."
 }
 
-if ([string]::IsNullOrWhiteSpace($env:DATABASE_URL)) {
+$shouldResolveDbFromSupabase = [string]::IsNullOrWhiteSpace($env:DATABASE_URL)
+
+if (-not $shouldResolveDbFromSupabase) {
+  $dbTarget = Get-DatabaseHostPort -DatabaseUrl $env:DATABASE_URL
+
+  if ($null -eq $dbTarget) {
+    Write-Host "DATABASE_URL has invalid format. Refreshing credentials from Supabase link..."
+    $shouldResolveDbFromSupabase = $true
+  } else {
+    $isReachable = Test-TcpPort -ComputerName $dbTarget.Host -Port $dbTarget.Port
+    if (-not $isReachable) {
+      Write-Host "DATABASE_URL host '$($dbTarget.Host):$($dbTarget.Port)' is unreachable. Refreshing credentials from Supabase link..."
+      $shouldResolveDbFromSupabase = $true
+    }
+  }
+}
+
+if ($shouldResolveDbFromSupabase) {
   Set-DatabaseUrlFromSupabaseLink
+}
+
+$effectiveDbTarget = Get-DatabaseHostPort -DatabaseUrl $env:DATABASE_URL
+if ($null -ne $effectiveDbTarget) {
+  Write-Host "Using DATABASE_URL host '$($effectiveDbTarget.Host):$($effectiveDbTarget.Port)'."
 }
 
 if ([string]::IsNullOrWhiteSpace($env:JWT_SECRET)) {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Save, X } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
@@ -19,6 +19,123 @@ const statusOptions = [
   { value: 'CANCELLED', label: 'Cancelada', color: 'danger' },
   { value: 'NO_SHOW', label: 'No Asistió', color: 'danger' }
 ]
+
+type SearchableOption = {
+  id: string
+  label: string
+  detail?: string
+  searchText: string
+}
+
+const normalizeText = (value: unknown) =>
+  String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+
+function SearchableSelect({
+  value,
+  options,
+  onSelect,
+  placeholder,
+  emptyText
+}: {
+  value: string
+  options: SearchableOption[]
+  onSelect: (id: string) => void
+  placeholder: string
+  emptyText: string
+}) {
+  const [query, setQuery] = useState('')
+  const [isOpen, setIsOpen] = useState(false)
+
+  const selectedOption = useMemo(
+    () => options.find((option) => option.id === value) || null,
+    [options, value]
+  )
+
+  useEffect(() => {
+    if (!value) {
+      if (!isOpen) {
+        setQuery('')
+      }
+      return
+    }
+
+    if (selectedOption && !isOpen) {
+      setQuery(selectedOption.label)
+    }
+  }, [value, selectedOption, isOpen])
+
+  const filteredOptions = useMemo(() => {
+    const term = normalizeText(query)
+    if (!term) return options
+    return options.filter((option) => normalizeText(option.searchText).includes(term))
+  }, [options, query])
+
+  const handleSelect = (option: SearchableOption) => {
+    onSelect(option.id)
+    setQuery(option.label)
+    setIsOpen(false)
+  }
+
+  return (
+    <div
+      className="relative"
+      onFocus={() => setIsOpen(true)}
+      onBlur={() => {
+        window.setTimeout(() => setIsOpen(false), 120)
+      }}
+    >
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => {
+          const nextQuery = e.target.value
+          setQuery(nextQuery)
+          setIsOpen(true)
+          if (value) {
+            onSelect('')
+          }
+        }}
+        className="input"
+        placeholder={placeholder}
+      />
+
+      {isOpen && (
+        <div className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800">
+          {filteredOptions.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+              {emptyText}
+            </div>
+          ) : (
+            filteredOptions.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  handleSelect(option)
+                }}
+                className="w-full border-b border-gray-100 px-3 py-2 text-left last:border-b-0 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700"
+              >
+                <p className="text-sm font-medium text-gray-900 dark:text-white">
+                  {option.label}
+                </p>
+                {option.detail && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {option.detail}
+                  </p>
+                )}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function AppointmentForm({ appointment, onSuccess, onCancel, preselectedDate }: AppointmentFormProps) {
   const { user } = useAuthStore()
@@ -97,6 +214,63 @@ export default function AppointmentForm({ appointment, onSuccess, onCancel, pres
     }
   }
 
+  const clientOptions = useMemo<SearchableOption[]>(() => {
+    return clients.map((client) => {
+      const fullName = `${client.firstName || ''} ${client.lastName || ''}`.trim()
+      const phone = String(client.phone || 'Sin teléfono')
+      const email = client.email ? String(client.email) : ''
+      const detail = email ? `${phone} · ${email}` : phone
+
+      return {
+        id: client.id,
+        label: fullName,
+        detail,
+        searchText: `${fullName} ${phone} ${email}`
+      }
+    })
+  }, [clients])
+
+  const serviceOptions = useMemo<SearchableOption[]>(() => {
+    return services.map((service) => {
+      const name = String(service.name || '')
+      const category = String(service.category || '')
+      const duration = Number(service.duration || 0)
+
+      return {
+        id: service.id,
+        label: name,
+        detail: `${duration} min${category ? ` · ${category}` : ''}`,
+        searchText: `${name} ${category} ${duration}`
+      }
+    })
+  }, [services])
+
+  const calculateEndTime = (startTime: string, duration: number) => {
+    const [hours, minutes] = startTime.split(':')
+    const startDate = new Date()
+    startDate.setHours(parseInt(hours), parseInt(minutes))
+    startDate.setMinutes(startDate.getMinutes() + duration)
+    return `${startDate.getHours().toString().padStart(2, '0')}:${startDate.getMinutes().toString().padStart(2, '0')}`
+  }
+
+  const handleClientSelect = (clientId: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      clientId
+    }))
+  }
+
+  const handleServiceSelect = (serviceId: string) => {
+    const service = services.find((item) => item.id === serviceId) || null
+    setSelectedService(service)
+
+    setFormData((prev) => ({
+      ...prev,
+      serviceId,
+      endTime: service && prev.startTime ? calculateEndTime(prev.startTime, service.duration) : prev.endTime
+    }))
+  }
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target
     setFormData(prev => ({
@@ -104,27 +278,9 @@ export default function AppointmentForm({ appointment, onSuccess, onCancel, pres
       [name]: type === 'checkbox' ? (e.target as HTMLInputElement).checked : value
     }))
 
-    // Si cambia el servicio, calcular endTime automáticamente
-    if (name === 'serviceId') {
-      const service = services.find(s => s.id === value)
-      setSelectedService(service)
-      if (service && formData.startTime) {
-        const [hours, minutes] = formData.startTime.split(':')
-        const startDate = new Date()
-        startDate.setHours(parseInt(hours), parseInt(minutes))
-        startDate.setMinutes(startDate.getMinutes() + service.duration)
-        const endTime = `${startDate.getHours().toString().padStart(2, '0')}:${startDate.getMinutes().toString().padStart(2, '0')}`
-        setFormData(prev => ({ ...prev, endTime }))
-      }
-    }
-
     // Si cambia startTime y hay un servicio seleccionado, recalcular endTime
     if (name === 'startTime' && selectedService) {
-      const [hours, minutes] = value.split(':')
-      const startDate = new Date()
-      startDate.setHours(parseInt(hours), parseInt(minutes))
-      startDate.setMinutes(startDate.getMinutes() + selectedService.duration)
-      const endTime = `${startDate.getHours().toString().padStart(2, '0')}:${startDate.getMinutes().toString().padStart(2, '0')}`
+      const endTime = calculateEndTime(value, selectedService.duration)
       setFormData(prev => ({ ...prev, endTime }))
     }
   }
@@ -201,40 +357,26 @@ export default function AppointmentForm({ appointment, onSuccess, onCancel, pres
             <label className="label">
               Cliente <span className="text-red-500">*</span>
             </label>
-            <select
-              name="clientId"
+            <SearchableSelect
               value={formData.clientId}
-              onChange={handleChange}
-              className="input"
-              required
-            >
-              <option value="">Seleccionar cliente</option>
-              {clients.map((client) => (
-                <option key={client.id} value={client.id}>
-                  {client.firstName} {client.lastName} - {client.phone}
-                </option>
-              ))}
-            </select>
+              options={clientOptions}
+              onSelect={handleClientSelect}
+              placeholder="Buscar cliente por nombre, teléfono o email..."
+              emptyText="No se encontraron clientes"
+            />
           </div>
 
           <div>
             <label className="label">
               Servicio <span className="text-red-500">*</span>
             </label>
-            <select
-              name="serviceId"
+            <SearchableSelect
               value={formData.serviceId}
-              onChange={handleChange}
-              className="input"
-              required
-            >
-              <option value="">Seleccionar servicio</option>
-              {services.map((service) => (
-                <option key={service.id} value={service.id}>
-                  {service.name} ({service.duration} min)
-                </option>
-              ))}
-            </select>
+              options={serviceOptions}
+              onSelect={handleServiceSelect}
+              placeholder="Buscar servicio por nombre o categoría..."
+              emptyText="No se encontraron servicios"
+            />
           </div>
         </div>
       </div>
