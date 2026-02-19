@@ -2,6 +2,19 @@ import { Request, Response } from 'express'
 import { prisma } from '../db'
 import * as XLSX from 'xlsx'
 
+const parseSpanishDecimal = (value: unknown): number => {
+  if (value === null || value === undefined) return NaN
+  const normalized = String(value).trim().replace(/\s*€\s*/g, '').replace(',', '.')
+  const parsed = Number.parseFloat(normalized)
+  return Number.isFinite(parsed) ? parsed : NaN
+}
+
+const parseIntegerValue = (value: unknown): number => {
+  if (value === null || value === undefined || String(value).trim() === '') return 0
+  const parsed = Number.parseInt(String(value).trim(), 10)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
 export const getProducts = async (req: Request, res: Response) => {
   try {
     const { search, isActive, category } = req.query
@@ -257,11 +270,35 @@ export const importProductsFromExcel = async (req: Request, res: Response) => {
       const row: any = data[i]
 
       try {
-        // Validar campos requeridos
-        if (!row.nombre || !row.sku || !row.precio || !row.costo) {
+        const legacyId = row.ID ?? row.id ?? row.sku ?? row.SKU
+        const brand = row.Marca ?? row.marca ?? null
+        const family = row.Familia ?? row.familia ?? row.categoria
+        const productDescription = row['Descripción'] ?? row.descripcion ?? row.nombre
+        const quantityRaw = row.Cantidad ?? row.cantidad ?? row.stock
+        const pvpRaw = row.PVP ?? row.pvp ?? row.precio
+
+        if (
+          legacyId === null || legacyId === undefined || String(legacyId).trim() === '' ||
+          productDescription === null || productDescription === undefined || String(productDescription).trim() === '' ||
+          family === null || family === undefined || String(family).trim() === '' ||
+          pvpRaw === null || pvpRaw === undefined || String(pvpRaw).trim() === ''
+        ) {
           results.errors.push({
             row: i + 2, // +2 porque Excel empieza en 1 y tiene header
-            error: 'Faltan campos requeridos (nombre, sku, precio, costo)'
+            error: 'Faltan campos requeridos (ID, Familia, Descripción, PVP)'
+          })
+          results.skipped++
+          continue
+        }
+
+        const sku = String(legacyId).trim()
+        const price = parseSpanishDecimal(pvpRaw)
+        const stock = parseIntegerValue(quantityRaw)
+
+        if (!Number.isFinite(price) || price <= 0) {
+          results.errors.push({
+            row: i + 2,
+            error: `PVP inválido: ${String(pvpRaw)}`
           })
           results.skipped++
           continue
@@ -269,13 +306,13 @@ export const importProductsFromExcel = async (req: Request, res: Response) => {
 
         // Verificar si el SKU ya existe
         const existingProduct = await prisma.product.findFirst({
-          where: { sku: String(row.sku).trim() }
+          where: { sku }
         })
 
         if (existingProduct) {
           results.errors.push({
             row: i + 2,
-            error: `SKU ${row.sku} ya existe`
+            error: `ID ${sku} ya existe`
           })
           results.skipped++
           continue
@@ -284,19 +321,19 @@ export const importProductsFromExcel = async (req: Request, res: Response) => {
         // Crear producto
         await prisma.product.create({
           data: {
-            name: String(row.nombre).trim(),
-            description: row.descripcion ? String(row.descripcion).trim() : null,
-            sku: String(row.sku).trim(),
-            barcode: row.codigoBarras ? String(row.codigoBarras).trim() : null,
-            category: row.categoria ? String(row.categoria).trim() : 'Otros',
-            brand: row.marca ? String(row.marca).trim() : null,
-            price: parseFloat(row.precio),
-            cost: parseFloat(row.costo),
-            stock: row.stock ? parseInt(row.stock) : 0,
-            minStock: row.stockMinimo ? parseInt(row.stockMinimo) : 5,
-            maxStock: row.stockMaximo ? parseInt(row.stockMaximo) : null,
-            unit: row.unidad ? String(row.unidad).trim() : 'unidad',
-            isActive: row.activo === undefined ? true : Boolean(row.activo)
+            name: String(productDescription).trim(),
+            description: null,
+            sku,
+            barcode: null,
+            category: String(family).trim(),
+            brand: brand === null || brand === undefined || String(brand).trim() === '' ? null : String(brand).trim(),
+            price,
+            cost: price,
+            stock,
+            minStock: 1,
+            maxStock: null,
+            unit: 'unidad',
+            isActive: true
           }
         })
 

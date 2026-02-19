@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Plus, Search, Edit, Trash2, Package, AlertTriangle, TrendingUp, TrendingDown, Upload } from 'lucide-react'
 import api from '../utils/api'
 import { formatCurrency } from '../utils/format'
@@ -7,11 +7,18 @@ import Modal from '../components/Modal'
 import ProductForm from '../components/ProductForm'
 import ImportProductsModal from '../components/ImportProductsModal'
 
+const formatFamilyLabel = (value: string): string =>
+  value
+    .toLowerCase()
+    .split(' ')
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(' ')
+
 export default function Products() {
   const [products, setProducts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState<string>('all')
+  const [selectedFamily, setSelectedFamily] = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
   const [editingProduct, setEditingProduct] = useState<any>(null)
   const [showStockModal, setShowStockModal] = useState(false)
@@ -71,26 +78,42 @@ export default function Products() {
     setSelectedProduct(null)
   }
 
-  // Filtrar productos
-  const filteredProducts = products.filter(product => {
-    const matchesSearch =
-      product.name.toLowerCase().includes(search.toLowerCase()) ||
-      product.sku.toLowerCase().includes(search.toLowerCase()) ||
-      product.brand?.toLowerCase().includes(search.toLowerCase())
+  const filteredProducts = useMemo(
+    () =>
+      products.filter((product) => {
+        if (!selectedFamily) return false
+        const family = String(product.category || '')
+        const matchesFamily = family === selectedFamily
+        const matchesSearch =
+          String(product.name || '').toLowerCase().includes(search.toLowerCase()) ||
+          String(product.sku || '').toLowerCase().includes(search.toLowerCase()) ||
+          String(product.brand || '').toLowerCase().includes(search.toLowerCase())
+        return matchesFamily && matchesSearch
+      }),
+    [products, search, selectedFamily]
+  )
 
-    const matchesCategory = categoryFilter === 'all' || product.category === categoryFilter
+  const familyCards = useMemo(() => {
+    const grouped = products.reduce<Record<string, number>>((acc, product) => {
+      const family = String(product.category || '').trim() || 'Sin categoría'
+      acc[family] = (acc[family] || 0) + 1
+      return acc
+    }, {})
 
-    return matchesSearch && matchesCategory
-  })
-
-  // Obtener categorías únicas
-  const categories = ['all', ...Array.from(new Set(products.map(p => p.category)))]
+    return Object.entries(grouped)
+      .map(([family, total]) => ({
+        family,
+        label: formatFamilyLabel(family),
+        total
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' }))
+  }, [products])
 
   // Productos con stock bajo
   const lowStockProducts = products.filter(p => p.stock <= p.minStock && p.isActive)
 
   // Valor total del inventario
-  const totalInventoryValue = products.reduce((sum, p) => sum + (Number(p.cost) * p.stock), 0)
+  const totalInventoryValue = products.reduce((sum, p) => sum + (Number(p.price) * p.stock), 0)
 
   if (loading) {
     return (
@@ -133,36 +156,90 @@ export default function Products() {
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Search */}
-        <div className="card">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar por nombre, SKU o marca..."
-              className="input pl-10"
-            />
+      {/* Search */}
+      <div className="card">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={
+              selectedFamily
+                ? 'Buscar por descripción, ID o marca en la familia seleccionada...'
+                : 'Selecciona una tarjeta para ver y buscar productos...'
+            }
+            className="input pl-10"
+            disabled={!selectedFamily}
+          />
+        </div>
+      </div>
+
+      {/* Low Stock Alert */}
+      {lowStockProducts.length > 0 && (
+        <div className="card bg-orange-50 dark:bg-orange-900/20 border-l-4 border-orange-500">
+          <div className="flex items-start">
+            <AlertTriangle className="w-5 h-5 text-orange-500 mr-3 mt-0.5" />
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold text-orange-900 dark:text-orange-200">
+                {lowStockProducts.length} productos con stock bajo
+              </h3>
+              <div className="mt-2 text-sm text-orange-700 dark:text-orange-300">
+                {lowStockProducts.slice(0, 3).map(p => (
+                  <div key={p.id}>
+                    • {p.name} - {p.stock} {p.unit} (mínimo: {p.minStock})
+                  </div>
+                ))}
+                {lowStockProducts.length > 3 && (
+                  <div className="mt-1 font-medium">
+                    y {lowStockProducts.length - 3} más...
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
+      )}
 
-        {/* Category Filter */}
-        <div className="card">
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="input"
-          >
-            <option value="all">Todas las categorías</option>
-            {categories.filter(c => c !== 'all').map((category) => (
-              <option key={category} value={category}>
-                {category}
-              </option>
-            ))}
-          </select>
+      {/* Family Home */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            Acceso por familia
+          </h2>
+          {selectedFamily && (
+            <button
+              type="button"
+              onClick={() => setSelectedFamily(null)}
+              className="text-sm px-3 py-1 rounded-md border border-gray-300 text-gray-600 dark:text-gray-300 hover:border-primary-500 transition-colors"
+            >
+              Ocultar listado
+            </button>
+          )}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          {familyCards.map((item) => (
+            <button
+              key={item.family}
+              type="button"
+              onClick={() =>
+                setSelectedFamily((prev) => (prev === item.family ? null : item.family))
+              }
+              className={`text-left card transition-all border ${
+                selectedFamily === item.family
+                  ? 'border-primary-600 ring-2 ring-primary-200 dark:ring-primary-800'
+                  : 'border-gray-200 dark:border-gray-700 hover:border-primary-500'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <p className="text-base font-semibold text-gray-900 dark:text-white">{item.label}</p>
+                <Package className="w-4 h-4 text-primary-600" />
+              </div>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
+                {item.total} productos
+              </p>
+            </button>
+          ))}
         </div>
       </div>
 
@@ -218,172 +295,129 @@ export default function Products() {
         </div>
       </div>
 
-      {/* Low Stock Alert */}
-      {lowStockProducts.length > 0 && (
-        <div className="card bg-orange-50 dark:bg-orange-900/20 border-l-4 border-orange-500">
-          <div className="flex items-start">
-            <AlertTriangle className="w-5 h-5 text-orange-500 mr-3 mt-0.5" />
-            <div className="flex-1">
-              <h3 className="text-sm font-semibold text-orange-900 dark:text-orange-200">
-                {lowStockProducts.length} productos con stock bajo
-              </h3>
-              <div className="mt-2 text-sm text-orange-700 dark:text-orange-300">
-                {lowStockProducts.slice(0, 3).map(p => (
-                  <div key={p.id}>
-                    • {p.name} - {p.stock} {p.unit} (mínimo: {p.minStock})
-                  </div>
-                ))}
-                {lowStockProducts.length > 3 && (
-                  <div className="mt-1 font-medium">
-                    y {lowStockProducts.length - 3} más...
-                  </div>
+      {/* Products Table */}
+      {!selectedFamily ? (
+        <div className="card">
+          <p className="text-center py-8 text-gray-500 dark:text-gray-400">
+            Pulsa una tarjeta para mostrar los productos de esa familia.
+          </p>
+        </div>
+      ) : (
+        <div className="card">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              {`Productos: ${formatFamilyLabel(selectedFamily)}`}
+            </h3>
+            <span className="badge badge-secondary">{filteredProducts.length}</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-gray-200 dark:border-gray-700">
+                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                    ID
+                  </th>
+                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                    Marca
+                  </th>
+                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                    Familia
+                  </th>
+                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                    Descripción
+                  </th>
+                  <th className="text-center py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                    Cantidad
+                  </th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                    PVP
+                  </th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                    Acciones
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredProducts.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="text-center py-8 text-gray-500 dark:text-gray-400">
+                      No hay productos registrados
+                    </td>
+                  </tr>
+                ) : (
+                  filteredProducts.map((product) => {
+                    const isLowStock = product.stock <= product.minStock
+                    return (
+                      <tr
+                        key={product.id}
+                        className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
+                      >
+                        <td className="py-3 px-4 text-sm text-gray-900 dark:text-white">
+                          {product.sku}
+                        </td>
+                        <td className="py-3 px-4">
+                          <p className="text-sm text-gray-900 dark:text-white">{product.brand || '-'}</p>
+                        </td>
+                        <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400">
+                          {product.category}
+                        </td>
+                        <td className="py-3 px-4 text-sm text-gray-900 dark:text-white">
+                          {product.name}
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <div className="flex flex-col items-center">
+                            <span
+                              className={`font-bold ${
+                                isLowStock ? 'text-orange-500' : 'text-gray-900 dark:text-white'
+                              }`}
+                            >
+                              {product.stock}
+                            </span>
+                            {isLowStock && (
+                              <span className="text-xs text-orange-500 flex items-center mt-1">
+                                <AlertTriangle className="w-3 h-3 mr-1" />
+                                Bajo
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-sm text-right font-medium text-gray-900 dark:text-white">
+                          {formatCurrency(Number(product.price))}
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center justify-end space-x-2">
+                            <button
+                              onClick={() => handleStockMovement(product)}
+                              className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
+                              title="Ajustar stock"
+                            >
+                              <Package className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                            </button>
+                            <button
+                              onClick={() => handleEdit(product)}
+                              className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
+                              title="Editar"
+                            >
+                              <Edit className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(product.id)}
+                              className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
+                              title="Eliminar"
+                            >
+                              <Trash2 className="w-4 h-4 text-red-600" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })
                 )}
-              </div>
-            </div>
+              </tbody>
+            </table>
           </div>
         </div>
       )}
-
-      {/* Products Table */}
-      <div className="card">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-gray-200 dark:border-gray-700">
-                <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
-                  Producto
-                </th>
-                <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
-                  SKU / Barcode
-                </th>
-                <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
-                  Categoría
-                </th>
-                <th className="text-center py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
-                  Stock
-                </th>
-                <th className="text-right py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
-                  Costo
-                </th>
-                <th className="text-right py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
-                  Precio
-                </th>
-                <th className="text-center py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
-                  Estado
-                </th>
-                <th className="text-right py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
-                  Acciones
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredProducts.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="text-center py-8 text-gray-500 dark:text-gray-400">
-                    No hay productos registrados
-                  </td>
-                </tr>
-              ) : (
-                filteredProducts.map((product) => {
-                  const isLowStock = product.stock <= product.minStock
-                  return (
-                    <tr
-                      key={product.id}
-                      className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
-                    >
-                      <td className="py-3 px-4">
-                        <div>
-                          <p className="text-sm font-medium text-gray-900 dark:text-white">
-                            {product.name}
-                          </p>
-                          {product.brand && (
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
-                              {product.brand}
-                            </p>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-3 px-4">
-                        <div className="text-sm">
-                          <p className="text-gray-900 dark:text-white">{product.sku}</p>
-                          {product.barcode && (
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
-                              {product.barcode}
-                            </p>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400">
-                        {product.category}
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        <div className="flex flex-col items-center">
-                          <span
-                            className={`font-bold ${
-                              isLowStock ? 'text-orange-500' : 'text-gray-900 dark:text-white'
-                            }`}
-                          >
-                            {product.stock}
-                          </span>
-                          <span className="text-xs text-gray-500 dark:text-gray-400">
-                            {product.unit}
-                          </span>
-                          {isLowStock && (
-                            <span className="text-xs text-orange-500 flex items-center mt-1">
-                              <AlertTriangle className="w-3 h-3 mr-1" />
-                              Bajo
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 text-sm text-right text-gray-600 dark:text-gray-400">
-                        {formatCurrency(Number(product.cost))}
-                      </td>
-                      <td className="py-3 px-4 text-sm text-right font-medium text-gray-900 dark:text-white">
-                        {formatCurrency(Number(product.price))}
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        <span
-                          className={`badge ${
-                            product.isActive ? 'badge-success' : 'badge-danger'
-                          }`}
-                        >
-                          {product.isActive ? 'Activo' : 'Inactivo'}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4">
-                        <div className="flex items-center justify-end space-x-2">
-                          <button
-                            onClick={() => handleStockMovement(product)}
-                            className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
-                            title="Ajustar stock"
-                          >
-                            <Package className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                          </button>
-                          <button
-                            onClick={() => handleEdit(product)}
-                            className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
-                            title="Editar"
-                          >
-                            <Edit className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(product.id)}
-                            className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
-                            title="Eliminar"
-                          >
-                            <Trash2 className="w-4 h-4 text-red-600" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
 
       {/* Modal de Formulario de Producto */}
       <Modal

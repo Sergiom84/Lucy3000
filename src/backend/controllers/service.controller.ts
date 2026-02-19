@@ -1,5 +1,61 @@
 import { Request, Response } from 'express'
+import { Prisma } from '@prisma/client'
 import { prisma } from '../db'
+
+const parseDecimal = (value: unknown): number | null => {
+  if (value === null || value === undefined || String(value).trim() === '') return null
+  const raw = String(value).trim().replace(/\s*€\s*/g, '').replace('%', '').replace(/\s/g, '')
+  const normalized = raw.includes(',') && raw.includes('.')
+    ? raw.replace(/\./g, '').replace(',', '.')
+    : raw.replace(',', '.')
+  const parsed = Number.parseFloat(normalized)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const parseDuration = (value: unknown): number | null => {
+  if (value === null || value === undefined || String(value).trim() === '') return null
+  const firstSegment = String(value).split('-')[0]
+  const onlyDigits = firstSegment.replace(/[^0-9]/g, '')
+  const parsed = Number.parseInt(onlyDigits, 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+const normalizeServicePayload = (payload: Record<string, any>, partial = false) => {
+  const data: Record<string, any> = { ...payload }
+
+  if (!partial || data.name !== undefined) {
+    data.name = String(data.name || '').trim()
+  }
+
+  if (data.serviceCode !== undefined) {
+    const code = String(data.serviceCode || '').trim()
+    data.serviceCode = code || null
+  }
+
+  if (!partial || data.category !== undefined) {
+    const category = String(data.category || '').trim()
+    data.category = category || 'General'
+  }
+
+  if (data.description !== undefined) {
+    const description = String(data.description || '').trim()
+    data.description = description || null
+  }
+
+  if (!partial || data.price !== undefined) {
+    data.price = parseDecimal(data.price)
+  }
+
+  if (data.taxRate !== undefined) {
+    data.taxRate = parseDecimal(data.taxRate)
+  }
+
+  if (!partial || data.duration !== undefined) {
+    data.duration = parseDuration(data.duration)
+  }
+
+  return data
+}
 
 export const getServices = async (req: Request, res: Response) => {
   try {
@@ -48,10 +104,22 @@ export const getServiceById = async (req: Request, res: Response) => {
 
 export const createService = async (req: Request, res: Response) => {
   try {
-    const data = req.body
+    const data = normalizeServicePayload(req.body)
+
+    if (!data.name) {
+      return res.status(400).json({ error: 'Description is required' })
+    }
+
+    if (data.price === null || data.price <= 0) {
+      return res.status(400).json({ error: 'Tariff must be greater than 0' })
+    }
+
+    if (data.duration === null || data.duration <= 0) {
+      return res.status(400).json({ error: 'Duration must be greater than 0 minutes' })
+    }
 
     const service = await prisma.service.create({
-      data
+      data: data as Prisma.ServiceCreateInput
     })
 
     res.status(201).json(service)
@@ -64,11 +132,19 @@ export const createService = async (req: Request, res: Response) => {
 export const updateService = async (req: Request, res: Response) => {
   try {
     const { id } = req.params
-    const data = req.body
+    const data = normalizeServicePayload(req.body, true)
+
+    if (data.price !== undefined && (data.price === null || data.price <= 0)) {
+      return res.status(400).json({ error: 'Tariff must be greater than 0' })
+    }
+
+    if (data.duration !== undefined && (data.duration === null || data.duration <= 0)) {
+      return res.status(400).json({ error: 'Duration must be greater than 0 minutes' })
+    }
 
     const service = await prisma.service.update({
       where: { id },
-      data
+      data: data as Prisma.ServiceUpdateInput
     })
 
     res.json(service)

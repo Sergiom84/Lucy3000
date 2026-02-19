@@ -9,25 +9,27 @@ interface ServiceFormProps {
   onCancel: () => void
 }
 
-const categories = [
-  'Corte y Peinado',
-  'Coloración',
-  'Tratamientos Capilares',
-  'Manicura y Pedicura',
-  'Depilación',
-  'Tratamientos Faciales',
-  'Maquillaje',
-  'Extensiones',
-  'Otros'
-]
+const parseDecimalInput = (value: string): number | null => {
+  if (!value.trim()) return null
+  const normalized = value.trim().replace(/\s*€\s*/g, '').replace(',', '.')
+  const parsed = Number.parseFloat(normalized)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const parseDurationInput = (value: string): number | null => {
+  if (!value.trim()) return null
+  const digits = value.replace(/[^0-9]/g, '')
+  const parsed = Number.parseInt(digits, 10)
+  return Number.isFinite(parsed) ? parsed : null
+}
 
 export default function ServiceForm({ service, onSuccess, onCancel }: ServiceFormProps) {
   const [loading, setLoading] = useState(false)
   const [formData, setFormData] = useState({
+    serviceCode: '',
     name: '',
-    description: '',
-    category: categories[0],
     price: '',
+    taxRate: '',
     duration: '',
     isActive: true
   })
@@ -35,19 +37,21 @@ export default function ServiceForm({ service, onSuccess, onCancel }: ServiceFor
   useEffect(() => {
     if (service) {
       setFormData({
+        serviceCode: service.serviceCode || '',
         name: service.name || '',
-        description: service.description || '',
-        category: service.category || categories[0],
         price: service.price?.toString() || '',
+        taxRate: service.taxRate?.toString() || '',
         duration: service.duration?.toString() || '',
         isActive: service.isActive ?? true
       })
     }
   }, [service])
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
+  ) => {
     const { name, value, type } = e.target
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
       [name]: type === 'checkbox' ? (e.target as HTMLInputElement).checked : value
     }))
@@ -58,47 +62,54 @@ export default function ServiceForm({ service, onSuccess, onCancel }: ServiceFor
     setLoading(true)
 
     try {
-      // Validaciones
       if (!formData.name.trim()) {
-        toast.error('El nombre del servicio es requerido')
+        toast.error('La descripción es requerida')
         setLoading(false)
         return
       }
 
-      if (!formData.price || parseFloat(formData.price) <= 0) {
-        toast.error('El precio debe ser mayor a 0')
+      const priceValue = parseDecimalInput(formData.price)
+      if (priceValue === null || priceValue <= 0) {
+        toast.error('La tarifa debe ser mayor a 0')
         setLoading(false)
         return
       }
 
-      if (!formData.duration || parseInt(formData.duration) <= 0) {
-        toast.error('La duración debe ser mayor a 0 minutos')
+      const durationValue = parseDurationInput(formData.duration)
+      if (durationValue === null || durationValue <= 0) {
+        toast.error('El tiempo debe ser mayor a 0 minutos')
         setLoading(false)
         return
       }
 
-      // Preparar datos
+      const taxRateValue = parseDecimalInput(formData.taxRate)
+      if (formData.taxRate.trim() && taxRateValue === null) {
+        toast.error('El IVA no tiene un formato válido')
+        setLoading(false)
+        return
+      }
+
       const dataToSend = {
+        serviceCode: formData.serviceCode.trim() || null,
         name: formData.name.trim(),
-        description: formData.description.trim() || null,
-        category: formData.category,
-        price: parseFloat(formData.price),
-        duration: parseInt(formData.duration),
+        price: formData.price.trim(),
+        taxRate: formData.taxRate.trim() || null,
+        duration: formData.duration.trim(),
         isActive: formData.isActive
       }
 
       if (service) {
         await api.put(`/services/${service.id}`, dataToSend)
-        toast.success('Servicio actualizado exitosamente')
+        toast.success('Tratamiento actualizado')
       } else {
         await api.post('/services', dataToSend)
-        toast.success('Servicio creado exitosamente')
+        toast.success('Tratamiento creado')
       }
 
       onSuccess()
     } catch (error: any) {
       console.error('Error saving service:', error)
-      toast.error(error.response?.data?.error || 'Error al guardar el servicio')
+      toast.error(error.response?.data?.error || 'Error al guardar el tratamiento')
     } finally {
       setLoading(false)
     }
@@ -106,15 +117,25 @@ export default function ServiceForm({ service, onSuccess, onCancel }: ServiceFor
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      {/* Información Básica */}
       <div>
         <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-4">
-          Información del Servicio
+          Tratamiento
         </h3>
-        <div className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
+            <label className="label">Código de identificación</label>
+            <input
+              type="text"
+              name="serviceCode"
+              value={formData.serviceCode}
+              onChange={handleChange}
+              className="input"
+              placeholder="Ej: TRAT-001"
+            />
+          </div>
+          <div className="md:col-span-1">
             <label className="label">
-              Nombre del Servicio <span className="text-red-500">*</span>
+              Descripción <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
@@ -122,84 +143,52 @@ export default function ServiceForm({ service, onSuccess, onCancel }: ServiceFor
               value={formData.name}
               onChange={handleChange}
               className="input"
-              placeholder="Ej: Corte de Cabello"
+              placeholder="Ej: Higiene facial"
               required
             />
           </div>
-
-          <div>
-            <label className="label">Categoría</label>
-            <select
-              name="category"
-              value={formData.category}
-              onChange={handleChange}
-              className="input"
-            >
-              {categories.map((cat) => (
-                <option key={cat} value={cat}>
-                  {cat}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="label">Descripción</label>
-            <textarea
-              name="description"
-              value={formData.description}
-              onChange={handleChange}
-              className="input resize-none"
-              rows={3}
-              placeholder="Descripción breve del servicio..."
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Precio y Duración */}
-      <div>
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-4">
-          Precio y Duración
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="label">
-              Precio (€) <span className="text-red-500">*</span>
+              Tarifa (€) <span className="text-red-500">*</span>
             </label>
             <input
-              type="number"
+              type="text"
               name="price"
               value={formData.price}
               onChange={handleChange}
               className="input"
-              placeholder="25.00"
-              step="0.01"
-              min="0"
+              placeholder="45,00"
               required
             />
           </div>
-
+          <div>
+            <label className="label">IVA</label>
+            <input
+              type="text"
+              name="taxRate"
+              value={formData.taxRate}
+              onChange={handleChange}
+              className="input"
+              placeholder="21"
+            />
+          </div>
           <div>
             <label className="label">
-              Duración (minutos) <span className="text-red-500">*</span>
+              Tiempo (minutos) <span className="text-red-500">*</span>
             </label>
             <input
-              type="number"
+              type="text"
               name="duration"
               value={formData.duration}
               onChange={handleChange}
               className="input"
-              placeholder="30"
-              step="5"
-              min="5"
+              placeholder="60"
               required
             />
           </div>
         </div>
       </div>
 
-      {/* Estado */}
       <div className="flex items-center">
         <input
           type="checkbox"
@@ -210,28 +199,18 @@ export default function ServiceForm({ service, onSuccess, onCancel }: ServiceFor
           className="w-4 h-4 text-primary-600 bg-gray-100 border-gray-300 rounded focus:ring-primary-500"
         />
         <label htmlFor="isActive" className="ml-2 text-sm text-gray-900 dark:text-white">
-          Servicio activo
+          Tratamiento activo
         </label>
       </div>
 
-      {/* Botones */}
       <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200 dark:border-gray-700">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="btn btn-secondary"
-          disabled={loading}
-        >
+        <button type="button" onClick={onCancel} className="btn btn-secondary" disabled={loading}>
           <X className="w-4 h-4 mr-2" />
           Cancelar
         </button>
-        <button
-          type="submit"
-          className="btn btn-primary"
-          disabled={loading}
-        >
+        <button type="submit" className="btn btn-primary" disabled={loading}>
           <Save className="w-4 h-4 mr-2" />
-          {loading ? 'Guardando...' : service ? 'Actualizar' : 'Crear Servicio'}
+          {loading ? 'Guardando...' : service ? 'Actualizar' : 'Crear Tratamiento'}
         </button>
       </div>
     </form>

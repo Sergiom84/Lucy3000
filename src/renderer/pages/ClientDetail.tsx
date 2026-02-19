@@ -13,7 +13,9 @@ import {
   ShoppingBag,
   CalendarCheck,
   User,
-  Cake
+  Cake,
+  Link2,
+  AlertTriangle
 } from 'lucide-react'
 import api from '../utils/api'
 import { formatCurrency, formatDate, formatPhone, formatDateTime, getInitials } from '../utils/format'
@@ -245,6 +247,28 @@ export default function ClientDetail() {
                 </div>
               </div>
             </div>
+
+            <div className="card">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Importe Pendiente
+                  </p>
+                  <p className={`text-2xl font-bold mt-1 ${Number(client.pendingAmount || 0) > 0 ? 'text-red-600' : 'text-gray-900 dark:text-white'}`}>
+                    {formatCurrency(Number(client.pendingAmount || 0))}
+                  </p>
+                  {client.debtAlertEnabled && Number(client.pendingAmount || 0) > 0 && (
+                    <p className="text-xs text-red-600 mt-1 inline-flex items-center">
+                      <AlertTriangle className="w-3 h-3 mr-1" />
+                      Alerta de deuda activa
+                    </p>
+                  )}
+                </div>
+                <div className="w-12 h-12 bg-red-500 rounded-lg flex items-center justify-center">
+                  <DollarSign className="w-6 h-6 text-white" />
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -296,7 +320,33 @@ export default function ClientDetail() {
                     {formatDate(client.updatedAt)}
                   </p>
                 </div>
+                {client.activeTreatmentCount !== null && client.activeTreatmentCount !== undefined && (
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Tratamientos activos</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                      {client.activeTreatmentCount}
+                    </p>
+                  </div>
+                )}
+                {client.linkedClient && (
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Cliente vinculado</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white inline-flex items-center">
+                      <Link2 className="w-4 h-4 mr-1" />
+                      {client.linkedClient.firstName} {client.linkedClient.lastName}
+                      {client.relationshipType ? ` (${client.relationshipType})` : ''}
+                    </p>
+                  </div>
+                )}
               </div>
+              {client.activeTreatmentNames && (
+                <div>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Nombres de tratamientos activos</p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">
+                    {client.activeTreatmentNames}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -38,19 +38,12 @@ export default function ImportProductsModal({ onSuccess, onCancel }: ImportProdu
     // Crear plantilla de Excel
     const template = [
       {
-        nombre: 'Ejemplo Champú',
-        descripcion: 'Champú hidratante 500ml',
-        sku: 'CHAMP-001',
-        codigoBarras: '1234567890123',
-        categoria: 'Cuidado del Cabello',
-        marca: "L'Oréal",
-        precio: 15.99,
-        costo: 8.50,
-        stock: 50,
-        stockMinimo: 10,
-        stockMaximo: 200,
-        unidad: 'unidad',
-        activo: true
+        ID: 'CHAMP-001',
+        Marca: "L'Oréal",
+        Familia: 'Cuidado del Cabello',
+        'Descripción': 'Champú hidratante 500ml',
+        Cantidad: 50,
+        PVP: '15,99'
       }
     ]
 
@@ -60,19 +53,12 @@ export default function ImportProductsModal({ onSuccess, onCancel }: ImportProdu
 
     // Ajustar ancho de columnas
     const colWidths = [
-      { wch: 20 }, // nombre
-      { wch: 30 }, // descripcion
-      { wch: 15 }, // sku
-      { wch: 18 }, // codigoBarras
-      { wch: 20 }, // categoria
-      { wch: 15 }, // marca
-      { wch: 10 }, // precio
-      { wch: 10 }, // costo
-      { wch: 10 }, // stock
-      { wch: 12 }, // stockMinimo
-      { wch: 12 }, // stockMaximo
-      { wch: 10 }, // unidad
-      { wch: 10 }  // activo
+      { wch: 15 }, // ID
+      { wch: 20 }, // Marca
+      { wch: 20 }, // Familia
+      { wch: 35 }, // Descripción
+      { wch: 10 }, // Cantidad
+      { wch: 10 }  // PVP
     ]
     ws['!cols'] = colWidths
 
@@ -134,7 +120,7 @@ export default function ImportProductsModal({ onSuccess, onCancel }: ImportProdu
             <ol className="text-sm text-blue-800 dark:text-blue-300 space-y-1 list-decimal list-inside">
               <li>Descarga la plantilla de Excel haciendo clic en el botón de abajo</li>
               <li>Rellena la plantilla con los datos de tus productos</li>
-              <li>Los campos <strong>obligatorios</strong> son: nombre, sku, precio, costo</li>
+              <li>Los campos <strong>obligatorios</strong> son: ID, Familia, Descripción, PVP</li>
               <li>Sube el archivo Excel completado</li>
               <li>Revisa los resultados y confirma la importación</li>
             </ol>

@@ -1,16 +1,32 @@
-import { useEffect, useState } from 'react'
-import { Plus, Search, Edit, Trash2, Clock, DollarSign, Tag } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Plus, Search, Edit, Trash2, Clock, Euro, Scissors } from 'lucide-react'
 import api from '../utils/api'
 import { formatCurrency } from '../utils/format'
 import toast from 'react-hot-toast'
 import Modal from '../components/Modal'
 import ServiceForm from '../components/ServiceForm'
 
+const formatTaxRate = (value: unknown): string => {
+  if (value === null || value === undefined || String(value).trim() === '') return '-'
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return '-'
+  const percent = parsed <= 1 ? parsed * 100 : parsed
+  const formatted = percent.toLocaleString('es-ES', { maximumFractionDigits: 2 })
+  return `${formatted}%`
+}
+
+const formatCategoryLabel = (value: string): string =>
+  value
+    .toLowerCase()
+    .split(' ')
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(' ')
+
 export default function Services() {
   const [services, setServices] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState<string>('all')
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
   const [editingService, setEditingService] = useState<any>(null)
 
@@ -24,21 +40,21 @@ export default function Services() {
       setServices(response.data)
     } catch (error) {
       console.error('Error fetching services:', error)
-      toast.error('Error al cargar servicios')
+      toast.error('Error al cargar tratamientos')
     } finally {
       setLoading(false)
     }
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('¿Estás seguro de eliminar este servicio?')) return
+    if (!confirm('¿Estás seguro de eliminar este tratamiento?')) return
 
     try {
       await api.delete(`/services/${id}`)
-      toast.success('Servicio eliminado')
+      toast.success('Tratamiento eliminado')
       fetchServices()
     } catch (error) {
-      toast.error('Error al eliminar servicio')
+      toast.error('Error al eliminar tratamiento')
     }
   }
 
@@ -57,28 +73,48 @@ export default function Services() {
     fetchServices()
   }
 
-  // Filtrar servicios
-  const filteredServices = services.filter(service => {
-    const matchesSearch =
-      service.name.toLowerCase().includes(search.toLowerCase()) ||
-      service.description?.toLowerCase().includes(search.toLowerCase())
+  const filteredServices = useMemo(
+    () =>
+      services.filter((service) => {
+        if (!selectedCategory) return false
+        const category = String(service.category || '')
+        const matchesCategory = category === selectedCategory
+        const searchText = `${service.serviceCode || ''} ${service.name || ''} ${service.category || ''}`
+          .toLowerCase()
+        const matchesSearch = searchText.includes(search.toLowerCase())
+        return matchesCategory && matchesSearch
+      }),
+    [services, search, selectedCategory]
+  )
 
-    const matchesCategory = categoryFilter === 'all' || service.category === categoryFilter
+  const averagePrice = useMemo(() => {
+    if (!services.length) return 0
+    return services.reduce((sum, item) => sum + Number(item.price), 0) / services.length
+  }, [services])
 
-    return matchesSearch && matchesCategory
-  })
+  const averageDuration = useMemo(() => {
+    if (!services.length) return 0
+    return Math.round(services.reduce((sum, item) => sum + Number(item.duration || 0), 0) / services.length)
+  }, [services])
 
-  // Obtener categorías únicas
-  const categories = ['all', ...Array.from(new Set(services.map(s => s.category)))]
+  const categoryCards = useMemo(() => {
+    const grouped = services.reduce<Record<string, { total: number }>>((acc, service) => {
+      const category = String(service.category || '').trim() || 'Sin categoría'
+      if (!acc[category]) {
+        acc[category] = { total: 0 }
+      }
+      acc[category].total += 1
+      return acc
+    }, {})
 
-  // Agrupar servicios por categoría
-  const servicesByCategory = filteredServices.reduce((acc: any, service) => {
-    if (!acc[service.category]) {
-      acc[service.category] = []
-    }
-    acc[service.category].push(service)
-    return acc
-  }, {})
+    return Object.entries(grouped)
+      .map(([category, data]) => ({
+        category,
+        label: formatCategoryLabel(category),
+        total: data.total
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' }))
+  }, [services])
 
   if (loading) {
     return (
@@ -94,10 +130,10 @@ export default function Services() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-            Servicios
+            Tratamientos
           </h1>
           <p className="text-gray-600 dark:text-gray-400 mt-1">
-            Gestiona el catálogo de servicios
+            Gestiona código, descripción, tarifa, IVA y tiempo
           </p>
         </div>
         <button
@@ -108,56 +144,91 @@ export default function Services() {
           className="btn btn-primary"
         >
           <Plus className="w-5 h-5 mr-2" />
-          Nuevo Servicio
+          Nuevo Tratamiento
         </button>
       </div>
 
       {/* Filters */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Search */}
-        <div className="card">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar servicios..."
-              className="input pl-10"
-            />
-          </div>
+      <div className="card">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={
+              selectedCategory
+                ? 'Buscar por código o descripción en la categoría seleccionada...'
+                : 'Selecciona una tarjeta para ver y buscar tratamientos...'
+            }
+            className="input pl-10"
+            disabled={!selectedCategory}
+          />
         </div>
+      </div>
 
-        {/* Category Filter */}
-        <div className="card">
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="input"
-          >
-            <option value="all">Todas las categorías</option>
-            {categories.filter(c => c !== 'all').map((category) => (
-              <option key={category} value={category}>
-                {category}
-              </option>
-            ))}
-          </select>
+      {/* Category Home */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            Acceso por tratamiento
+          </h2>
+          {selectedCategory && (
+            <button
+              type="button"
+              onClick={() => setSelectedCategory(null)}
+              className="text-sm px-3 py-1 rounded-md border border-gray-300 text-gray-600 dark:text-gray-300 hover:border-primary-500 transition-colors"
+            >
+              Ocultar listado
+            </button>
+          )}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          {categoryCards.map((item) => (
+            <button
+              key={item.category}
+              type="button"
+              onClick={() =>
+                setSelectedCategory((prev) => (prev === item.category ? null : item.category))
+              }
+              className={`text-left card transition-all border ${
+                selectedCategory === item.category
+                  ? 'border-primary-600 ring-2 ring-primary-200 dark:ring-primary-800'
+                  : 'border-gray-200 dark:border-gray-700 hover:border-primary-500'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <p className="text-base font-semibold text-gray-900 dark:text-white">{item.label}</p>
+                <Scissors className="w-4 h-4 text-primary-600" />
+              </div>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
+                {item.total} tratamientos
+              </p>
+            </button>
+          ))}
         </div>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="card">
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            Total Servicios
-          </p>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
-            {services.length}
-          </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Total Tratamientos
+              </p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
+                {services.length}
+              </p>
+            </div>
+            <div className="w-12 h-12 bg-blue-500 rounded-lg flex items-center justify-center">
+              <Scissors className="w-6 h-6 text-white" />
+            </div>
+          </div>
         </div>
         <div className="card">
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            Servicios Activos
+            Activos
           </p>
           <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
             {services.filter(s => s.isActive).length}
@@ -165,109 +236,142 @@ export default function Services() {
         </div>
         <div className="card">
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            Precio Promedio
+            Tarifa Promedio
           </p>
           <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
-            {formatCurrency(
-              services.length > 0
-                ? services.reduce((sum, s) => sum + Number(s.price), 0) / services.length
-                : 0
-            )}
+            {formatCurrency(averagePrice)}
+          </p>
+        </div>
+        <div className="card">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Tiempo Promedio
+          </p>
+          <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
+            {averageDuration} min
           </p>
         </div>
       </div>
 
-      {/* Services by Category */}
-      <div className="space-y-6">
-        {Object.keys(servicesByCategory).length === 0 ? (
-          <div className="card">
-            <p className="text-center py-8 text-gray-500 dark:text-gray-400">
-              No hay servicios registrados
-            </p>
+      {/* Services Table */}
+      {!selectedCategory ? (
+        <div className="card">
+          <p className="text-center py-8 text-gray-500 dark:text-gray-400">
+            Pulsa una tarjeta para mostrar los tratamientos de esa categoría.
+          </p>
+        </div>
+      ) : (
+        <div className="card">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              {`Tratamientos: ${formatCategoryLabel(selectedCategory)}`}
+            </h3>
+            <span className="badge badge-secondary">{filteredServices.length}</span>
           </div>
-        ) : (
-          Object.entries(servicesByCategory).map(([category, categoryServices]: [string, any]) => (
-            <div key={category} className="card">
-              <div className="flex items-center mb-4">
-                <Tag className="w-5 h-5 text-primary-600 mr-2" />
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                  {category}
-                </h2>
-                <span className="ml-2 badge badge-secondary">
-                  {categoryServices.length}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {categoryServices.map((service: any) => (
-                  <div
-                    key={service.id}
-                    className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 hover:border-primary-500 dark:hover:border-primary-500 transition-colors"
-                  >
-                    {/* Service Header */}
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1">
-                        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-gray-200 dark:border-gray-700">
+                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                    Código
+                  </th>
+                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                    Descripción
+                  </th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                    Tarifa
+                  </th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                    IVA
+                  </th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                    Tiempo
+                  </th>
+                  <th className="text-center py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                    Estado
+                  </th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                    Acciones
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredServices.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="text-center py-8 text-gray-500 dark:text-gray-400">
+                      No hay tratamientos registrados
+                    </td>
+                  </tr>
+                ) : (
+                  filteredServices.map((service) => (
+                    <tr
+                      key={service.id}
+                      className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
+                    >
+                      <td className="py-3 px-4 text-sm text-gray-900 dark:text-white">
+                        {service.serviceCode || '-'}
+                      </td>
+                      <td className="py-3 px-4">
+                        <p className="text-sm font-medium text-gray-900 dark:text-white">
                           {service.name}
-                        </h3>
-                        {service.description && (
-                          <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">
-                            {service.description}
+                        </p>
+                        {service.category && (
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            {service.category}
                           </p>
                         )}
-                      </div>
-                      <span
-                        className={`badge ${
-                          service.isActive ? 'badge-success' : 'badge-danger'
-                        }`}
-                      >
-                        {service.isActive ? 'Activo' : 'Inactivo'}
-                      </span>
-                    </div>
-
-                    {/* Service Info */}
-                    <div className="space-y-2 mb-3">
-                      <div className="flex items-center text-sm">
-                        <DollarSign className="w-4 h-4 mr-2 text-green-600" />
-                        <span className="font-bold text-gray-900 dark:text-white">
-                          {formatCurrency(Number(service.price))}
+                      </td>
+                      <td className="py-3 px-4 text-sm text-right font-medium text-gray-900 dark:text-white">
+                        <span className="inline-flex items-center">
+                          <Euro className="w-3 h-3 mr-1" />
+                          {formatCurrency(Number(service.price)).replace('€', '').trim()}
                         </span>
-                      </div>
-                      <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
-                        <Clock className="w-4 h-4 mr-2" />
-                        <span>{service.duration} minutos</span>
-                      </div>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex space-x-2 pt-3 border-t border-gray-200 dark:border-gray-600">
-                      <button
-                        onClick={() => handleEdit(service)}
-                        className="flex-1 btn btn-secondary text-xs py-2"
-                      >
-                        <Edit className="w-3 h-3 mr-1" />
-                        Editar
-                      </button>
-                      <button
-                        onClick={() => handleDelete(service.id)}
-                        className="btn btn-secondary text-xs py-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
+                      </td>
+                      <td className="py-3 px-4 text-sm text-right text-gray-900 dark:text-white">
+                        {formatTaxRate(service.taxRate)}
+                      </td>
+                      <td className="py-3 px-4 text-sm text-right text-gray-900 dark:text-white">
+                        <span className="inline-flex items-center justify-end">
+                          <Clock className="w-3 h-3 mr-1" />
+                          {service.duration} min
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <span className={`badge ${service.isActive ? 'badge-success' : 'badge-danger'}`}>
+                          {service.isActive ? 'Activo' : 'Inactivo'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex items-center justify-end space-x-2">
+                          <button
+                            onClick={() => handleEdit(service)}
+                            className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
+                            title="Editar"
+                          >
+                            <Edit className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(service.id)}
+                            className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
+                            title="Eliminar"
+                          >
+                            <Trash2 className="w-4 h-4 text-red-600" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Modal de Formulario */}
       <Modal
         isOpen={showModal}
         onClose={handleCloseModal}
-        title={editingService ? 'Editar Servicio' : 'Nuevo Servicio'}
+        title={editingService ? 'Editar Tratamiento' : 'Nuevo Tratamiento'}
         maxWidth="lg"
       >
         <ServiceForm

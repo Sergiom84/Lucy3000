@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Search, Edit, Trash2, Eye, Phone, Mail, Calendar } from 'lucide-react'
+import { Plus, Search, Edit, Trash2, Eye, Phone, Mail, Calendar, AlertTriangle, Link2 } from 'lucide-react'
 import api from '../utils/api'
 import { formatCurrency, formatDate, formatPhone } from '../utils/format'
 import toast from 'react-hot-toast'
@@ -109,7 +109,7 @@ export default function Clients() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="card">
           <p className="text-sm text-gray-600 dark:text-gray-400">
             Total Clientes
@@ -128,10 +128,18 @@ export default function Clients() {
         </div>
         <div className="card">
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            Gasto Total
+            Facturado Total
           </p>
           <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
             {formatCurrency(clients.reduce((sum, c) => sum + Number(c.totalSpent), 0))}
+          </p>
+        </div>
+        <div className="card">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Alertas de Deuda
+          </p>
+          <p className="text-2xl font-bold text-red-600 mt-1">
+            {clients.filter(c => c.debtAlertEnabled && Number(c.pendingAmount || 0) > 0).length}
           </p>
         </div>
       </div>
@@ -149,13 +157,16 @@ export default function Clients() {
                   Contacto
                 </th>
                 <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                  Relación
+                </th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
                   Cumpleaños
                 </th>
                 <th className="text-right py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
-                  Total Gastado
+                  Facturado
                 </th>
                 <th className="text-center py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
-                  Puntos
+                  Pendiente
                 </th>
                 <th className="text-center py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
                   Estado
@@ -168,7 +179,7 @@ export default function Clients() {
             <tbody>
               {clients.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-8 text-gray-500 dark:text-gray-400">
+                  <td colSpan={8} className="text-center py-8 text-gray-500 dark:text-gray-400">
                     No hay clientes registrados
                   </td>
                 </tr>
@@ -183,9 +194,10 @@ export default function Clients() {
                         <p className="text-sm font-medium text-gray-900 dark:text-white">
                           {client.firstName} {client.lastName}
                         </p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
-                          {client._count.appointments} citas • {client._count.sales} ventas
-                        </p>
+                        <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                          {client.externalCode && <span>#{client.externalCode}</span>}
+                          <span>{client._count.appointments} citas • {client._count.sales} ventas</span>
+                        </div>
                       </div>
                     </td>
                     <td className="py-3 px-4">
@@ -205,6 +217,23 @@ export default function Clients() {
                       </div>
                     </td>
                     <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400">
+                      {client.relationshipType ? (
+                        <div className="flex flex-col">
+                          <span className="inline-flex items-center">
+                            <Link2 className="w-3 h-3 mr-1" />
+                            {client.relationshipType}
+                          </span>
+                          {client.linkedClient && (
+                            <span className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                              con {client.linkedClient.firstName} {client.linkedClient.lastName}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        '-'
+                      )}
+                    </td>
+                    <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400">
                       {client.birthDate ? (
                         <div className="flex items-center">
                           <Calendar className="w-4 h-4 mr-1" />
@@ -218,9 +247,21 @@ export default function Clients() {
                       {formatCurrency(client.totalSpent)}
                     </td>
                     <td className="py-3 px-4 text-center">
-                      <span className="badge badge-primary">
-                        {client.loyaltyPoints} pts
-                      </span>
+                      {Number(client.pendingAmount || 0) > 0 ? (
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="badge badge-danger">
+                            {formatCurrency(client.pendingAmount)}
+                          </span>
+                          {client.debtAlertEnabled && (
+                            <span className="text-xs text-red-600 inline-flex items-center">
+                              <AlertTriangle className="w-3 h-3 mr-1" />
+                              Alerta
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-sm text-gray-500 dark:text-gray-400">-</span>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-center">
                       <span

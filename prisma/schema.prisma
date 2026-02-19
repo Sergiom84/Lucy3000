@@ -38,6 +38,11 @@ enum UserRole {
   EMPLOYEE
 }
 
+enum Gender {
+  HOMBRE
+  MUJER
+}
+
 // ============================================
 // CLIENTES
 // ============================================
@@ -52,6 +57,43 @@ model Client {
   address         String?
   city            String?
   postalCode      String?
+  province        String?
+  landlinePhone   String?
+  mobilePhone     String?
+  fullName        String?
+  externalCode    String?
+  dni             String?
+  gender          Gender?
+  registrationDate DateTime?
+  esthetician     String?
+  clientBrand     String?
+  appliedTariff   String?
+  text9A          String?
+  text9B          String?
+  text15          String?
+  text25          String?
+  text100         String?
+  integer1        Int?
+  integer2        Int?
+  gifts           String?
+  birthDay        Int?
+  birthMonthNumber Int?
+  birthMonthName  String?
+  birthYear       Int?
+  lastVisit       DateTime?
+  serviceCount    Int?
+  activeTreatmentCount Int?
+  activeTreatmentNames String?
+  bondCount       Int?
+  giftVoucher     String?
+  billedAmount    Decimal?  @db.Decimal(10, 2)
+  pendingAmount   Decimal?  @db.Decimal(10, 2)
+  debtAlertEnabled Boolean  @default(false)
+  linkedClientReference String?
+  relationshipType String?
+  linkedClientId  String?
+  discountProfile String?
+  webKey          String?
   notes           String?
   photoUrl        String?
   loyaltyPoints   Int       @default(0)
@@ -64,6 +106,8 @@ model Client {
   appointments    Appointment[]
   sales           Sale[]
   clientHistory   ClientHistory[]
+  linkedClient    Client?   @relation("ClientLink", fields: [linkedClientId], references: [id], onDelete: SetNull)
+  relatedClients  Client[]  @relation("ClientLink")
   
   @@map("clients")
 }
@@ -93,6 +137,12 @@ model Service {
   price           Decimal  @db.Decimal(10, 2)
   duration        Int      // en minutos
   category        String
+  serviceCode     String?
+  taxRate         Decimal? @db.Decimal(5, 4)
+  requiresProduct Boolean?
+  commission      String?
+  promo           String?
+  legacyRole      String?
   isActive        Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
