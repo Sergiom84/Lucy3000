@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { Trophy, Search, AlertTriangle, CheckCircle } from 'lucide-react'
+import { Trophy, Search, AlertTriangle, CheckCircle, ChevronLeft, ChevronRight } from 'lucide-react'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
@@ -39,6 +39,7 @@ interface RankingData {
 type SortKey = 'loyaltyPoints' | 'totalSpent' | 'visitRatio' | 'noShowCount' | 'name'
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444']
+const ROWS_PER_PAGE = 50
 
 export default function ClientRanking() {
   const [data, setData] = useState<RankingData | null>(null)
@@ -47,6 +48,7 @@ export default function ClientRanking() {
   const [riskOnly, setRiskOnly] = useState(false)
   const [sortKey, setSortKey] = useState<SortKey>('totalSpent')
   const [sortAsc, setSortAsc] = useState(false)
+  const [tablePage, setTablePage] = useState(1)
 
   useEffect(() => {
     loadRanking()
@@ -97,6 +99,18 @@ export default function ClientRanking() {
     })
     return list
   }, [data, search, riskOnly, sortKey, sortAsc])
+
+  useEffect(() => {
+    setTablePage(1)
+  }, [search, riskOnly, sortKey, sortAsc])
+
+  const totalRows = filtered.length
+  const totalPages = Math.max(1, Math.ceil(totalRows / ROWS_PER_PAGE))
+  const currentPage = Math.min(tablePage, totalPages)
+  const startIndex = (currentPage - 1) * ROWS_PER_PAGE
+  const visibleClients = filtered.slice(startIndex, startIndex + ROWS_PER_PAGE)
+  const showingFrom = totalRows === 0 ? 0 : startIndex + 1
+  const showingTo = totalRows === 0 ? 0 : Math.min(startIndex + ROWS_PER_PAGE, totalRows)
 
   if (loading) {
     return (
@@ -204,9 +218,9 @@ export default function ClientRanking() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((client, idx) => (
+            {visibleClients.map((client, idx) => (
               <tr key={client.id}>
-                <td className="text-gray-500">{idx + 1}</td>
+                <td className="text-gray-500">{startIndex + idx + 1}</td>
                 <td>
                   <Link
                     to={`/clients/${client.id}`}
@@ -236,7 +250,7 @@ export default function ClientRanking() {
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && (
+            {visibleClients.length === 0 && (
               <tr>
                 <td colSpan={9} className="text-center text-gray-500 py-8">
                   No se encontraron clientes
@@ -245,6 +259,34 @@ export default function ClientRanking() {
             )}
           </tbody>
         </table>
+
+        <div className="mt-4 flex flex-col gap-3 border-t border-gray-200 pt-4 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between">
+          <p>
+            Mostrando {showingFrom} - {showingTo} de {totalRows}
+          </p>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setTablePage((prev) => Math.max(1, prev - 1))}
+              disabled={currentPage <= 1}
+              className="btn btn-secondary btn-sm disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <ChevronLeft className="mr-1 h-4 w-4" />
+              Anterior
+            </button>
+            <span className="text-xs sm:text-sm">
+              Página {currentPage} de {totalPages}
+            </span>
+            <button
+              onClick={() => setTablePage((prev) => Math.min(totalPages, prev + 1))}
+              disabled={currentPage >= totalPages}
+              className="btn btn-secondary btn-sm disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Siguiente
+              <ChevronRight className="ml-1 h-4 w-4" />
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   )

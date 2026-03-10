@@ -24,11 +24,39 @@ import { printTicket } from '../utils/desktop'
 import { formatCurrency, formatDate, formatPhone } from '../utils/format'
 import { buildSaleTicketPayload, paymentMethodLabel } from '../utils/tickets'
 
+const PAGE_SIZE = 50
+
+type ClientListPagination = {
+  page: number
+  limit: number
+  total: number
+  totalPages: number
+}
+
+type ClientListSummary = {
+  total: number
+  active: number
+  debtAlerts: number
+}
+
 export default function Clients() {
   const navigate = useNavigate()
   const [clients, setClients] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pagination, setPagination] = useState<ClientListPagination>({
+    page: 1,
+    limit: PAGE_SIZE,
+    total: 0,
+    totalPages: 1
+  })
+  const [summary, setSummary] = useState<ClientListSummary>({
+    total: 0,
+    active: 0,
+    debtAlerts: 0
+  })
   const [showModal, setShowModal] = useState(false)
   const [editingClient, setEditingClient] = useState<any>(null)
   const [billingModalClient, setBillingModalClient] = useState<any>(null)
@@ -38,13 +66,57 @@ export default function Clients() {
   const [highlightedClientId, setHighlightedClientId] = useState<string | null>(null)
 
   useEffect(() => {
-    fetchClients()
+    const timeoutId = window.setTimeout(() => {
+      setCurrentPage(1)
+      setDebouncedSearch(search.trim())
+    }, 300)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
   }, [search])
 
-  const fetchClients = async () => {
+  useEffect(() => {
+    void fetchClients(currentPage, debouncedSearch)
+  }, [currentPage, debouncedSearch])
+
+  const fetchClients = async (page = currentPage, searchTerm = debouncedSearch) => {
+    setLoading(true)
     try {
-      const response = await api.get(`/clients?search=${search}`)
-      setClients(response.data)
+      const params = new URLSearchParams({
+        paginated: 'true',
+        includeCounts: 'true',
+        page: String(page),
+        limit: String(PAGE_SIZE)
+      })
+
+      if (searchTerm) {
+        params.set('search', searchTerm)
+      }
+
+      const response = await api.get(`/clients?${params.toString()}`)
+      const payload = response.data
+
+      setClients(Array.isArray(payload?.data) ? payload.data : [])
+      setPagination(
+        payload?.pagination || {
+          page,
+          limit: PAGE_SIZE,
+          total: 0,
+          totalPages: 1
+        }
+      )
+      setSummary(
+        payload?.summary || {
+          total: 0,
+          active: 0,
+          debtAlerts: 0
+        }
+      )
+
+      if (payload?.pagination?.totalPages && page > payload.pagination.totalPages) {
+        setCurrentPage(payload.pagination.totalPages)
+      }
     } catch (error) {
       console.error('Error fetching clients:', error)
       toast.error('Error al cargar clientes')
@@ -59,7 +131,7 @@ export default function Clients() {
     try {
       await api.delete(`/clients/${id}`)
       toast.success('Cliente eliminado')
-      fetchClients()
+      void fetchClients(currentPage, debouncedSearch)
     } catch (error) {
       toast.error('Error al eliminar cliente')
     }
@@ -104,7 +176,7 @@ export default function Clients() {
 
   const handleFormSuccess = () => {
     handleCloseModal()
-    fetchClients()
+    void fetchClients(currentPage, debouncedSearch)
   }
 
   const handleViewClientCalendar = (clientId: string) => {
@@ -116,6 +188,9 @@ export default function Clients() {
     setShowCalendarDock(false)
     setHighlightedClientId(null)
   }
+
+  const showingFrom = pagination.total === 0 ? 0 : (pagination.page - 1) * pagination.limit + 1
+  const showingTo = pagination.total === 0 ? 0 : Math.min(pagination.page * pagination.limit, pagination.total)
 
   if (loading) {
     return (
@@ -190,19 +265,15 @@ export default function Clients() {
           <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
             <div className="card">
               <p className="text-sm text-gray-600 dark:text-gray-400">Total Clientes</p>
-              <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{clients.length}</p>
+              <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{summary.total}</p>
             </div>
             <div className="card">
               <p className="text-sm text-gray-600 dark:text-gray-400">Clientes Activos</p>
-              <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">
-                {clients.filter((client) => client.isActive).length}
-              </p>
+              <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{summary.active}</p>
             </div>
             <div className="card">
               <p className="text-sm text-gray-600 dark:text-gray-400">Alertas de Deuda</p>
-              <p className="mt-1 text-2xl font-bold text-red-600">
-                {clients.filter((client) => client.debtAlertEnabled && Number(client.pendingAmount || 0) > 0).length}
-              </p>
+              <p className="mt-1 text-2xl font-bold text-red-600">{summary.debtAlerts}</p>
             </div>
           </div>
 
@@ -241,7 +312,7 @@ export default function Clients() {
                   {clients.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="py-8 text-center text-gray-500 dark:text-gray-400">
-                        No hay clientes registrados
+                        {debouncedSearch ? 'No se encontraron clientes para esta búsqueda' : 'No hay clientes registrados'}
                       </td>
                     </tr>
                   ) : (
@@ -259,7 +330,7 @@ export default function Clients() {
                             </p>
                             <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                               {client.externalCode && <span>#{client.externalCode}</span>}
-                              <span>{client._count.appointments} citas • {client._count.sales} ventas</span>
+                              <span>{client._count?.appointments ?? 0} citas • {client._count?.sales ?? 0} ventas</span>
                             </div>
                           </div>
                         </td>
@@ -384,6 +455,34 @@ export default function Clients() {
                   )}
                 </tbody>
               </table>
+            </div>
+
+            <div className="mt-4 flex flex-col gap-3 border-t border-gray-200 pt-4 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between">
+              <p>
+                Mostrando {showingFrom} - {showingTo} de {pagination.total}
+              </p>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                  disabled={pagination.page <= 1}
+                  className="btn btn-secondary btn-sm disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <ChevronLeft className="mr-1 h-4 w-4" />
+                  Anterior
+                </button>
+                <span className="text-xs sm:text-sm">
+                  Página {pagination.page} de {pagination.totalPages}
+                </span>
+                <button
+                  onClick={() => setCurrentPage((prev) => Math.min(pagination.totalPages, prev + 1))}
+                  disabled={pagination.page >= pagination.totalPages}
+                  className="btn btn-secondary btn-sm disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Siguiente
+                  <ChevronRight className="ml-1 h-4 w-4" />
+                </button>
+              </div>
             </div>
           </div>
         </div>

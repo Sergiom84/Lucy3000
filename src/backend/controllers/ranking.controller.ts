@@ -1,56 +1,103 @@
 import { Request, Response } from 'express'
 import { prisma } from '../db'
 
+const DAY_MS = 24 * 60 * 60 * 1000
+
+type AtRiskClient = {
+  firstName: string
+  lastName: string
+  visitRatio: number | null
+}
+
+const syncAbandonmentNotifications = async (clients: AtRiskClient[]) => {
+  if (clients.length === 0) return
+
+  const sevenDaysAgo = new Date(Date.now() - 7 * DAY_MS)
+  const titles = clients.map((client) => `Riesgo de abandono: ${client.firstName} ${client.lastName}`)
+
+  const existingNotifications = await prisma.notification.findMany({
+    where: {
+      type: 'ABANDONMENT_RISK',
+      title: { in: titles },
+      createdAt: { gte: sevenDaysAgo }
+    },
+    select: {
+      title: true
+    }
+  })
+
+  const existingTitles = new Set(existingNotifications.map((item) => item.title))
+
+  const notificationsToCreate = clients
+    .map((client) => ({
+      type: 'ABANDONMENT_RISK',
+      title: `Riesgo de abandono: ${client.firstName} ${client.lastName}`,
+      message: `El cliente no visita desde hace más tiempo del habitual (ratio: ${client.visitRatio} dias).`,
+      priority: 'HIGH'
+    }))
+    .filter((item) => !existingTitles.has(item.title))
+
+  if (notificationsToCreate.length > 0) {
+    await prisma.notification.createMany({
+      data: notificationsToCreate
+    })
+  }
+}
+
 export const getClientRanking = async (_req: Request, res: Response) => {
   try {
-    const clients = await prisma.client.findMany({
-      where: { isActive: true },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        loyaltyPoints: true,
-        totalSpent: true,
-        appointments: {
-          select: {
-            date: true,
-            status: true
-          },
-          orderBy: { date: 'asc' }
+    const [clients, completedStats, noShowStats] = await Promise.all([
+      prisma.client.findMany({
+        where: { isActive: true },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          loyaltyPoints: true,
+          totalSpent: true
         }
-      }
-    })
+      }),
+      prisma.appointment.groupBy({
+        by: ['clientId'],
+        where: { status: 'COMPLETED' },
+        _count: { _all: true },
+        _min: { date: true },
+        _max: { date: true }
+      }),
+      prisma.appointment.groupBy({
+        by: ['clientId'],
+        where: { status: 'NO_SHOW' },
+        _count: { _all: true }
+      })
+    ])
+
+    const completedStatsByClient = new Map(completedStats.map((item) => [item.clientId, item]))
+    const noShowStatsByClient = new Map(noShowStats.map((item) => [item.clientId, item._count._all]))
 
     const now = new Date()
-    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
 
     let totalRevenue = 0
-    const rankings = clients.map(client => {
+    const rankings = clients.map((client) => {
+      const completedStat = completedStatsByClient.get(client.id)
+      const completedCount = completedStat?._count._all ?? 0
+      const noShowCount = noShowStatsByClient.get(client.id) ?? 0
       const spent = Number(client.totalSpent || 0)
       totalRevenue += spent
 
-      const completed = client.appointments
-        .filter(a => a.status === 'COMPLETED')
-        .map(a => new Date(a.date).getTime())
-        .sort((a, b) => a - b)
-
-      const noShowCount = client.appointments.filter(a => a.status === 'NO_SHOW').length
-
-      const firstService = completed.length > 0 ? new Date(completed[0]) : null
-      const lastService = completed.length > 0 ? new Date(completed[completed.length - 1]) : null
+      const firstService = completedStat?._min.date ? new Date(completedStat._min.date) : null
+      const lastService = completedStat?._max.date ? new Date(completedStat._max.date) : null
 
       let visitRatio: number | null = null
-      if (completed.length >= 2) {
-        let totalGap = 0
-        for (let i = 1; i < completed.length; i++) {
-          totalGap += completed[i] - completed[i - 1]
-        }
-        visitRatio = totalGap / (completed.length - 1) / (1000 * 60 * 60 * 24)
+      if (completedCount >= 2 && firstService && lastService) {
+        visitRatio =
+          (lastService.getTime() - firstService.getTime()) /
+          (completedCount - 1) /
+          DAY_MS
       }
 
       let abandonmentRisk = false
       if (lastService && visitRatio !== null) {
-        const daysSinceLastVisit = (now.getTime() - lastService.getTime()) / (1000 * 60 * 60 * 24)
+        const daysSinceLastVisit = (now.getTime() - lastService.getTime()) / DAY_MS
         abandonmentRisk = daysSinceLastVisit > visitRatio * 1.2
       }
 
@@ -66,14 +113,14 @@ export const getClientRanking = async (_req: Request, res: Response) => {
         lastService: lastService?.toISOString() || null,
         visitRatio: visitRatio !== null ? Math.round(visitRatio * 10) / 10 : null,
         abandonmentRisk,
-        completedCount: completed.length
+        completedCount
       }
     })
 
     const avgRevenue = rankings.length > 0 ? totalRevenue / rankings.length : 0
 
     // Revenue chart: above/below average
-    const aboveAvg = rankings.filter(c => c.totalSpent >= avgRevenue).length
+    const aboveAvg = rankings.filter((c) => c.totalSpent >= avgRevenue).length
     const belowAvg = rankings.length - aboveAvg
     const revenueChart = [
       { name: 'Por encima', value: aboveAvg },
@@ -97,34 +144,13 @@ export const getClientRanking = async (_req: Request, res: Response) => {
     ]
 
     // No-show chart
-    const withNoShows = rankings.filter(c => c.noShowCount > 0).length
+    const withNoShows = rankings.filter((c) => c.noShowCount > 0).length
     const noShowChart = [
       { name: 'Con faltas', value: withNoShows },
       { name: 'Sin faltas', value: rankings.length - withNoShows }
     ]
 
-    // Create abandonment risk notifications (deduplicated 7 days)
-    const atRisk = rankings.filter(c => c.abandonmentRisk)
-    for (const client of atRisk) {
-      const title = `Riesgo de abandono: ${client.firstName} ${client.lastName}`
-      const existing = await prisma.notification.findFirst({
-        where: {
-          type: 'ABANDONMENT_RISK',
-          title,
-          createdAt: { gte: sevenDaysAgo }
-        }
-      })
-      if (!existing) {
-        await prisma.notification.create({
-          data: {
-            type: 'ABANDONMENT_RISK',
-            title,
-            message: `El cliente no visita desde hace más tiempo del habitual (ratio: ${client.visitRatio} dias).`,
-            priority: 'HIGH'
-          }
-        })
-      }
-    }
+    const atRisk = rankings.filter((c) => c.abandonmentRisk)
 
     res.json({
       clients: rankings,
@@ -136,6 +162,10 @@ export const getClientRanking = async (_req: Request, res: Response) => {
         frequency: frequencyChart,
         noShows: noShowChart
       }
+    })
+
+    void syncAbandonmentNotifications(atRisk).catch((syncError) => {
+      console.error('Sync abandonment notifications error:', syncError)
     })
   } catch (error) {
     console.error('Get client ranking error:', error)

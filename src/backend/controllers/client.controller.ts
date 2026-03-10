@@ -211,20 +211,23 @@ const syncDebtNotification = async (client: {
 
 export const getClients = async (req: Request, res: Response) => {
   try {
-    const { search, isActive } = req.query
+    const { search, isActive, paginated, page, limit, includeCounts } = req.query
+    const normalizedSearch = typeof search === 'string' ? search.trim() : ''
+    const shouldPaginate = paginated === 'true'
+    const shouldIncludeCounts = includeCounts !== 'false'
 
-    const where: any = {}
+    const where: Prisma.ClientWhereInput = {}
 
-    if (search) {
+    if (normalizedSearch) {
       where.OR = [
-        { firstName: { contains: search as string, mode: 'insensitive' } },
-        { lastName: { contains: search as string, mode: 'insensitive' } },
-        { externalCode: { contains: search as string, mode: 'insensitive' } },
-        { dni: { contains: search as string, mode: 'insensitive' } },
-        { email: { contains: search as string, mode: 'insensitive' } },
-        { phone: { contains: search as string, mode: 'insensitive' } },
-        { mobilePhone: { contains: search as string, mode: 'insensitive' } },
-        { landlinePhone: { contains: search as string, mode: 'insensitive' } }
+        { firstName: { contains: normalizedSearch, mode: 'insensitive' } },
+        { lastName: { contains: normalizedSearch, mode: 'insensitive' } },
+        { externalCode: { contains: normalizedSearch, mode: 'insensitive' } },
+        { dni: { contains: normalizedSearch, mode: 'insensitive' } },
+        { email: { contains: normalizedSearch, mode: 'insensitive' } },
+        { phone: { contains: normalizedSearch, mode: 'insensitive' } },
+        { mobilePhone: { contains: normalizedSearch, mode: 'insensitive' } },
+        { landlinePhone: { contains: normalizedSearch, mode: 'insensitive' } }
       ]
     }
 
@@ -232,23 +235,77 @@ export const getClients = async (req: Request, res: Response) => {
       where.isActive = isActive === 'true'
     }
 
-    const clients = await prisma.client.findMany({
-      where,
-      include: {
-        linkedClient: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true
-          }
-        },
-        _count: {
-          select: {
-            appointments: true,
-            sales: true
-          }
+    const include: Prisma.ClientInclude = {
+      linkedClient: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true
         }
       },
+      ...(shouldIncludeCounts
+        ? {
+            _count: {
+              select: {
+                appointments: true,
+                sales: true
+              }
+            }
+          }
+        : {})
+    }
+
+    if (shouldPaginate) {
+      const parsedPage = Number.parseInt(String(page ?? '1'), 10)
+      const parsedLimit = Number.parseInt(String(limit ?? '50'), 10)
+      const pageNumber = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1
+      const pageSize = Number.isFinite(parsedLimit)
+        ? Math.min(100, Math.max(10, parsedLimit))
+        : 50
+      const skip = (pageNumber - 1) * pageSize
+
+      const [total, activeCount, debtAlertCount, clients] = await prisma.$transaction([
+        prisma.client.count({ where }),
+        prisma.client.count({
+          where: {
+            AND: [where, { isActive: true }]
+          }
+        }),
+        prisma.client.count({
+          where: {
+            AND: [where, { debtAlertEnabled: true, pendingAmount: { gt: 0 } }]
+          }
+        }),
+        prisma.client.findMany({
+          where,
+          include,
+          orderBy: { createdAt: 'desc' },
+          skip,
+          take: pageSize
+        })
+      ])
+
+      const totalPages = Math.max(1, Math.ceil(total / pageSize))
+
+      return res.json({
+        data: clients,
+        pagination: {
+          page: pageNumber,
+          limit: pageSize,
+          total,
+          totalPages
+        },
+        summary: {
+          total,
+          active: activeCount,
+          debtAlerts: debtAlertCount
+        }
+      })
+    }
+
+    const clients = await prisma.client.findMany({
+      where,
+      include,
       orderBy: { createdAt: 'desc' }
     })
 
