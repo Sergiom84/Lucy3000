@@ -13,6 +13,9 @@ import cashRoutes from './routes/cash.routes'
 import notificationRoutes from './routes/notification.routes'
 import reportRoutes from './routes/report.routes'
 import dashboardRoutes from './routes/dashboard.routes'
+import rankingRoutes from './routes/ranking.routes'
+import bonoRoutes from './routes/bono.routes'
+import calendarRoutes from './routes/calendar.routes'
 
 export const app = express()
 
@@ -37,6 +40,9 @@ app.use('/api/cash', cashRoutes)
 app.use('/api/notifications', notificationRoutes)
 app.use('/api/reports', reportRoutes)
 app.use('/api/dashboard', dashboardRoutes)
+app.use('/api/ranking', rankingRoutes)
+app.use('/api/bonos', bonoRoutes)
+app.use('/api/calendar', calendarRoutes)
 
 // Static frontend build (Vite)
 const clientDir = path.resolve(__dirname, '..')

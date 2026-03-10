@@ -83,6 +83,7 @@ const normalizeClientPayload = (payload: Record<string, any>, requireIdentityFie
     'landlinePhone',
     'mobilePhone',
     'notes',
+    'allergies',
     'gifts',
     'activeTreatmentNames',
     'giftVoucher',
@@ -129,13 +130,17 @@ const normalizeClientPayload = (payload: Record<string, any>, requireIdentityFie
     data.pendingAmount = parseDecimalValue(data.pendingAmount)
   }
 
+  if (data.accountBalance !== undefined) {
+    data.accountBalance = parseDecimalValue(data.accountBalance)
+  }
+
   if (data.billedAmount !== undefined) {
     data.billedAmount = normalizeBilledOutlier(parseDecimalValue(data.billedAmount))
   }
 
   if (data.totalSpent !== undefined) {
     const totalSpent = parseDecimalValue(data.totalSpent)
-    if (totalSpent !== null) data.totalSpent = normalizeBilledOutlier(totalSpent)
+    data.totalSpent = totalSpent === null ? 0 : normalizeBilledOutlier(totalSpent)
   }
 
   if (data.debtAlertEnabled === undefined) {
@@ -280,6 +285,13 @@ export const getClientById = async (req: Request, res: Response) => {
         },
         clientHistory: {
           orderBy: { date: 'desc' }
+        },
+        bonoPacks: {
+          include: {
+            service: { select: { id: true, name: true } },
+            sessions: { orderBy: { sessionNumber: 'asc' } }
+          },
+          orderBy: { purchaseDate: 'desc' }
         },
         linkedClient: {
           select: {
@@ -466,4 +478,3 @@ export const getBirthdaysThisMonth = async (_req: Request, res: Response) => {
     res.status(500).json({ error: 'Internal server error' })
   }
 }
-

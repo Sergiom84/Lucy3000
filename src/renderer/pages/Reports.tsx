@@ -1,13 +1,48 @@
 import { useState, useEffect } from 'react'
-import { TrendingUp, TrendingDown, Users, Package, DollarSign, ShoppingCart, Download, Filter, Activity } from 'lucide-react'
+import { TrendingUp, TrendingDown, Users, Package, DollarSign, ShoppingCart, Download, Filter, Activity, PieChart as PieChartIcon, BarChart3, Maximize2, Minimize2 } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
 import { format, subDays, startOfMonth, endOfMonth } from 'date-fns'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart as RePieChart, Pie, Cell } from 'recharts'
+import { paymentMethodLabel } from '../utils/tickets'
 
 interface DateRange {
   startDate: string
   endDate: string
+}
+
+// Componente para tarjeta expandible
+const ExpandableCard = ({ title, children, icon: Icon }: { title: string; children: React.ReactNode; icon: any }) => {
+  const [isExpanded, setIsExpanded] = useState(false)
+  
+  return (
+    <div className={`card transition-all duration-300 cursor-pointer hover:shadow-lg ${isExpanded ? 'col-span-1 lg:col-span-2' : ''}`} onClick={() => setIsExpanded(!isExpanded)}>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Icon className="w-5 h-5 text-blue-600" />
+          <h3 className={`font-semibold text-gray-900 dark:text-white ${isExpanded ? 'text-lg' : 'text-sm'}`}>
+            {title}
+          </h3>
+        </div>
+        <button 
+          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
+          onClick={(e) => {
+            e.stopPropagation()
+            setIsExpanded(!isExpanded)
+          }}
+        >
+          {isExpanded ? (
+            <Minimize2 className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+          ) : (
+            <Maximize2 className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+          )}
+        </button>
+      </div>
+      <div className={`${isExpanded ? 'block' : 'max-h-48 overflow-hidden'}`}>
+        {children}
+      </div>
+    </div>
+  )
 }
 
 export default function Reports() {
@@ -75,7 +110,7 @@ export default function Reports() {
 
   // Prepare chart data
   const paymentMethodsData = salesReport ? Object.entries(salesReport.paymentMethods).map(([key, value]: any) => ({
-    name: key === 'CASH' ? 'Efectivo' : key === 'CARD' ? 'Tarjeta' : key === 'TRANSFER' ? 'Transferencia' : 'Mixto',
+    name: paymentMethodLabel(key),
     value: Number(value)
   })) : []
 
@@ -257,13 +292,10 @@ export default function Reports() {
                 </div>
               </div>
 
-              {/* Charts Row 1 */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Expandable Charts Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4">
                 {/* Payment Methods Chart */}
-                <div className="card">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                    Ventas por Método de Pago
-                  </h3>
+                <ExpandableCard title="Ventas por Método de Pago" icon={PieChartIcon}>
                   <ResponsiveContainer width="100%" height={300}>
                     <RePieChart>
                       <Pie
@@ -283,13 +315,10 @@ export default function Reports() {
                       <Tooltip formatter={(value: any) => `€${value.toFixed(2)}`} />
                     </RePieChart>
                   </ResponsiveContainer>
-                </div>
+                </ExpandableCard>
 
                 {/* Cash Flow Chart */}
-                <div className="card">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                    Flujo de Caja
-                  </h3>
+                <ExpandableCard title="Flujo de Caja" icon={BarChart3}>
                   <ResponsiveContainer width="100%" height={300}>
                     <BarChart data={cashFlowData}>
                       <CartesianGrid strokeDasharray="3 3" />
@@ -304,15 +333,10 @@ export default function Reports() {
                       Flujo Neto: €{cashReport?.netCashFlow.toFixed(2) || '0.00'}
                     </p>
                   </div>
-                </div>
-              </div>
+                </ExpandableCard>
 
-              {/* Top Products & Clients */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="card">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                    Productos Más Vendidos
-                  </h3>
+                {/* Top Products Chart */}
+                <ExpandableCard title="Productos Más Vendidos" icon={Package}>
                   <ResponsiveContainer width="100%" height={300}>
                     <BarChart data={topProductsData} layout="vertical">
                       <CartesianGrid strokeDasharray="3 3" />
@@ -322,12 +346,10 @@ export default function Reports() {
                       <Bar dataKey="ventas" fill="#10b981" />
                     </BarChart>
                   </ResponsiveContainer>
-                </div>
+                </ExpandableCard>
 
-                <div className="card">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                    Top Clientes
-                  </h3>
+                {/* Top Clients Chart */}
+                <ExpandableCard title="Top Clientes" icon={Users}>
                   <ResponsiveContainer width="100%" height={300}>
                     <BarChart data={topClientsData} layout="vertical">
                       <CartesianGrid strokeDasharray="3 3" />
@@ -337,7 +359,7 @@ export default function Reports() {
                       <Bar dataKey="gastado" fill="#8b5cf6" />
                     </BarChart>
                   </ResponsiveContainer>
-                </div>
+                </ExpandableCard>
               </div>
             </div>
           )}
@@ -386,7 +408,7 @@ export default function Reports() {
                   {Object.entries(salesReport.paymentMethods).map(([method, amount]: any) => (
                     <div key={method} className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
                       <p className="text-sm text-gray-600 dark:text-gray-400">
-                        {method === 'CASH' ? 'Efectivo' : method === 'CARD' ? 'Tarjeta' : method === 'TRANSFER' ? 'Transferencia' : 'Mixto'}
+                        {paymentMethodLabel(method)}
                       </p>
                       <p className="text-xl font-bold text-gray-900 dark:text-white">
                         €{Number(amount).toFixed(2)}

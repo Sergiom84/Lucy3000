@@ -118,3 +118,16 @@
   animation: slideIn 0.3s ease-out;
 }
 
+/* Prioriza cliente y tratamiento en la agenda integrada de Clientes */
+.client-calendar-dock-calendar .rbc-event-label {
+  display: none;
+}
+
+.client-calendar-dock-calendar .rbc-event-content {
+  height: 100%;
+}
+
+.client-calendar-dock-calendar .rbc-event-content > div {
+  height: 100%;
+}
+

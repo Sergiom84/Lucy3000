@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Search, Edit, Trash2, Package, AlertTriangle, TrendingUp, TrendingDown, Upload } from 'lucide-react'
+import { Plus, Search, Edit, Trash2, Package, AlertTriangle, TrendingUp, TrendingDown, Upload, ChevronDown, ChevronUp } from 'lucide-react'
 import api from '../utils/api'
 import { formatCurrency } from '../utils/format'
 import toast from 'react-hot-toast'
@@ -14,11 +14,15 @@ const formatFamilyLabel = (value: string): string =>
     .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
     .join(' ')
 
+type ViewMode = 'all' | 'lowStock' | null
+
 export default function Products() {
   const [products, setProducts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [selectedFamily, setSelectedFamily] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useState<ViewMode>(null)
+  const [showFamilies, setShowFamilies] = useState(false)
   const [showModal, setShowModal] = useState(false)
   const [editingProduct, setEditingProduct] = useState<any>(null)
   const [showStockModal, setShowStockModal] = useState(false)
@@ -78,19 +82,14 @@ export default function Products() {
     setSelectedProduct(null)
   }
 
-  const filteredProducts = useMemo(
-    () =>
-      products.filter((product) => {
-        if (!selectedFamily) return false
-        const family = String(product.category || '')
-        const matchesFamily = family === selectedFamily
-        const matchesSearch =
-          String(product.name || '').toLowerCase().includes(search.toLowerCase()) ||
-          String(product.sku || '').toLowerCase().includes(search.toLowerCase()) ||
-          String(product.brand || '').toLowerCase().includes(search.toLowerCase())
-        return matchesFamily && matchesSearch
-      }),
-    [products, search, selectedFamily]
+  const lowStockProducts = useMemo(
+    () => products.filter(p => p.stock <= p.minStock && p.isActive),
+    [products]
+  )
+
+  const activeCount = useMemo(
+    () => products.filter(p => p.isActive).length,
+    [products]
   )
 
   const familyCards = useMemo(() => {
@@ -109,11 +108,70 @@ export default function Products() {
       .sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' }))
   }, [products])
 
-  // Productos con stock bajo
-  const lowStockProducts = products.filter(p => p.stock <= p.minStock && p.isActive)
+  const filteredProducts = useMemo(() => {
+    const searchLower = search.toLowerCase().trim()
 
-  // Valor total del inventario
-  const totalInventoryValue = products.reduce((sum, p) => sum + (Number(p.price) * p.stock), 0)
+    // If search has text, filter all products by search (+ optional family filter)
+    if (searchLower) {
+      return products
+        .filter((product) => {
+          const matchesSearch =
+            String(product.name || '').toLowerCase().includes(searchLower) ||
+            String(product.sku || '').toLowerCase().includes(searchLower) ||
+            String(product.brand || '').toLowerCase().includes(searchLower) ||
+            String(product.category || '').toLowerCase().includes(searchLower)
+          const matchesFamily = selectedFamily
+            ? String(product.category || '') === selectedFamily
+            : true
+          return matchesSearch && matchesFamily
+        })
+        .sort((a, b) => String(a.sku || '').localeCompare(b.sku || ''))
+    }
+
+    // viewMode takes priority over family
+    if (viewMode === 'all') {
+      const base = selectedFamily
+        ? products.filter(p => String(p.category || '') === selectedFamily)
+        : products
+      return [...base].sort((a, b) => String(a.sku || '').localeCompare(b.sku || ''))
+    }
+
+    if (viewMode === 'lowStock') {
+      const base = selectedFamily
+        ? lowStockProducts.filter(p => String(p.category || '') === selectedFamily)
+        : lowStockProducts
+      return [...base].sort((a, b) => String(a.sku || '').localeCompare(b.sku || ''))
+    }
+
+    // Family-only filter
+    if (selectedFamily) {
+      return products
+        .filter(p => String(p.category || '') === selectedFamily)
+        .sort((a, b) => String(a.sku || '').localeCompare(b.sku || ''))
+    }
+
+    // Nothing active
+    return []
+  }, [products, search, selectedFamily, viewMode, lowStockProducts])
+
+  const hasActiveFilter = search.trim() !== '' || viewMode !== null || selectedFamily !== null
+
+  // Table title
+  const tableTitle = useMemo(() => {
+    if (search.trim()) return 'Resultados de búsqueda'
+    if (viewMode === 'all') return selectedFamily ? `Todos: ${formatFamilyLabel(selectedFamily)}` : 'Todos los productos'
+    if (viewMode === 'lowStock') return selectedFamily ? `Stock bajo: ${formatFamilyLabel(selectedFamily)}` : 'Productos con stock bajo'
+    if (selectedFamily) return `Familia: ${formatFamilyLabel(selectedFamily)}`
+    return ''
+  }, [search, viewMode, selectedFamily])
+
+  const handleViewMode = (mode: ViewMode) => {
+    setViewMode(prev => prev === mode ? null : mode)
+  }
+
+  const handleSelectFamily = (family: string) => {
+    setSelectedFamily(prev => prev === family ? null : family)
+  }
 
   if (loading) {
     return (
@@ -156,7 +214,7 @@ export default function Products() {
         </div>
       </div>
 
-      {/* Search */}
+      {/* Search - always enabled */}
       <div className="card">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -164,88 +222,24 @@ export default function Products() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={
-              selectedFamily
-                ? 'Buscar por descripción, ID o marca en la familia seleccionada...'
-                : 'Selecciona una tarjeta para ver y buscar productos...'
-            }
+            placeholder="Buscar por ID, marca, familia o descripción..."
             className="input pl-10"
-            disabled={!selectedFamily}
           />
         </div>
       </div>
 
-      {/* Low Stock Alert */}
-      {lowStockProducts.length > 0 && (
-        <div className="card bg-orange-50 dark:bg-orange-900/20 border-l-4 border-orange-500">
-          <div className="flex items-start">
-            <AlertTriangle className="w-5 h-5 text-orange-500 mr-3 mt-0.5" />
-            <div className="flex-1">
-              <h3 className="text-sm font-semibold text-orange-900 dark:text-orange-200">
-                {lowStockProducts.length} productos con stock bajo
-              </h3>
-              <div className="mt-2 text-sm text-orange-700 dark:text-orange-300">
-                {lowStockProducts.slice(0, 3).map(p => (
-                  <div key={p.id}>
-                    • {p.name} - {p.stock} {p.unit} (mínimo: {p.minStock})
-                  </div>
-                ))}
-                {lowStockProducts.length > 3 && (
-                  <div className="mt-1 font-medium">
-                    y {lowStockProducts.length - 3} más...
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Family Home */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-            Acceso por familia
-          </h2>
-          {selectedFamily && (
-            <button
-              type="button"
-              onClick={() => setSelectedFamily(null)}
-              className="text-sm px-3 py-1 rounded-md border border-gray-300 text-gray-600 dark:text-gray-300 hover:border-primary-500 transition-colors"
-            >
-              Ocultar listado
-            </button>
-          )}
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-          {familyCards.map((item) => (
-            <button
-              key={item.family}
-              type="button"
-              onClick={() =>
-                setSelectedFamily((prev) => (prev === item.family ? null : item.family))
-              }
-              className={`text-left card transition-all border ${
-                selectedFamily === item.family
-                  ? 'border-primary-600 ring-2 ring-primary-200 dark:ring-primary-800'
-                  : 'border-gray-200 dark:border-gray-700 hover:border-primary-500'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <p className="text-base font-semibold text-gray-900 dark:text-white">{item.label}</p>
-                <Package className="w-4 h-4 text-primary-600" />
-              </div>
-              <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
-                {item.total} productos
-              </p>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="card">
+      {/* Summary cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Total Productos - clickable */}
+        <button
+          type="button"
+          onClick={() => handleViewMode('all')}
+          className={`card text-left transition-all border ${
+            viewMode === 'all'
+              ? 'border-primary-600 ring-2 ring-primary-200 dark:ring-primary-800'
+              : 'border-gray-200 dark:border-gray-700 hover:border-primary-500'
+          }`}
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600 dark:text-gray-400">
@@ -259,54 +253,115 @@ export default function Products() {
               <Package className="w-6 h-6 text-white" />
             </div>
           </div>
-        </div>
+        </button>
 
-        <div className="card">
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            Stock Bajo
-          </p>
-          <p className="text-2xl font-bold text-orange-500 mt-1">
-            {lowStockProducts.length}
-          </p>
-          {lowStockProducts.length > 0 && (
-            <p className="text-xs text-orange-500 mt-1 flex items-center">
-              <AlertTriangle className="w-3 h-3 mr-1" />
-              Requiere atención
-            </p>
-          )}
-        </div>
+        {/* Stock Bajo - clickable */}
+        <button
+          type="button"
+          onClick={() => handleViewMode('lowStock')}
+          className={`card text-left transition-all border ${
+            viewMode === 'lowStock'
+              ? 'border-orange-500 ring-2 ring-orange-200 dark:ring-orange-800'
+              : 'border-gray-200 dark:border-gray-700 hover:border-orange-400'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Stock Bajo
+              </p>
+              <p className="text-2xl font-bold text-orange-500 mt-1">
+                {lowStockProducts.length}
+              </p>
+              {lowStockProducts.length > 0 && (
+                <p className="text-xs text-orange-500 mt-1 flex items-center">
+                  <AlertTriangle className="w-3 h-3 mr-1" />
+                  Requiere atención
+                </p>
+              )}
+            </div>
+            <div className="w-12 h-12 bg-orange-500 rounded-lg flex items-center justify-center">
+              <AlertTriangle className="w-6 h-6 text-white" />
+            </div>
+          </div>
+        </button>
 
-        <div className="card">
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            Valor Inventario
-          </p>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
-            {formatCurrency(totalInventoryValue)}
-          </p>
-        </div>
-
-        <div className="card">
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            Productos Activos
-          </p>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
-            {products.filter(p => p.isActive).length}
-          </p>
+        {/* Productos Activos - not clickable */}
+        <div className="card border border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Productos Activos
+              </p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
+                {activeCount}
+              </p>
+            </div>
+            <div className="w-12 h-12 bg-green-500 rounded-lg flex items-center justify-center">
+              <TrendingUp className="w-6 h-6 text-white" />
+            </div>
+          </div>
         </div>
       </div>
 
+      {/* Collapsible family section */}
+      <div className="space-y-3">
+        <button
+          type="button"
+          onClick={() => setShowFamilies(prev => !prev)}
+          className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+        >
+          {showFamilies ? (
+            <ChevronUp className="w-4 h-4" />
+          ) : (
+            <ChevronDown className="w-4 h-4" />
+          )}
+          {showFamilies ? 'Ocultar familias' : 'Mostrar familias'}
+          {selectedFamily && (
+            <span className="ml-2 text-xs px-2 py-0.5 bg-primary-100 text-primary-700 dark:bg-primary-900 dark:text-primary-300 rounded-full">
+              {formatFamilyLabel(selectedFamily)}
+            </span>
+          )}
+        </button>
+
+        {showFamilies && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            {familyCards.map((item) => (
+              <button
+                key={item.family}
+                type="button"
+                onClick={() => handleSelectFamily(item.family)}
+                className={`text-left card transition-all border ${
+                  selectedFamily === item.family
+                    ? 'border-primary-600 ring-2 ring-primary-200 dark:ring-primary-800'
+                    : 'border-gray-200 dark:border-gray-700 hover:border-primary-500'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <p className="text-base font-semibold text-gray-900 dark:text-white">{item.label}</p>
+                  <Package className="w-4 h-4 text-primary-600" />
+                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
+                  {item.total} productos
+                </p>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Products Table */}
-      {!selectedFamily ? (
+      {!hasActiveFilter ? (
         <div className="card">
           <p className="text-center py-8 text-gray-500 dark:text-gray-400">
-            Pulsa una tarjeta para mostrar los productos de esa familia.
+            Usa el buscador o pulsa una tarjeta para ver productos
           </p>
         </div>
       ) : (
         <div className="card">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-              {`Productos: ${formatFamilyLabel(selectedFamily)}`}
+              {tableTitle}
             </h3>
             <span className="badge badge-secondary">{filteredProducts.length}</span>
           </div>

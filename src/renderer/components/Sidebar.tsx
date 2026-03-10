@@ -9,13 +9,15 @@ import {
   Wallet,
   FileText,
   Settings,
-  Sparkles
+  Sparkles,
+  Trophy
 } from 'lucide-react'
 import { cn } from '../utils/cn'
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Clientes', href: '/clients', icon: Users },
+  { name: 'Ranking', href: '/ranking', icon: Trophy },
   { name: 'Citas', href: '/appointments', icon: Calendar },
   { name: 'Servicios', href: '/services', icon: Scissors },
   { name: 'Productos', href: '/products', icon: Package },

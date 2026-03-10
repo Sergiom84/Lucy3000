@@ -33,6 +33,7 @@ export const prismaMock: any = {
     findUnique: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
+    updateMany: vi.fn(),
     delete: vi.fn()
   },
 
@@ -67,7 +68,10 @@ export const prismaMock: any = {
 
   cashMovement: {
     findMany: vi.fn(),
-    create: vi.fn()
+    findUnique: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn()
   },
 
   notification: {
@@ -85,6 +89,13 @@ export const prismaMock: any = {
     findMany: vi.fn(),
     findUnique: vi.fn(),
     update: vi.fn()
+  },
+
+  googleCalendarConfig: {
+    findFirst: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn()
   }
 }
 
@@ -104,4 +115,3 @@ const resetObjectMocks = (value: any) => {
 export const resetPrismaMock = () => {
   resetObjectMocks(prismaMock)
 }
-

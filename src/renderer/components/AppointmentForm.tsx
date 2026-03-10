@@ -9,6 +9,7 @@ interface AppointmentFormProps {
   onSuccess: () => void
   onCancel: () => void
   preselectedDate?: Date
+  initialCabin?: 'LUCY' | 'TAMARA' | 'CABINA_1' | 'CABINA_2'
 }
 
 const statusOptions = [
@@ -137,7 +138,20 @@ function SearchableSelect({
   )
 }
 
-export default function AppointmentForm({ appointment, onSuccess, onCancel, preselectedDate }: AppointmentFormProps) {
+const cabinOptions = [
+  { value: 'LUCY', label: 'Lucy' },
+  { value: 'TAMARA', label: 'Tamara' },
+  { value: 'CABINA_1', label: 'Cabina 1' },
+  { value: 'CABINA_2', label: 'Cabina 2' }
+]
+
+export default function AppointmentForm({
+  appointment,
+  onSuccess,
+  onCancel,
+  preselectedDate,
+  initialCabin = 'LUCY'
+}: AppointmentFormProps) {
   const { user } = useAuthStore()
   const [loading, setLoading] = useState(false)
   const [clients, setClients] = useState<any[]>([])
@@ -147,10 +161,11 @@ export default function AppointmentForm({ appointment, onSuccess, onCancel, pres
   const [formData, setFormData] = useState({
     clientId: '',
     serviceId: '',
-    userId: user?.id || '',
-    date: '',
-    startTime: '',
-    endTime: '',
+      userId: user?.id || '',
+      cabin: 'LUCY',
+      date: '',
+      startTime: '',
+      endTime: '',
     status: 'SCHEDULED',
     notes: '',
     reminder: true
@@ -168,6 +183,7 @@ export default function AppointmentForm({ appointment, onSuccess, onCancel, pres
         clientId: appointment.clientId || '',
         serviceId: appointment.serviceId || '',
         userId: appointment.userId || user?.id || '',
+        cabin: appointment.cabin || initialCabin,
         date: appointmentDate.toISOString().split('T')[0],
         startTime: appointment.startTime || '',
         endTime: appointment.endTime || '',
@@ -181,10 +197,16 @@ export default function AppointmentForm({ appointment, onSuccess, onCancel, pres
     } else if (preselectedDate) {
       setFormData(prev => ({
         ...prev,
+        cabin: initialCabin,
         date: preselectedDate.toISOString().split('T')[0]
       }))
+    } else {
+      setFormData((prev) => ({
+        ...prev,
+        cabin: initialCabin
+      }))
     }
-  }, [appointment, preselectedDate, user])
+  }, [appointment, preselectedDate, user, initialCabin])
 
   const fetchClients = async () => {
     try {
@@ -320,6 +342,7 @@ export default function AppointmentForm({ appointment, onSuccess, onCancel, pres
         clientId: formData.clientId,
         serviceId: formData.serviceId,
         userId: formData.userId || user?.id,
+        cabin: formData.cabin,
         date: new Date(formData.date).toISOString(),
         startTime: formData.startTime,
         endTime: formData.endTime,
@@ -386,7 +409,7 @@ export default function AppointmentForm({ appointment, onSuccess, onCancel, pres
         <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-4">
           Fecha y Horario
         </h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
             <label className="label">
               Fecha <span className="text-red-500">*</span>
@@ -427,6 +450,24 @@ export default function AppointmentForm({ appointment, onSuccess, onCancel, pres
               className="input"
               required
             />
+          </div>
+          <div>
+            <label className="label">
+              Cabina <span className="text-red-500">*</span>
+            </label>
+            <select
+              name="cabin"
+              value={formData.cabin}
+              onChange={handleChange}
+              className="input"
+              required
+            >
+              {cabinOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       </div>

@@ -87,11 +87,6 @@ export default function Services() {
     [services, search, selectedCategory]
   )
 
-  const averagePrice = useMemo(() => {
-    if (!services.length) return 0
-    return services.reduce((sum, item) => sum + Number(item.price), 0) / services.length
-  }, [services])
-
   const averageDuration = useMemo(() => {
     if (!services.length) return 0
     return Math.round(services.reduce((sum, item) => sum + Number(item.duration || 0), 0) / services.length)
@@ -210,7 +205,7 @@ export default function Services() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="card">
           <div className="flex items-center justify-between">
             <div>
@@ -232,14 +227,6 @@ export default function Services() {
           </p>
           <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
             {services.filter(s => s.isActive).length}
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            Tarifa Promedio
-          </p>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
-            {formatCurrency(averagePrice)}
           </p>
         </div>
         <div className="card">

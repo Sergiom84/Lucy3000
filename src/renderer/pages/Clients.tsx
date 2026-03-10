@@ -1,11 +1,28 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Search, Edit, Trash2, Eye, Phone, Mail, Calendar, AlertTriangle, Link2 } from 'lucide-react'
-import api from '../utils/api'
-import { formatCurrency, formatDate, formatPhone } from '../utils/format'
+import {
+  AlertTriangle,
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
+  Edit,
+  Eye,
+  Link2,
+  Mail,
+  Phone,
+  Plus,
+  Receipt,
+  Search,
+  Trash2
+} from 'lucide-react'
 import toast from 'react-hot-toast'
-import Modal from '../components/Modal'
+import ClientCalendarDock from '../components/ClientCalendarDock'
 import ClientForm from '../components/ClientForm'
+import Modal from '../components/Modal'
+import api from '../utils/api'
+import { printTicket } from '../utils/desktop'
+import { formatCurrency, formatDate, formatPhone } from '../utils/format'
+import { buildSaleTicketPayload, paymentMethodLabel } from '../utils/tickets'
 
 export default function Clients() {
   const navigate = useNavigate()
@@ -14,6 +31,11 @@ export default function Clients() {
   const [search, setSearch] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [editingClient, setEditingClient] = useState<any>(null)
+  const [billingModalClient, setBillingModalClient] = useState<any>(null)
+  const [clientSales, setClientSales] = useState<any[]>([])
+  const [billingLoading, setBillingLoading] = useState(false)
+  const [showCalendarDock, setShowCalendarDock] = useState(false)
+  const [highlightedClientId, setHighlightedClientId] = useState<string | null>(null)
 
   useEffect(() => {
     fetchClients()
@@ -52,6 +74,29 @@ export default function Clients() {
     navigate(`/clients/${id}`)
   }
 
+  const handleViewBilling = async (client: any) => {
+    try {
+      setBillingLoading(true)
+      const response = await api.get(`/sales?clientId=${client.id}`)
+      setBillingModalClient(client)
+      setClientSales(response.data)
+    } catch (error) {
+      toast.error('No se pudo cargar la facturación del cliente')
+    } finally {
+      setBillingLoading(false)
+    }
+  }
+
+  const handlePrintSale = async (saleId: string) => {
+    try {
+      const response = await api.get(`/sales/${saleId}`)
+      await printTicket(buildSaleTicketPayload(response.data))
+      toast.success('Ticket enviado a la impresora')
+    } catch (error: any) {
+      toast.error(error.message || 'No se pudo imprimir el ticket')
+    }
+  }
+
   const handleCloseModal = () => {
     setShowModal(false)
     setEditingClient(null)
@@ -62,250 +107,295 @@ export default function Clients() {
     fetchClients()
   }
 
+  const handleViewClientCalendar = (clientId: string) => {
+    setHighlightedClientId(clientId)
+    setShowCalendarDock(true)
+  }
+
+  const handleCloseCalendarDock = () => {
+    setShowCalendarDock(false)
+    setHighlightedClientId(null)
+  }
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+      <div className="flex h-full items-center justify-center">
+        <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-primary-600"></div>
       </div>
     )
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-            Clientes
-          </h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">
-            Gestiona tu base de clientes
-          </p>
-        </div>
-        <button
-          onClick={() => {
-            setEditingClient(null)
-            setShowModal(true)
-          }}
-          className="btn btn-primary"
-        >
-          <Plus className="w-5 h-5 mr-2" />
-          Nuevo Cliente
-        </button>
-      </div>
+    <div className="animate-fade-in">
+      <div
+        className={`grid gap-6 transition-all duration-300 ${
+          showCalendarDock
+            ? 'xl:grid-cols-[minmax(0,1fr)_42rem] 2xl:grid-cols-[minmax(0,1fr)_48rem]'
+            : 'grid-cols-1'
+        }`}
+      >
+        <div className="min-w-0 space-y-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Clientes</h1>
+              <p className="mt-1 text-gray-600 dark:text-gray-400">
+                Gestiona tu base de clientes y abre la agenda sin salir de esta pantalla.
+              </p>
+            </div>
 
-      {/* Search */}
-      <div className="card">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por nombre, email o teléfono..."
-            className="input pl-10"
-          />
-        </div>
-      </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                onClick={() => setShowCalendarDock((current) => !current)}
+                className="btn btn-secondary"
+              >
+                {showCalendarDock ? (
+                  <>
+                    <ChevronRight className="mr-2 h-4 w-4" />
+                    Ocultar agenda
+                  </>
+                ) : (
+                  <>
+                    <ChevronLeft className="mr-2 h-4 w-4" />
+                    Mostrar agenda
+                  </>
+                )}
+              </button>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="card">
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            Total Clientes
-          </p>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
-            {clients.length}
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            Clientes Activos
-          </p>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
-            {clients.filter(c => c.isActive).length}
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            Facturado Total
-          </p>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
-            {formatCurrency(clients.reduce((sum, c) => sum + Number(c.totalSpent), 0))}
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            Alertas de Deuda
-          </p>
-          <p className="text-2xl font-bold text-red-600 mt-1">
-            {clients.filter(c => c.debtAlertEnabled && Number(c.pendingAmount || 0) > 0).length}
-          </p>
-        </div>
-      </div>
+              <button
+                onClick={() => {
+                  setEditingClient(null)
+                  setShowModal(true)
+                }}
+                className="btn btn-primary"
+              >
+                <Plus className="mr-2 h-5 w-5" />
+                Nuevo Cliente
+              </button>
+            </div>
+          </div>
 
-      {/* Clients Table */}
-      <div className="card">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-gray-200 dark:border-gray-700">
-                <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
-                  Cliente
-                </th>
-                <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
-                  Contacto
-                </th>
-                <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
-                  Relación
-                </th>
-                <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
-                  Cumpleaños
-                </th>
-                <th className="text-right py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
-                  Facturado
-                </th>
-                <th className="text-center py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
-                  Pendiente
-                </th>
-                <th className="text-center py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
-                  Estado
-                </th>
-                <th className="text-right py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
-                  Acciones
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {clients.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="text-center py-8 text-gray-500 dark:text-gray-400">
-                    No hay clientes registrados
-                  </td>
-                </tr>
-              ) : (
-                clients.map((client) => (
-                  <tr
-                    key={client.id}
-                    className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
-                  >
-                    <td className="py-3 px-4">
-                      <div>
-                        <p className="text-sm font-medium text-gray-900 dark:text-white">
-                          {client.firstName} {client.lastName}
-                        </p>
-                        <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                          {client.externalCode && <span>#{client.externalCode}</span>}
-                          <span>{client._count.appointments} citas • {client._count.sales} ventas</span>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="space-y-1">
-                        {client.phone && (
-                          <div className="flex items-center text-xs text-gray-600 dark:text-gray-400">
-                            <Phone className="w-3 h-3 mr-1" />
-                            {formatPhone(client.phone)}
-                          </div>
-                        )}
-                        {client.email && (
-                          <div className="flex items-center text-xs text-gray-600 dark:text-gray-400">
-                            <Mail className="w-3 h-3 mr-1" />
-                            {client.email}
-                          </div>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400">
-                      {client.relationshipType ? (
-                        <div className="flex flex-col">
-                          <span className="inline-flex items-center">
-                            <Link2 className="w-3 h-3 mr-1" />
-                            {client.relationshipType}
-                          </span>
-                          {client.linkedClient && (
-                            <span className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                              con {client.linkedClient.firstName} {client.linkedClient.lastName}
-                            </span>
-                          )}
-                        </div>
-                      ) : (
-                        '-'
-                      )}
-                    </td>
-                    <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400">
-                      {client.birthDate ? (
-                        <div className="flex items-center">
-                          <Calendar className="w-4 h-4 mr-1" />
-                          {formatDate(client.birthDate)}
-                        </div>
-                      ) : (
-                        '-'
-                      )}
-                    </td>
-                    <td className="py-3 px-4 text-sm text-right font-medium text-gray-900 dark:text-white">
-                      {formatCurrency(client.totalSpent)}
-                    </td>
-                    <td className="py-3 px-4 text-center">
-                      {Number(client.pendingAmount || 0) > 0 ? (
-                        <div className="flex flex-col items-center gap-1">
-                          <span className="badge badge-danger">
-                            {formatCurrency(client.pendingAmount)}
-                          </span>
-                          {client.debtAlertEnabled && (
-                            <span className="text-xs text-red-600 inline-flex items-center">
-                              <AlertTriangle className="w-3 h-3 mr-1" />
-                              Alerta
-                            </span>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-sm text-gray-500 dark:text-gray-400">-</span>
-                      )}
-                    </td>
-                    <td className="py-3 px-4 text-center">
-                      <span
-                        className={`badge ${
-                          client.isActive ? 'badge-success' : 'badge-danger'
+          <div className="card">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar por nombre, email o teléfono..."
+                className="input pl-10"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+            <div className="card">
+              <p className="text-sm text-gray-600 dark:text-gray-400">Total Clientes</p>
+              <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{clients.length}</p>
+            </div>
+            <div className="card">
+              <p className="text-sm text-gray-600 dark:text-gray-400">Clientes Activos</p>
+              <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">
+                {clients.filter((client) => client.isActive).length}
+              </p>
+            </div>
+            <div className="card">
+              <p className="text-sm text-gray-600 dark:text-gray-400">Alertas de Deuda</p>
+              <p className="mt-1 text-2xl font-bold text-red-600">
+                {clients.filter((client) => client.debtAlertEnabled && Number(client.pendingAmount || 0) > 0).length}
+              </p>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-gray-200 dark:border-gray-700">
+                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-600 dark:text-gray-400">
+                      Cliente
+                    </th>
+                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-600 dark:text-gray-400">
+                      Contacto
+                    </th>
+                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-600 dark:text-gray-400">
+                      Relación
+                    </th>
+                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-600 dark:text-gray-400">
+                      Cumpleaños
+                    </th>
+                    <th className="px-4 py-3 text-right text-sm font-medium text-gray-600 dark:text-gray-400">
+                      Facturado
+                    </th>
+                    <th className="px-4 py-3 text-center text-sm font-medium text-gray-600 dark:text-gray-400">
+                      Pendiente
+                    </th>
+                    <th className="px-4 py-3 text-center text-sm font-medium text-gray-600 dark:text-gray-400">
+                      Estado
+                    </th>
+                    <th className="px-4 py-3 text-right text-sm font-medium text-gray-600 dark:text-gray-400">
+                      Acciones
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {clients.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-8 text-center text-gray-500 dark:text-gray-400">
+                        No hay clientes registrados
+                      </td>
+                    </tr>
+                  ) : (
+                    clients.map((client) => (
+                      <tr
+                        key={client.id}
+                        className={`border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 ${
+                          highlightedClientId === client.id ? 'bg-cyan-50 dark:bg-cyan-900/20' : ''
                         }`}
                       >
-                        {client.isActive ? 'Activo' : 'Inactivo'}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="flex items-center justify-end space-x-2">
-                        <button
-                          onClick={() => handleView(client.id)}
-                          className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
-                          title="Ver detalles"
-                        >
-                          <Eye className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                        </button>
-                        <button
-                          onClick={() => handleEdit(client)}
-                          className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
-                          title="Editar"
-                        >
-                          <Edit className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(client.id)}
-                          className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
-                          title="Eliminar"
-                        >
-                          <Trash2 className="w-4 h-4 text-red-600" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                        <td className="px-4 py-3">
+                          <div>
+                            <p className="text-sm font-medium text-gray-900 dark:text-white">
+                              {client.firstName} {client.lastName}
+                            </p>
+                            <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                              {client.externalCode && <span>#{client.externalCode}</span>}
+                              <span>{client._count.appointments} citas • {client._count.sales} ventas</span>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-3">
+                          <div className="space-y-1">
+                            {client.phone && (
+                              <div className="flex items-center text-xs text-gray-600 dark:text-gray-400">
+                                <Phone className="mr-1 h-3 w-3" />
+                                {formatPhone(client.phone)}
+                              </div>
+                            )}
+                            {client.email && (
+                              <div className="flex items-center text-xs text-gray-600 dark:text-gray-400">
+                                <Mail className="mr-1 h-3 w-3" />
+                                {client.email}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                          {client.relationshipType ? (
+                            <div className="flex flex-col">
+                              <span className="inline-flex items-center">
+                                <Link2 className="mr-1 h-3 w-3" />
+                                {client.relationshipType}
+                              </span>
+                              {client.linkedClient && (
+                                <span className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                  con {client.linkedClient.firstName} {client.linkedClient.lastName}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            '-'
+                          )}
+                        </td>
+
+                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                          {client.birthDate ? (
+                            <div className="flex items-center">
+                              <Calendar className="mr-1 h-4 w-4" />
+                              {formatDate(client.birthDate)}
+                            </div>
+                          ) : (
+                            '-'
+                          )}
+                        </td>
+
+                        <td className="px-4 py-3 text-right text-sm font-medium text-gray-900 dark:text-white">
+                          <div className="inline-flex items-center gap-2">
+                            <span>{formatCurrency(client.totalSpent)}</span>
+                            <button
+                              onClick={() => handleViewBilling(client)}
+                              className="rounded p-1 hover:bg-gray-200 dark:hover:bg-gray-600"
+                              title="Ver detalle facturado"
+                            >
+                              <Eye className="h-4 w-4 text-primary-600" />
+                            </button>
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-3 text-center">
+                          {Number(client.pendingAmount || 0) > 0 ? (
+                            <div className="flex flex-col items-center gap-1">
+                              <span className="badge badge-danger">
+                                {formatCurrency(client.pendingAmount)}
+                              </span>
+                              {client.debtAlertEnabled && (
+                                <span className="inline-flex items-center text-xs text-red-600">
+                                  <AlertTriangle className="mr-1 h-3 w-3" />
+                                  Alerta
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-sm text-gray-500 dark:text-gray-400">-</span>
+                          )}
+                        </td>
+
+                        <td className="px-4 py-3 text-center">
+                          <span className={`badge ${client.isActive ? 'badge-success' : 'badge-danger'}`}>
+                            {client.isActive ? 'Activo' : 'Inactivo'}
+                          </span>
+                        </td>
+
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end space-x-2">
+                            <button
+                              onClick={() => handleViewClientCalendar(client.id)}
+                              className="rounded p-1 hover:bg-gray-200 dark:hover:bg-gray-600"
+                              title="Ver citas en calendario"
+                            >
+                              <Calendar className="h-4 w-4 text-primary-600" />
+                            </button>
+                            <button
+                              onClick={() => handleView(client.id)}
+                              className="rounded p-1 hover:bg-gray-200 dark:hover:bg-gray-600"
+                              title="Ver detalles"
+                            >
+                              <Eye className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                            </button>
+                            <button
+                              onClick={() => handleEdit(client)}
+                              className="rounded p-1 hover:bg-gray-200 dark:hover:bg-gray-600"
+                              title="Editar"
+                            >
+                              <Edit className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(client.id)}
+                              className="rounded p-1 hover:bg-gray-200 dark:hover:bg-gray-600"
+                              title="Eliminar"
+                            >
+                              <Trash2 className="h-4 w-4 text-red-600" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
+
+        {showCalendarDock && (
+          <ClientCalendarDock
+            onClose={handleCloseCalendarDock}
+            selectedClientId={highlightedClientId}
+          />
+        )}
       </div>
 
-      {/* Modal de Formulario */}
       <Modal
         isOpen={showModal}
         onClose={handleCloseModal}
@@ -318,7 +408,72 @@ export default function Clients() {
           onCancel={handleCloseModal}
         />
       </Modal>
+
+      <Modal
+        isOpen={!!billingModalClient}
+        onClose={() => {
+          setBillingModalClient(null)
+          setClientSales([])
+        }}
+        title={
+          billingModalClient
+            ? `Facturación de ${billingModalClient.firstName} ${billingModalClient.lastName}`
+            : 'Facturación'
+        }
+        maxWidth="2xl"
+      >
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Total facturado:{' '}
+              <span className="font-semibold text-gray-900 dark:text-white">
+                {formatCurrency(clientSales.reduce((sum, sale) => sum + Number(sale.total), 0))}
+              </span>
+            </p>
+            <p className="text-sm text-gray-600 dark:text-gray-400">{clientSales.length} ventas</p>
+          </div>
+
+          {billingLoading ? (
+            <div className="py-10 text-center text-gray-500 dark:text-gray-400">
+              Cargando facturación...
+            </div>
+          ) : clientSales.length === 0 ? (
+            <div className="py-10 text-center text-gray-500 dark:text-gray-400">
+              No hay ventas registradas para este cliente.
+            </div>
+          ) : (
+            <div className="max-h-[28rem] overflow-y-auto">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Ticket</th>
+                    <th>Fecha</th>
+                    <th>Pago</th>
+                    <th>Total</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {clientSales.map((sale) => (
+                    <tr key={sale.id}>
+                      <td className="font-mono text-sm">{sale.saleNumber}</td>
+                      <td>{formatDate(sale.date)}</td>
+                      <td>{paymentMethodLabel(sale.paymentMethod)}</td>
+                      <td className="font-semibold">{formatCurrency(Number(sale.total))}</td>
+                      <td>
+                        <button onClick={() => handlePrintSale(sale.id)} className="btn btn-sm btn-secondary">
+                          <Receipt className="mr-2 h-4 w-4" />
+                          Ticket
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   )
 }
-

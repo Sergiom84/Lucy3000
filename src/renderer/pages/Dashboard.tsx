@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import {
   Users,
   Calendar,
-  DollarSign,
   AlertTriangle
 } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
@@ -37,13 +36,6 @@ export default function Dashboard() {
   }
 
   const statCards = [
-    {
-      title: 'Ventas Hoy',
-      value: formatCurrency(stats?.today?.revenue || 0),
-      subtitle: `${stats?.today?.salesCount || 0} ventas`,
-      icon: DollarSign,
-      color: 'bg-green-500',
-    },
     {
       title: 'Citas Hoy',
       value: stats?.today?.appointments || 0,
@@ -80,7 +72,7 @@ export default function Dashboard() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {statCards.map((stat, index) => (
           <div key={index} className="card">
             <div className="flex items-center justify-between">

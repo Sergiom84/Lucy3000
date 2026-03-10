@@ -2,26 +2,56 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
+  CreditCard,
   Edit,
   Phone,
   Mail,
   MapPin,
   Calendar,
-  DollarSign,
-  Award,
   History,
   ShoppingBag,
   CalendarCheck,
   User,
   Cake,
   Link2,
-  AlertTriangle
+  AlertTriangle,
+  Ticket,
+  BarChart3,
+  Scale,
+  ClipboardList,
+  FileText,
+  FolderOpen,
+  Printer,
+  Star,
+  StickyNote,
+  Trash2,
+  Upload
 } from 'lucide-react'
 import api from '../utils/api'
 import { formatCurrency, formatDate, formatPhone, formatDateTime, getInitials } from '../utils/format'
+import {
+  ClientAssetsResponse,
+  deleteClientAsset,
+  importClientAssets,
+  isDesktop,
+  listClientAssets,
+  openClientFolder,
+  printTicket,
+  setPrimaryClientPhoto
+} from '../utils/desktop'
+import { buildSaleTicketPayload, paymentMethodLabel } from '../utils/tickets'
 import toast from 'react-hot-toast'
 import Modal from '../components/Modal'
 import ClientForm from '../components/ClientForm'
+
+const toolbarItems = [
+  { icon: Ticket, label: 'Bonos' },
+  { icon: BarChart3, label: 'Análisis' },
+  { icon: Scale, label: 'Control Peso' },
+  { icon: ClipboardList, label: 'Ficha Bio' },
+  { icon: FileText, label: 'Plantillas' },
+  { icon: FolderOpen, label: 'Documentos' }
+]
 
 export default function ClientDetail() {
   const { id } = useParams()
@@ -29,7 +59,9 @@ export default function ClientDetail() {
   const [client, setClient] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [showEditModal, setShowEditModal] = useState(false)
-  const [activeTab, setActiveTab] = useState<'overview' | 'appointments' | 'sales' | 'history'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'appointments' | 'sales' | 'history' | 'bonos'>('overview')
+  const [clientAssets, setClientAssets] = useState<ClientAssetsResponse | null>(null)
+  const [assetsLoading, setAssetsLoading] = useState(false)
 
   useEffect(() => {
     if (id) {
@@ -41,6 +73,15 @@ export default function ClientDetail() {
     try {
       const response = await api.get(`/clients/${id}`)
       setClient(response.data)
+      if (isDesktop()) {
+        setAssetsLoading(true)
+        try {
+          const assets = await listClientAssets(response.data.id, `${response.data.firstName} ${response.data.lastName}`)
+          setClientAssets(assets)
+        } finally {
+          setAssetsLoading(false)
+        }
+      }
     } catch (error) {
       console.error('Error fetching client:', error)
       toast.error('Error al cargar el cliente')
@@ -53,6 +94,67 @@ export default function ClientDetail() {
   const handleFormSuccess = () => {
     setShowEditModal(false)
     fetchClient()
+  }
+
+  const handleImportAssets = async (kind: 'photos' | 'consents') => {
+    if (!client) return
+    try {
+      setAssetsLoading(true)
+      const assets = await importClientAssets(client.id, `${client.firstName} ${client.lastName}`, kind)
+      setClientAssets(assets)
+      toast.success(kind === 'photos' ? 'Fotos importadas' : 'Consentimientos importados')
+    } catch (error: any) {
+      toast.error(error.message || 'No se pudo importar el archivo')
+    } finally {
+      setAssetsLoading(false)
+    }
+  }
+
+  const handleDeleteAsset = async (assetId: string) => {
+    if (!client) return
+    try {
+      setAssetsLoading(true)
+      const assets = await deleteClientAsset(client.id, `${client.firstName} ${client.lastName}`, assetId)
+      setClientAssets(assets)
+      toast.success('Archivo eliminado')
+    } catch (error: any) {
+      toast.error(error.message || 'No se pudo eliminar el archivo')
+    } finally {
+      setAssetsLoading(false)
+    }
+  }
+
+  const handleSetPrimaryPhoto = async (assetId: string) => {
+    if (!client) return
+    try {
+      setAssetsLoading(true)
+      const assets = await setPrimaryClientPhoto(client.id, `${client.firstName} ${client.lastName}`, assetId)
+      setClientAssets(assets)
+      toast.success('Foto principal actualizada')
+    } catch (error: any) {
+      toast.error(error.message || 'No se pudo actualizar la foto principal')
+    } finally {
+      setAssetsLoading(false)
+    }
+  }
+
+  const handleOpenClientFolder = async () => {
+    if (!client) return
+    try {
+      await openClientFolder(client.id, `${client.firstName} ${client.lastName}`)
+    } catch (error: any) {
+      toast.error(error.message || 'No se pudo abrir la carpeta local')
+    }
+  }
+
+  const handlePrintSale = async (saleId: string) => {
+    try {
+      const response = await api.get(`/sales/${saleId}`)
+      await printTicket(buildSaleTicketPayload(response.data))
+      toast.success('Ticket enviado a la impresora')
+    } catch (error: any) {
+      toast.error(error.message || 'No se pudo imprimir el ticket')
+    }
   }
 
   if (loading) {
@@ -89,183 +191,140 @@ export default function ClientDetail() {
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-              {client.firstName} {client.lastName}
-            </h1>
-            <p className="text-gray-600 dark:text-gray-400 mt-1">
-              Cliente desde {formatDate(client.createdAt)}
-            </p>
-          </div>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+            {client.firstName} {client.lastName}
+          </h1>
         </div>
-        <button
-          onClick={() => setShowEditModal(true)}
-          className="btn btn-primary"
-        >
-          <Edit className="w-5 h-5 mr-2" />
-          Editar Cliente
-        </button>
+        <div className="flex gap-3">
+          <button
+            onClick={() => navigate(`/sales?clientId=${client.id}`)}
+            className="btn btn-secondary"
+          >
+            <CreditCard className="w-5 h-5 mr-2" />
+            Cobrar
+          </button>
+          <button
+            onClick={() => setShowEditModal(true)}
+            className="btn btn-primary"
+          >
+            <Edit className="w-5 h-5 mr-2" />
+            Editar
+          </button>
+        </div>
       </div>
 
-      {/* Client Overview Card */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Info Card */}
-        <div className="lg:col-span-1">
-          <div className="card">
-            {/* Avatar */}
-            <div className="flex justify-center mb-6">
-              <div className="w-24 h-24 rounded-full bg-primary-600 flex items-center justify-center">
+      {/* Ficha Compacta */}
+      <div className="card">
+        <div className="flex flex-col sm:flex-row gap-6">
+          {/* Avatar */}
+          <div className="flex-shrink-0 flex justify-center sm:justify-start">
+            {clientAssets?.primaryPhotoUrl || client.photoUrl ? (
+              <img
+                src={clientAssets?.primaryPhotoUrl || client.photoUrl}
+                alt={`${client.firstName} ${client.lastName}`}
+                className="w-24 h-24 rounded-full object-cover ring-4 ring-primary-100 dark:ring-primary-900"
+              />
+            ) : (
+              <div className="w-24 h-24 rounded-full bg-primary-600 flex items-center justify-center ring-4 ring-primary-100 dark:ring-primary-900">
                 <span className="text-3xl font-bold text-white">
                   {getInitials(`${client.firstName} ${client.lastName}`)}
                 </span>
               </div>
-            </div>
+            )}
+          </div>
 
-            {/* Status Badge */}
-            <div className="flex justify-center mb-6">
+          {/* Info */}
+          <div className="flex-1 min-w-0">
+            {/* Name + Status */}
+            <div className="flex flex-wrap items-center gap-3 mb-2">
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+                {client.firstName} {client.lastName}
+              </h2>
               <span className={`badge ${client.isActive ? 'badge-success' : 'badge-danger'}`}>
                 {client.isActive ? 'Activo' : 'Inactivo'}
               </span>
+              {client.externalCode && (
+                <span className="text-sm text-gray-500 dark:text-gray-400">
+                  #{client.externalCode}
+                </span>
+              )}
             </div>
 
-            {/* Contact Info */}
-            <div className="space-y-4">
+            {/* Contact details */}
+            <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm text-gray-600 dark:text-gray-400 mb-3">
               {client.phone && (
-                <div className="flex items-center text-sm">
-                  <Phone className="w-4 h-4 mr-3 text-gray-400" />
-                  <span className="text-gray-900 dark:text-white">{formatPhone(client.phone)}</span>
-                </div>
+                <span className="inline-flex items-center gap-1">
+                  <Phone className="w-3.5 h-3.5" />
+                  {formatPhone(client.phone)}
+                </span>
               )}
-
               {client.email && (
-                <div className="flex items-center text-sm">
-                  <Mail className="w-4 h-4 mr-3 text-gray-400" />
-                  <span className="text-gray-900 dark:text-white">{client.email}</span>
-                </div>
+                <span className="inline-flex items-center gap-1">
+                  <Mail className="w-3.5 h-3.5" />
+                  {client.email}
+                </span>
               )}
-
               {client.birthDate && (
-                <div className="flex items-center text-sm">
-                  <Cake className="w-4 h-4 mr-3 text-gray-400" />
-                  <span className="text-gray-900 dark:text-white">{formatDate(client.birthDate)}</span>
-                </div>
+                <span className="inline-flex items-center gap-1">
+                  <Cake className="w-3.5 h-3.5" />
+                  {formatDate(client.birthDate)}
+                </span>
               )}
-
               {(client.address || client.city) && (
-                <div className="flex items-start text-sm">
-                  <MapPin className="w-4 h-4 mr-3 text-gray-400 mt-0.5" />
-                  <div className="text-gray-900 dark:text-white">
-                    {client.address && <div>{client.address}</div>}
-                    {client.city && (
-                      <div>
-                        {client.city}
-                        {client.postalCode && ` - ${client.postalCode}`}
-                      </div>
-                    )}
+                <span className="inline-flex items-center gap-1">
+                  <MapPin className="w-3.5 h-3.5" />
+                  {[client.address, client.city, client.postalCode].filter(Boolean).join(', ')}
+                </span>
+              )}
+            </div>
+
+            {/* Allergies */}
+            {client.allergies && (
+              <div className="mb-3 p-2.5 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <span className="text-sm font-semibold text-red-700 dark:text-red-400">ALERGIAS: </span>
+                    <span className="text-sm text-red-700 dark:text-red-300">{client.allergies}</span>
                   </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
 
             {/* Notes */}
             {client.notes && (
-              <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
-                <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-2">
-                  Notas
-                </h3>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  {client.notes}
-                </p>
+              <div className="mb-3 flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400">
+                <StickyNote className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                <p className="line-clamp-2">{client.notes}</p>
               </div>
             )}
-          </div>
-        </div>
 
-        {/* Stats Cards */}
-        <div className="lg:col-span-2">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="card">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Total Gastado
-                  </p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
+            {/* Stats row */}
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-3 mt-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                <div className="text-center">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Total Gastado</p>
+                  <p className="text-lg font-bold text-gray-900 dark:text-white">
                     {formatCurrency(Number(client.totalSpent))}
                   </p>
                 </div>
-                <div className="w-12 h-12 bg-green-500 rounded-lg flex items-center justify-center">
-                  <DollarSign className="w-6 h-6 text-white" />
+                <div className="text-center">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Puntos</p>
+                  <p className="text-lg font-bold text-purple-600">{client.loyaltyPoints}</p>
                 </div>
-              </div>
-            </div>
-
-            <div className="card">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Puntos de Lealtad
-                  </p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
-                    {client.loyaltyPoints}
-                  </p>
+                <div className="text-center">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Citas</p>
+                  <p className="text-lg font-bold text-blue-600">{client.appointments?.length || 0}</p>
                 </div>
-                <div className="w-12 h-12 bg-purple-500 rounded-lg flex items-center justify-center">
-                  <Award className="w-6 h-6 text-white" />
+                <div className="text-center">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Ventas</p>
+                  <p className="text-lg font-bold text-orange-600">{client.sales?.length || 0}</p>
                 </div>
-              </div>
-            </div>
-
-            <div className="card">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Total Citas
-                  </p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
-                    {client.appointments?.length || 0}
-                  </p>
-                </div>
-                <div className="w-12 h-12 bg-blue-500 rounded-lg flex items-center justify-center">
-                  <CalendarCheck className="w-6 h-6 text-white" />
-                </div>
-              </div>
-            </div>
-
-            <div className="card">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Total Ventas
-                  </p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
-                    {client.sales?.length || 0}
-                  </p>
-                </div>
-                <div className="w-12 h-12 bg-orange-500 rounded-lg flex items-center justify-center">
-                  <ShoppingBag className="w-6 h-6 text-white" />
-                </div>
-              </div>
-            </div>
-
-            <div className="card">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Importe Pendiente
-                  </p>
-                  <p className={`text-2xl font-bold mt-1 ${Number(client.pendingAmount || 0) > 0 ? 'text-red-600' : 'text-gray-900 dark:text-white'}`}>
+                <div className="text-center">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Pendiente</p>
+                  <p className={`text-lg font-bold ${Number(client.pendingAmount || 0) > 0 ? 'text-red-600' : 'text-gray-900 dark:text-white'}`}>
                     {formatCurrency(Number(client.pendingAmount || 0))}
                   </p>
-                  {client.debtAlertEnabled && Number(client.pendingAmount || 0) > 0 && (
-                    <p className="text-xs text-red-600 mt-1 inline-flex items-center">
-                      <AlertTriangle className="w-3 h-3 mr-1" />
-                      Alerta de deuda activa
-                    </p>
-                  )}
-                </div>
-                <div className="w-12 h-12 bg-red-500 rounded-lg flex items-center justify-center">
-                  <DollarSign className="w-6 h-6 text-white" />
                 </div>
               </div>
             </div>
@@ -273,16 +332,34 @@ export default function ClientDetail() {
         </div>
       </div>
 
+      {/* Toolbar de Acceso Rápido */}
+      <div className="flex flex-wrap gap-2">
+        {toolbarItems.map((item) => {
+          const Icon = item.icon
+          return (
+            <button
+              key={item.label}
+              disabled
+              title="Próximamente"
+              className="flex flex-col items-center gap-1 px-4 py-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 opacity-50 cursor-not-allowed"
+            >
+              <Icon className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+              <span className="text-xs text-gray-500 dark:text-gray-400">{item.label}</span>
+            </button>
+          )
+        })}
+      </div>
+
       {/* Tabs */}
       <div className="border-b border-gray-200 dark:border-gray-700">
-        <div className="flex space-x-6">
+        <div className="flex space-x-6 overflow-x-auto">
           {tabs.map((tab) => {
             const Icon = tab.icon
             return (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`flex items-center space-x-2 pb-4 border-b-2 transition-colors ${
+                className={`flex items-center space-x-2 pb-4 border-b-2 transition-colors whitespace-nowrap ${
                   activeTab === tab.id
                     ? 'border-primary-600 text-primary-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
@@ -302,50 +379,139 @@ export default function ClientDetail() {
       {/* Tab Content */}
       <div>
         {activeTab === 'overview' && (
-          <div className="card">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-              Resumen General
-            </h3>
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Primera visita</p>
-                  <p className="text-sm font-medium text-gray-900 dark:text-white">
-                    {formatDate(client.createdAt)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Última actualización</p>
-                  <p className="text-sm font-medium text-gray-900 dark:text-white">
-                    {formatDate(client.updatedAt)}
-                  </p>
-                </div>
-                {client.activeTreatmentCount !== null && client.activeTreatmentCount !== undefined && (
+          <div className="grid gap-6 lg:grid-cols-[1.1fr_1fr]">
+            <div className="card">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                Resumen General
+              </h3>
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Tratamientos activos</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Primera visita</p>
                     <p className="text-sm font-medium text-gray-900 dark:text-white">
-                      {client.activeTreatmentCount}
+                      {formatDate(client.createdAt)}
                     </p>
                   </div>
-                )}
-                {client.linkedClient && (
                   <div>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Cliente vinculado</p>
-                    <p className="text-sm font-medium text-gray-900 dark:text-white inline-flex items-center">
-                      <Link2 className="w-4 h-4 mr-1" />
-                      {client.linkedClient.firstName} {client.linkedClient.lastName}
-                      {client.relationshipType ? ` (${client.relationshipType})` : ''}
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Última actualización</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                      {formatDate(client.updatedAt)}
+                    </p>
+                  </div>
+                  {client.activeTreatmentCount !== null && client.activeTreatmentCount !== undefined && (
+                    <div>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">Tratamientos activos</p>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">
+                        {client.activeTreatmentCount}
+                      </p>
+                    </div>
+                  )}
+                  {client.linkedClient && (
+                    <div>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">Cliente vinculado</p>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white inline-flex items-center">
+                        <Link2 className="w-4 h-4 mr-1" />
+                        {client.linkedClient.firstName} {client.linkedClient.lastName}
+                        {client.relationshipType ? ` (${client.relationshipType})` : ''}
+                      </p>
+                    </div>
+                  )}
+                </div>
+                {client.activeTreatmentNames && (
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Nombres de tratamientos activos</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                      {client.activeTreatmentNames}
                     </p>
                   </div>
                 )}
               </div>
-              {client.activeTreatmentNames && (
+            </div>
+
+            <div className="card space-y-4">
+              <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Nombres de tratamientos activos</p>
-                  <p className="text-sm font-medium text-gray-900 dark:text-white">
-                    {client.activeTreatmentNames}
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Carpeta local</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                    Fotos del cliente y consentimientos guardados en el equipo.
                   </p>
                 </div>
+                {isDesktop() && (
+                  <button onClick={handleOpenClientFolder} className="btn btn-secondary btn-sm">
+                    <FolderOpen className="w-4 h-4 mr-2" />
+                    Abrir carpeta
+                  </button>
+                )}
+              </div>
+
+              {!isDesktop() ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-300">
+                  Disponible solo en la app de escritorio Electron.
+                </div>
+              ) : (
+                <>
+                  <div className="flex flex-wrap gap-3">
+                    <button onClick={() => handleImportAssets('photos')} className="btn btn-primary btn-sm" disabled={assetsLoading}>
+                      <Upload className="w-4 h-4 mr-2" />
+                      Añadir fotos
+                    </button>
+                    <button onClick={() => handleImportAssets('consents')} className="btn btn-secondary btn-sm" disabled={assetsLoading}>
+                      <Upload className="w-4 h-4 mr-2" />
+                      Añadir consentimiento
+                    </button>
+                  </div>
+
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white mb-2">Fotos</p>
+                    {assetsLoading ? (
+                      <p className="text-sm text-gray-500 dark:text-gray-400">Cargando archivos...</p>
+                    ) : clientAssets?.photos.length ? (
+                      <div className="grid grid-cols-2 gap-3">
+                        {clientAssets.photos.map((asset) => (
+                          <div key={asset.id} className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                            <img src={asset.previewUrl} alt={asset.originalName} className="h-28 w-full object-cover" />
+                            <div className="p-3 space-y-2">
+                              <p className="text-xs text-gray-600 dark:text-gray-400 truncate">{asset.originalName}</p>
+                              <div className="flex flex-wrap gap-2">
+                                <button onClick={() => handleSetPrimaryPhoto(asset.id)} className={`btn btn-sm ${asset.isPrimaryPhoto ? 'btn-primary' : 'btn-secondary'}`}>
+                                  <Star className="w-3.5 h-3.5 mr-1" />
+                                  Principal
+                                </button>
+                                <button onClick={() => handleDeleteAsset(asset.id)} className="btn btn-sm btn-secondary text-red-600">
+                                  <Trash2 className="w-3.5 h-3.5 mr-1" />
+                                  Borrar
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500 dark:text-gray-400">No hay fotos locales.</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white mb-2">Consentimientos</p>
+                    {clientAssets?.consents.length ? (
+                      <div className="space-y-2">
+                        {clientAssets.consents.map((asset) => (
+                          <div key={asset.id} className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2">
+                            <a href={asset.previewUrl} target="_blank" rel="noreferrer" className="text-sm text-primary-600 hover:underline">
+                              {asset.originalName}
+                            </a>
+                            <button onClick={() => handleDeleteAsset(asset.id)} className="btn btn-sm btn-secondary text-red-600">
+                              <Trash2 className="w-3.5 h-3.5 mr-1" />
+                              Borrar
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500 dark:text-gray-400">No hay consentimientos locales.</p>
+                    )}
+                  </div>
+                </>
               )}
             </div>
           </div>
@@ -371,7 +537,7 @@ export default function ClientDetail() {
                             {appointment.service.name}
                           </p>
                           <p className="text-xs text-gray-500 dark:text-gray-400">
-                            Con {appointment.user.name}
+                            Con {appointment.user.name} · {appointment.cabin?.replace('CABINA_', 'Cabina ') || 'Sin cabina'}
                           </p>
                         </div>
                       </div>
@@ -390,6 +556,19 @@ export default function ClientDetail() {
                         }`}>
                           {appointment.status}
                         </span>
+                        {appointment.sale?.status === 'COMPLETED' ? (
+                          <div className="mt-2 text-xs text-green-600">
+                            Cobrada · {paymentMethodLabel(appointment.sale.paymentMethod)}
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => navigate(`/sales?clientId=${client.id}&serviceId=${appointment.serviceId}&appointmentId=${appointment.id}`)}
+                            className="btn btn-secondary btn-sm mt-2"
+                          >
+                            <CreditCard className="w-3.5 h-3.5 mr-1" />
+                            Cobrar
+                          </button>
+                        )}
                       </div>
                     </div>
                     {appointment.notes && (
@@ -433,6 +612,9 @@ export default function ClientDetail() {
                       <th className="text-center py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
                         Estado
                       </th>
+                      <th className="text-right py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                        Ticket
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -461,6 +643,12 @@ export default function ClientDetail() {
                           }`}>
                             {sale.status}
                           </span>
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <button onClick={() => handlePrintSale(sale.id)} className="btn btn-sm btn-secondary">
+                            <Printer className="w-4 h-4 mr-2" />
+                            Ticket
+                          </button>
                         </td>
                       </tr>
                     ))}

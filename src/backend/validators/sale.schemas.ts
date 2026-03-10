@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { dateQuerySchema, optionalNullableTextSchema, uuidParamSchema } from './common.schemas'
 
 const saleStatusSchema = z.enum(['PENDING', 'COMPLETED', 'CANCELLED', 'REFUNDED'])
-const paymentMethodSchema = z.enum(['CASH', 'CARD', 'TRANSFER', 'MIXED'])
+const paymentMethodSchema = z.enum(['CASH', 'CARD', 'BIZUM', 'OTHER'])
 
 const moneySchema = z.coerce.number().finite().min(0, 'Value cannot be negative')
 
@@ -23,6 +23,8 @@ export const salesQuerySchema = z
     startDate: dateQuerySchema.optional(),
     endDate: dateQuerySchema.optional(),
     clientId: z.string().uuid('Invalid clientId').optional(),
+    appointmentId: z.string().uuid('Invalid appointmentId').optional(),
+    paymentMethod: paymentMethodSchema.optional(),
     status: saleStatusSchema.optional()
   })
   .refine(
@@ -36,6 +38,7 @@ export const salesQuerySchema = z
 export const createSaleBodySchema = z
   .object({
     clientId: z.string().uuid('Invalid clientId').nullable().optional(),
+    appointmentId: z.string().uuid('Invalid appointmentId').nullable().optional(),
     items: z.array(saleItemSchema).min(1, 'At least one sale item is required'),
     discount: moneySchema.optional().default(0),
     tax: moneySchema.optional().default(0),
@@ -55,4 +58,3 @@ export const updateSaleBodySchema = z
   .refine((payload) => Object.keys(payload).length > 0, {
     message: 'At least one field is required'
   })
-

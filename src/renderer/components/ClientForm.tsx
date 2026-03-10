@@ -56,12 +56,14 @@ export default function ClientForm({ client, onSuccess, onCancel }: ClientFormPr
     postalCode: '',
     province: '',
     notes: '',
+    allergies: '',
     gifts: '',
     activeTreatmentCount: '',
     activeTreatmentNames: '',
     bondCount: '',
     giftVoucher: '',
     serviceCount: '',
+    accountBalance: '',
     billedAmount: '',
     pendingAmount: '',
     debtAlertEnabled: false,
@@ -93,12 +95,14 @@ export default function ClientForm({ client, onSuccess, onCancel }: ClientFormPr
         postalCode: client.postalCode || '',
         province: client.province || '',
         notes: client.notes || '',
+        allergies: client.allergies || '',
         gifts: client.gifts || '',
         activeTreatmentCount: client.activeTreatmentCount?.toString() || '',
         activeTreatmentNames: client.activeTreatmentNames || '',
         bondCount: client.bondCount?.toString() || '',
         giftVoucher: client.giftVoucher || '',
         serviceCount: client.serviceCount?.toString() || '',
+        accountBalance: client.accountBalance?.toString() || '',
         billedAmount: client.billedAmount?.toString() || '',
         pendingAmount: client.pendingAmount?.toString() || '',
         debtAlertEnabled: client.debtAlertEnabled ?? false,
@@ -181,6 +185,8 @@ export default function ClientForm({ client, onSuccess, onCancel }: ClientFormPr
       const pendingAmount = parseDecimalInput(formData.pendingAmount) || 0
       const billedAmount = parseDecimalInput(formData.billedAmount)
 
+      const accountBalance = parseDecimalInput(formData.accountBalance)
+
       const dataToSend: any = {
         externalCode: formData.externalCode.trim() || null,
         dni: formData.dni.trim() || null,
@@ -202,6 +208,7 @@ export default function ClientForm({ client, onSuccess, onCancel }: ClientFormPr
         postalCode: formData.postalCode.trim() || null,
         province: formData.province.trim() || null,
         notes: formData.notes.trim() || null,
+        allergies: formData.allergies.trim() || null,
         gifts: formData.gifts.trim() || null,
         activeTreatmentCount: formData.activeTreatmentCount
           ? Number.parseInt(formData.activeTreatmentCount, 10)
@@ -210,6 +217,7 @@ export default function ClientForm({ client, onSuccess, onCancel }: ClientFormPr
         bondCount: formData.bondCount ? Number.parseInt(formData.bondCount, 10) : null,
         giftVoucher: formData.giftVoucher.trim() || null,
         serviceCount: formData.serviceCount ? Number.parseInt(formData.serviceCount, 10) : null,
+        accountBalance,
         billedAmount,
         totalSpent: billedAmount,
         pendingAmount,
@@ -583,6 +591,17 @@ export default function ClientForm({ client, onSuccess, onCancel }: ClientFormPr
               placeholder="0,00"
             />
           </div>
+          <div>
+            <label className="label">Saldo a cuenta (€)</label>
+            <input
+              type="text"
+              name="accountBalance"
+              value={formData.accountBalance}
+              onChange={handleChange}
+              className="input"
+              placeholder="0,00"
+            />
+          </div>
         </div>
 
         <div className="mt-4">
@@ -651,6 +670,18 @@ export default function ClientForm({ client, onSuccess, onCancel }: ClientFormPr
             </select>
           </div>
         </div>
+      </div>
+
+      <div>
+        <label className="label">Alergias</label>
+        <textarea
+          name="allergies"
+          value={formData.allergies}
+          onChange={handleChange}
+          className="input resize-none"
+          rows={2}
+          placeholder="Ej: Látex, Parabenos, Níquel..."
+        />
       </div>
 
       <div>

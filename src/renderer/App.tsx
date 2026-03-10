@@ -17,6 +17,7 @@ import Sales from './pages/Sales'
 import Cash from './pages/Cash'
 import Reports from './pages/Reports'
 import Settings from './pages/Settings'
+import ClientRanking from './pages/ClientRanking'
 
 function App() {
   const { isAuthenticated } = useAuthStore()
@@ -61,6 +62,7 @@ function App() {
           <Route path="/sales" element={<Sales />} />
           <Route path="/cash" element={<Cash />} />
           <Route path="/reports" element={<Reports />} />
+          <Route path="/ranking" element={<ClientRanking />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>

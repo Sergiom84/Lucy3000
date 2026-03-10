@@ -1,17 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthRequest } from '../../../src/backend/middleware/auth.middleware'
-import { createSale } from '../../../src/backend/controllers/sale.controller'
+import { createSale, updateSale } from '../../../src/backend/controllers/sale.controller'
 import { createMockRequest, createMockResponse } from '../helpers/http'
 import { prismaMock, resetPrismaMock } from '../mocks/prisma.mock'
 
 vi.mock('../../../src/backend/db', async () => import('../mocks/db.mock'))
 
-describe('sale.controller.createSale', () => {
+describe('sale.controller', () => {
   beforeEach(() => {
     resetPrismaMock()
   })
 
-  it('creates a sale and applies stock/client effects', async () => {
+  it('creates a sale linked to an appointment and creates automatic cash movement', async () => {
     const tx: any = {
       $queryRaw: vi.fn().mockResolvedValue(undefined),
       sale: {
@@ -20,9 +20,29 @@ describe('sale.controller.createSale', () => {
           id: 'sale-1',
           saleNumber: 'V-000100',
           clientId: 'client-1',
+          appointmentId: 'appointment-1',
           total: 100,
+          client: { firstName: 'Ana', lastName: 'Lopez' },
           items: []
+        }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'sale-1',
+          saleNumber: 'V-000100',
+          total: 100,
+          paymentMethod: 'CASH',
+          client: { firstName: 'Ana', lastName: 'Lopez' },
+          items: [],
+          cashMovement: { id: 'movement-1' }
         })
+      },
+      appointment: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'appointment-1',
+          clientId: 'client-1',
+          client: { firstName: 'Ana', lastName: 'Lopez' },
+          sale: null
+        }),
+        update: vi.fn().mockResolvedValue(undefined)
       },
       product: {
         findUnique: vi.fn().mockResolvedValue({ id: 'product-1', name: 'Shampoo', stock: 10 }),
@@ -33,6 +53,13 @@ describe('sale.controller.createSale', () => {
       },
       client: {
         update: vi.fn().mockResolvedValue(undefined)
+      },
+      cashRegister: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'cash-1' })
+      },
+      cashMovement: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue(undefined)
       }
     }
 
@@ -42,6 +69,7 @@ describe('sale.controller.createSale', () => {
       user: { id: 'user-1', email: 'admin@lucy3000.com', role: 'ADMIN' },
       body: {
         clientId: 'client-1',
+        appointmentId: 'appointment-1',
         items: [
           {
             productId: 'product-1',
@@ -63,13 +91,19 @@ describe('sale.controller.createSale', () => {
     await createSale(req, res)
 
     expect(res.status).toHaveBeenCalledWith(201)
-    expect(tx.product.update).toHaveBeenCalledWith(
+    expect(tx.appointment.update).toHaveBeenCalledWith({
+      where: { id: 'appointment-1' },
+      data: { status: 'COMPLETED' }
+    })
+    expect(tx.cashMovement.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'product-1' },
-        data: { stock: { decrement: 2 } }
+        data: expect.objectContaining({
+          cashRegisterId: 'cash-1',
+          saleId: 'sale-1',
+          paymentMethod: 'CASH'
+        })
       })
     )
-    expect(tx.client.update).toHaveBeenCalledTimes(1)
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ saleNumber: 'V-000100' }))
   })
 
@@ -83,6 +117,7 @@ describe('sale.controller.createSale', () => {
           saleNumber: 'V-000001',
           clientId: null,
           total: 200,
+          client: null,
           items: []
         })
       },
@@ -95,6 +130,13 @@ describe('sale.controller.createSale', () => {
       },
       client: {
         update: vi.fn().mockResolvedValue(undefined)
+      },
+      cashRegister: {
+        findFirst: vi.fn().mockResolvedValue(null)
+      },
+      cashMovement: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue(undefined)
       }
     }
 
@@ -130,5 +172,67 @@ describe('sale.controller.createSale', () => {
         error: expect.stringContaining('Insufficient stock')
       })
     )
+  })
+
+  it('reverts automatic cash movement when a completed sale is cancelled', async () => {
+    const tx: any = {
+      sale: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'sale-1',
+          clientId: 'client-1',
+          userId: 'user-1',
+          appointmentId: 'appointment-1',
+          saleNumber: 'V-000100',
+          total: 80,
+          status: 'COMPLETED',
+          paymentMethod: 'CARD',
+          notes: null,
+          client: { firstName: 'Ana', lastName: 'Lopez' },
+          items: []
+        }),
+        update: vi.fn().mockResolvedValue(undefined)
+      },
+      client: {
+        update: vi.fn().mockResolvedValue(undefined)
+      },
+      cashMovement: {
+        findUnique: vi.fn().mockResolvedValue({ id: 'movement-1' }),
+        delete: vi.fn().mockResolvedValue(undefined)
+      },
+      saleItems: {},
+      product: {
+        update: vi.fn().mockResolvedValue(undefined)
+      },
+      stockMovement: {
+        create: vi.fn().mockResolvedValue(undefined)
+      }
+    }
+
+    tx.sale.findUnique = vi.fn().mockResolvedValue({
+      id: 'sale-1',
+      clientId: 'client-1',
+      userId: 'user-1',
+      appointmentId: 'appointment-1',
+      saleNumber: 'V-000100',
+      total: 80,
+      status: 'COMPLETED',
+      paymentMethod: 'CARD',
+      notes: null,
+      client: { firstName: 'Ana', lastName: 'Lopez' },
+      items: []
+    })
+    tx.sale.update = vi.fn().mockResolvedValue(undefined)
+
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx))
+
+    const req = createMockRequest({
+      params: { id: 'sale-1' },
+      body: { status: 'CANCELLED' }
+    })
+    const res = createMockResponse()
+
+    await updateSale(req as any, res)
+
+    expect(tx.cashMovement.delete).toHaveBeenCalledWith({ where: { saleId: 'sale-1' } })
   })
 })

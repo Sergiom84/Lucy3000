@@ -85,6 +85,39 @@ describe('client.controller gender validation', () => {
     expect(prismaMock.client.create).not.toHaveBeenCalled()
   })
 
+  it('createClient normalizes null totalSpent to zero', async () => {
+    prismaMock.client.create.mockResolvedValue({
+      id: 'client-1',
+      firstName: 'Sergio',
+      lastName: 'Hernandez Lara',
+      pendingAmount: 0,
+      debtAlertEnabled: false,
+      isActive: true
+    })
+
+    const req = createMockRequest({
+      body: {
+        firstName: 'Sergio',
+        lastName: 'Hernandez Lara',
+        phone: '600000000',
+        gender: 'HOMBRE',
+        totalSpent: null
+      }
+    })
+    const res = createMockResponse()
+
+    await createClient(req as any, res)
+
+    expect(res.status).toHaveBeenCalledWith(201)
+    expect(prismaMock.client.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          totalSpent: 0
+        })
+      })
+    )
+  })
+
   it('updateClient rejects invalid gender when provided', async () => {
     const req = createMockRequest({
       params: { id: 'client-1' },
