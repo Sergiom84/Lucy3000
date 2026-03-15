@@ -37,7 +37,8 @@ export const prismaMock: any = {
   },
 
   bonoSession: {
-    update: vi.fn()
+    update: vi.fn(),
+    updateMany: vi.fn()
   },
 
   accountBalanceMovement: {

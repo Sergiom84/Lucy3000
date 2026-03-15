@@ -2,6 +2,7 @@ import dotenv from 'dotenv'
 import http from 'http'
 import { app } from './app'
 import { prisma } from './db'
+import { appointmentReminderService } from './services/appointmentReminder.service'
 
 dotenv.config()
 
@@ -22,10 +23,18 @@ server.on('error', (error: NodeJS.ErrnoException) => {
 server.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`)
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`)
+  appointmentReminderService.start()
 })
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
+  appointmentReminderService.stop()
+  await prisma.$disconnect()
+  process.exit(0)
+})
+
+process.on('SIGTERM', async () => {
+  appointmentReminderService.stop()
   await prisma.$disconnect()
   process.exit(0)
 })

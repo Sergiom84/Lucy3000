@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Save, X } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
@@ -11,9 +11,18 @@ interface BonoPackModalProps {
   onSuccess: () => void
 }
 
+const normalizeText = (value: unknown) =>
+  String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+
 export default function BonoPackModal({ isOpen, onClose, clientId, onSuccess }: BonoPackModalProps) {
   const [loading, setLoading] = useState(false)
   const [services, setServices] = useState<any[]>([])
+  const [bonoSearchQuery, setBonoSearchQuery] = useState('')
+  const [isBonoDropdownOpen, setIsBonoDropdownOpen] = useState(false)
   const [formData, setFormData] = useState({
     name: '',
     serviceId: '',
@@ -29,8 +38,56 @@ export default function BonoPackModal({ isOpen, onClose, clientId, onSuccess }: 
         .then(res => setServices(res.data || []))
         .catch(() => {})
       setFormData({ name: '', serviceId: '', totalSessions: '5', price: '', expiryDate: '', notes: '' })
+      setBonoSearchQuery('')
+      setIsBonoDropdownOpen(false)
     }
   }, [isOpen])
+
+  const selectedService = useMemo(
+    () => services.find((service) => service.id === formData.serviceId) || null,
+    [services, formData.serviceId]
+  )
+
+  const filteredServices = useMemo(() => {
+    const term = normalizeText(bonoSearchQuery)
+    const source = [...services].sort((a, b) =>
+      String(a.name || '').localeCompare(String(b.name || ''), 'es', { sensitivity: 'base' })
+    )
+
+    if (!term) return source
+
+    return source.filter((service) =>
+      normalizeText(`${service.name || ''} ${service.serviceCode || ''} ${service.category || ''}`).includes(term)
+    )
+  }, [services, bonoSearchQuery])
+
+  const handleSelectServiceFromSearch = (service: any) => {
+    const serviceName = String(service.name || '').trim()
+    const servicePrice = Number(service.price || 0)
+
+    setBonoSearchQuery(serviceName)
+    setIsBonoDropdownOpen(false)
+    setFormData((prev) => ({
+      ...prev,
+      serviceId: service.id,
+      name: `Bono ${serviceName}`,
+      price: prev.price.trim()
+        ? prev.price
+        : Number.isFinite(servicePrice)
+          ? servicePrice.toFixed(2).replace('.', ',')
+          : ''
+    }))
+  }
+
+  const handleBonoSearchChange = (value: string) => {
+    setBonoSearchQuery(value)
+    setIsBonoDropdownOpen(true)
+    setFormData((prev) => ({
+      ...prev,
+      serviceId: '',
+      name: value
+    }))
+  }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
@@ -74,32 +131,61 @@ export default function BonoPackModal({ isOpen, onClose, clientId, onSuccess }: 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Nuevo Bono" maxWidth="md">
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="label">Nombre del bono <span className="text-red-500">*</span></label>
+        <div
+          className="relative"
+          onFocus={() => setIsBonoDropdownOpen(true)}
+          onBlur={() => {
+            window.setTimeout(() => setIsBonoDropdownOpen(false), 120)
+          }}
+        >
+          <label className="label">Buscar bono <span className="text-red-500">*</span></label>
           <input
             type="text"
-            name="name"
-            value={formData.name}
-            onChange={handleChange}
+            value={bonoSearchQuery}
+            onChange={(event) => handleBonoSearchChange(event.target.value)}
             className="input"
-            placeholder="Ej: 5 sesiones de Mechas"
+            placeholder="Escribe para buscar por nombre, código o familia..."
             required
           />
+
+          {isBonoDropdownOpen && (
+            <div className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800">
+              {filteredServices.length === 0 ? (
+                <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+                  No se encontraron bonos
+                </div>
+              ) : (
+                filteredServices.slice(0, 30).map((service: any) => (
+                  <button
+                    key={service.id}
+                    type="button"
+                    onMouseDown={(event) => {
+                      event.preventDefault()
+                      handleSelectServiceFromSearch(service)
+                    }}
+                    className="w-full border-b border-gray-100 px-3 py-2 text-left last:border-b-0 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700"
+                  >
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">{service.name}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {service.serviceCode ? `Código: ${service.serviceCode} · ` : ''}
+                      {service.category || 'Sin categoría'}
+                    </p>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+
         </div>
 
         <div>
           <label className="label">Servicio asociado</label>
-          <select
-            name="serviceId"
-            value={formData.serviceId}
-            onChange={handleChange}
+          <input
+            type="text"
             className="input"
-          >
-            <option value="">Sin servicio específico</option>
-            {services.map((s: any) => (
-              <option key={s.id} value={s.id}>{s.name} - {s.category}</option>
-            ))}
-          </select>
+            value={selectedService ? `${selectedService.name} - ${selectedService.category || 'Sin categoría'}` : 'Sin servicio específico'}
+            readOnly
+          />
         </div>
 
         <div className="grid grid-cols-2 gap-4">

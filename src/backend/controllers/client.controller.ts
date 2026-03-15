@@ -344,9 +344,24 @@ export const getClientById = async (req: Request, res: Response) => {
           orderBy: { date: 'desc' }
         },
         bonoPacks: {
+          where: { clientId: id },
           include: {
             service: { select: { id: true, name: true } },
-            sessions: { orderBy: { sessionNumber: 'asc' } }
+            sessions: {
+              orderBy: { sessionNumber: 'asc' },
+              include: {
+                appointment: {
+                  select: {
+                    id: true,
+                    date: true,
+                    startTime: true,
+                    endTime: true,
+                    status: true,
+                    cabin: true
+                  }
+                }
+              }
+            }
           },
           orderBy: { purchaseDate: 'desc' }
         },

@@ -22,31 +22,26 @@ import {
   FileText,
   FolderOpen,
   Printer,
-  CheckCircle2,
-  Search,
-  Star,
-  StickyNote,
-  Trash2,
-  Upload
+  StickyNote
 } from 'lucide-react'
 import api from '../utils/api'
 import { formatCurrency, formatDate, formatPhone, formatDateTime, getInitials } from '../utils/format'
 import {
   ClientAssetsResponse,
-  deleteClientAsset,
-  importClientAssets,
   isDesktop,
   getPrintTicketSuccessMessage,
   listClientAssets,
-  openClientFolder,
-  printTicket,
-  setPrimaryClientPhoto
+  normalizeDesktopAssetUrl,
+  printTicket
 } from '../utils/desktop'
 import { buildSaleTicketPayload, paymentMethodLabel } from '../utils/tickets'
 import toast from 'react-hot-toast'
 import Modal from '../components/Modal'
 import ClientForm from '../components/ClientForm'
 import BonoCard from '../components/BonoCard'
+import BonoPackModal from '../components/BonoPackModal'
+import AppointmentForm from '../components/AppointmentForm'
+import ClientAssetExplorer from '../components/ClientAssetExplorer'
 
 const toolbarItems = [
   { icon: CreditCard, label: 'Abonos', tab: 'abonos' as const },
@@ -57,14 +52,6 @@ const toolbarItems = [
   { icon: FileText, label: 'Plantillas' },
   { icon: FolderOpen, label: 'Documentos' }
 ]
-
-const BONO_FAMILY_META = [
-  { key: 'ELECTRICA', label: 'Depilación eléctrica', keywords: ['dep', 'electr'] },
-  { key: 'CORPORAL', label: 'Tratamiento corporal', keywords: ['corporal'] },
-  { key: 'FACIAL', label: 'Tratamientos faciales', keywords: ['facial'] }
-] as const
-
-type BonoFamilyKey = (typeof BONO_FAMILY_META)[number]['key']
 
 type AccountBalanceMovement = {
   id: string
@@ -77,13 +64,6 @@ type AccountBalanceMovement = {
   notes?: string | null
 }
 
-const normalizeText = (value: unknown) =>
-  String(value ?? '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim()
-
 const accountBalanceMovementTypeLabel: Record<AccountBalanceMovement['type'], string> = {
   TOP_UP: 'Recarga',
   CONSUMPTION: 'Consumo',
@@ -92,18 +72,18 @@ const accountBalanceMovementTypeLabel: Record<AccountBalanceMovement['type'], st
 
 const accountBalanceDateInput = () => new Date().toISOString().split('T')[0]
 
-const resolveBonoFamily = (service: any): BonoFamilyKey | null => {
-  const category = normalizeText(service?.category)
-  const name = normalizeText(service?.name)
-  const haystack = `${category} ${name}`
+const getSaleTreatmentLabel = (sale: any) => {
+  const labels = Array.isArray(sale?.items)
+    ? sale.items
+        .map((item: any) => {
+          const rawLabel = item?.service?.name || item?.description || item?.product?.name || ''
+          return String(rawLabel).trim()
+        })
+        .filter(Boolean)
+    : []
 
-  if (haystack.includes('facial')) return 'FACIAL'
-  if (haystack.includes('corporal')) return 'CORPORAL'
-  if ((haystack.includes('dep') && haystack.includes('electr')) || haystack.includes('electrica')) {
-    return 'ELECTRICA'
-  }
-
-  return null
+  const uniqueLabels = Array.from(new Set(labels))
+  return uniqueLabels.length > 0 ? uniqueLabels.join(', ') : 'Sin tratamiento'
 }
 
 export default function ClientDetail() {
@@ -124,24 +104,13 @@ export default function ClientDetail() {
     operationDate: accountBalanceDateInput(),
     notes: ''
   })
-  const [servicesCatalog, setServicesCatalog] = useState<any[]>([])
-  const [servicesLoading, setServicesLoading] = useState(false)
-  const [bonoSearch, setBonoSearch] = useState('')
-  const [selectedBonoFamily, setSelectedBonoFamily] = useState<BonoFamilyKey | null>(null)
-  const [selectedBonoServiceId, setSelectedBonoServiceId] = useState('')
-  const [creatingBono, setCreatingBono] = useState(false)
-  const [bonoDraft, setBonoDraft] = useState({
-    name: '',
-    totalSessions: '12',
-    price: '',
-    expiryDate: '',
-    notes: ''
-  })
+  const [showBonoPackModal, setShowBonoPackModal] = useState(false)
+  const [showBonoAppointmentModal, setShowBonoAppointmentModal] = useState(false)
+  const [selectedBonoForAppointment, setSelectedBonoForAppointment] = useState<any | null>(null)
 
   useEffect(() => {
     if (id) {
       fetchClient()
-      fetchBonoServices()
     }
   }, [id])
 
@@ -165,19 +134,6 @@ export default function ClientDetail() {
       navigate('/clients')
     } finally {
       setLoading(false)
-    }
-  }
-
-  const fetchBonoServices = async () => {
-    try {
-      setServicesLoading(true)
-      const response = await api.get('/services?isActive=true')
-      setServicesCatalog(response.data || [])
-    } catch (error) {
-      console.error('Error loading services for bono sale:', error)
-      toast.error('No se pudo cargar el catálogo de tratamientos')
-    } finally {
-      setServicesLoading(false)
     }
   }
 
@@ -205,55 +161,29 @@ export default function ClientDetail() {
     fetchClient()
   }
 
-  const handleImportAssets = async (kind: 'photos' | 'consents') => {
-    if (!client) return
-    try {
-      setAssetsLoading(true)
-      const assets = await importClientAssets(client.id, `${client.firstName} ${client.lastName}`, kind)
-      setClientAssets(assets)
-      toast.success(kind === 'photos' ? 'Fotos importadas' : 'Consentimientos importados')
-    } catch (error: any) {
-      toast.error(error.message || 'No se pudo importar el archivo')
-    } finally {
-      setAssetsLoading(false)
-    }
+  const handleBonoCreateSuccess = () => {
+    fetchClient()
   }
 
-  const handleDeleteAsset = async (assetId: string) => {
-    if (!client) return
-    try {
-      setAssetsLoading(true)
-      const assets = await deleteClientAsset(client.id, `${client.firstName} ${client.lastName}`, assetId)
-      setClientAssets(assets)
-      toast.success('Archivo eliminado')
-    } catch (error: any) {
-      toast.error(error.message || 'No se pudo eliminar el archivo')
-    } finally {
-      setAssetsLoading(false)
+  const handleOpenBonoAppointmentModal = (bonoPackId: string) => {
+    const selectedBono = clientBonoPacks.find((bonoPack: any) => bonoPack.id === bonoPackId) || null
+    if (!selectedBono) {
+      toast.error('No se encontro el bono seleccionado')
+      return
     }
+
+    setSelectedBonoForAppointment(selectedBono)
+    setShowBonoAppointmentModal(true)
   }
 
-  const handleSetPrimaryPhoto = async (assetId: string) => {
-    if (!client) return
-    try {
-      setAssetsLoading(true)
-      const assets = await setPrimaryClientPhoto(client.id, `${client.firstName} ${client.lastName}`, assetId)
-      setClientAssets(assets)
-      toast.success('Foto principal actualizada')
-    } catch (error: any) {
-      toast.error(error.message || 'No se pudo actualizar la foto principal')
-    } finally {
-      setAssetsLoading(false)
-    }
+  const handleCloseBonoAppointmentModal = () => {
+    setShowBonoAppointmentModal(false)
+    setSelectedBonoForAppointment(null)
   }
 
-  const handleOpenClientFolder = async () => {
-    if (!client) return
-    try {
-      await openClientFolder(client.id, `${client.firstName} ${client.lastName}`)
-    } catch (error: any) {
-      toast.error(error.message || 'No se pudo abrir la carpeta local')
-    }
+  const handleBonoAppointmentSuccess = async () => {
+    handleCloseBonoAppointmentModal()
+    await fetchClient()
   }
 
   const handlePrintSale = async (saleId: string) => {
@@ -266,107 +196,10 @@ export default function ClientDetail() {
     }
   }
 
-  const familyServiceCounts = useMemo(
-    () =>
-      BONO_FAMILY_META.map((family) => ({
-        ...family,
-        total: servicesCatalog.filter((service) => resolveBonoFamily(service) === family.key).length
-      })),
-    [servicesCatalog]
-  )
-
-  const filteredBonoServices = useMemo(() => {
-    const term = normalizeText(bonoSearch)
-
-    return servicesCatalog
-      .filter((service) => {
-        const family = resolveBonoFamily(service)
-        if (!family) return false
-        if (selectedBonoFamily && family !== selectedBonoFamily) return false
-        if (!term) return true
-
-        const haystack = normalizeText(
-          `${service.serviceCode || ''} ${service.name || ''} ${service.category || ''} ${service.description || ''}`
-        )
-        return haystack.includes(term)
-      })
-      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es', { sensitivity: 'base' }))
-  }, [servicesCatalog, bonoSearch, selectedBonoFamily])
-
-  const selectedBonoService = useMemo(
-    () => servicesCatalog.find((service) => service.id === selectedBonoServiceId) || null,
-    [servicesCatalog, selectedBonoServiceId]
-  )
-
-  const formatTaxRate = (value: unknown): string => {
-    if (value === null || value === undefined || String(value).trim() === '') return '-'
-    const parsed = Number(value)
-    if (!Number.isFinite(parsed)) return '-'
-    const percent = parsed <= 1 ? parsed * 100 : parsed
-    return `${percent.toLocaleString('es-ES', { maximumFractionDigits: 2 })}%`
-  }
-
-  const handleSelectBonoService = (service: any) => {
-    setSelectedBonoServiceId(service.id)
-    setBonoDraft((prev) => {
-      const normalizedPrice = Number(service.price || 0)
-      const fallbackPrice = Number.isFinite(normalizedPrice)
-        ? normalizedPrice.toFixed(2).replace('.', ',')
-        : ''
-      return {
-        ...prev,
-        name: prev.name.trim() ? prev.name : `Bono ${service.name}`,
-        price: prev.price.trim() ? prev.price : fallbackPrice
-      }
-    })
-  }
-
-  const handleCreateBonoSale = async () => {
-    if (!client) return
-    if (!selectedBonoService) {
-      toast.error('Selecciona un tratamiento para crear el bono')
-      return
-    }
-
-    const totalSessions = Number.parseInt(bonoDraft.totalSessions, 10)
-    if (!Number.isFinite(totalSessions) || totalSessions < 1) {
-      toast.error('Indica un número de sesiones válido')
-      return
-    }
-
-    const parsedPrice = bonoDraft.price
-      ? Number.parseFloat(bonoDraft.price.replace(',', '.'))
-      : Number.parseFloat(String(selectedBonoService.price || '0'))
-
-    setCreatingBono(true)
-    try {
-      await api.post('/bonos', {
-        clientId: client.id,
-        serviceId: selectedBonoService.id,
-        name: bonoDraft.name.trim() || `Bono ${selectedBonoService.name}`,
-        totalSessions,
-        price: Number.isFinite(parsedPrice) ? parsedPrice : 0,
-        expiryDate: bonoDraft.expiryDate || null,
-        notes: bonoDraft.notes.trim() || null
-      })
-
-      toast.success('Bono creado y asignado al cliente')
-      setBonoDraft({
-        name: '',
-        totalSessions: '12',
-        price: '',
-        expiryDate: '',
-        notes: ''
-      })
-      setSelectedBonoServiceId('')
-      await fetchClient()
-    } catch (error: any) {
-      console.error('Error creating bono from client detail:', error)
-      toast.error(error.response?.data?.error || 'No se pudo crear el bono')
-    } finally {
-      setCreatingBono(false)
-    }
-  }
+  const profileImageUrl = useMemo(() => {
+    if (clientAssets?.primaryPhotoUrl) return clientAssets.primaryPhotoUrl
+    return normalizeDesktopAssetUrl(client?.photoUrl) || null
+  }, [clientAssets, client?.photoUrl])
 
   const handleConsumeBonoSession = async (bonoPackId: string) => {
     try {
@@ -469,6 +302,11 @@ export default function ClientDetail() {
       .slice(0, 3)
   }, [client?.appointments])
 
+  const clientBonoPacks = useMemo(() => {
+    if (!Array.isArray(client?.bonoPacks)) return []
+    return client.bonoPacks.filter((bonoPack: any) => !bonoPack?.clientId || bonoPack.clientId === client?.id)
+  }, [client?.bonoPacks, client?.id])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -490,7 +328,7 @@ export default function ClientDetail() {
     { id: 'appointments', label: 'Citas', icon: CalendarCheck, count: client.appointments?.length || 0 },
     { id: 'sales', label: 'Ventas', icon: ShoppingBag, count: client.sales?.length || 0 },
     { id: 'abonos', label: 'Abonos', icon: CreditCard, count: accountBalanceHistory.length },
-    { id: 'bonos', label: 'Bonos', icon: Ticket, count: client.bonoPacks?.length || 0 },
+    { id: 'bonos', label: 'Bonos', icon: Ticket, count: clientBonoPacks.length },
     { id: 'history', label: 'Historial', icon: History, count: client.clientHistory?.length || 0 }
   ]
 
@@ -532,9 +370,9 @@ export default function ClientDetail() {
         <div className="flex flex-col sm:flex-row gap-6">
           {/* Avatar */}
           <div className="flex-shrink-0 flex justify-center sm:justify-start">
-            {clientAssets?.primaryPhotoUrl || client.photoUrl ? (
+            {profileImageUrl ? (
               <img
-                src={clientAssets?.primaryPhotoUrl || client.photoUrl}
+                src={profileImageUrl}
                 alt={`${client.firstName} ${client.lastName}`}
                 className="w-24 h-24 rounded-full object-cover ring-4 ring-primary-100 dark:ring-primary-900"
               />
@@ -708,7 +546,7 @@ export default function ClientDetail() {
       {/* Tab Content */}
       <div>
         {activeTab === 'overview' && (
-          <div className="grid gap-6 lg:grid-cols-[1.1fr_1fr]">
+          <div className="grid gap-6 xl:grid-cols-[minmax(280px,0.78fr)_minmax(0,1.22fr)]">
             <div className="card">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                 Resumen General
@@ -757,99 +595,15 @@ export default function ClientDetail() {
               </div>
             </div>
 
-            <div className="card space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Carpeta local</h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                    Fotos del cliente y consentimientos guardados en el equipo.
-                  </p>
-                </div>
-                {isDesktop() && (
-                  <button onClick={handleOpenClientFolder} className="btn btn-secondary btn-sm">
-                    <FolderOpen className="w-4 h-4 mr-2" />
-                    Abrir carpeta
-                  </button>
-                )}
-              </div>
-
-              {!isDesktop() ? (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-300">
-                  Disponible solo en la app de escritorio Electron.
-                </div>
-              ) : (
-                <>
-                  <div className="flex flex-wrap gap-3">
-                    <button onClick={() => handleImportAssets('photos')} className="btn btn-primary btn-sm" disabled={assetsLoading}>
-                      <Upload className="w-4 h-4 mr-2" />
-                      Añadir fotos
-                    </button>
-                    <button onClick={() => handleImportAssets('consents')} className="btn btn-secondary btn-sm" disabled={assetsLoading}>
-                      <Upload className="w-4 h-4 mr-2" />
-                      Añadir consentimiento
-                    </button>
-                  </div>
-
-                  <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-white mb-2">Fotos</p>
-                    {assetsLoading ? (
-                      <p className="text-sm text-gray-500 dark:text-gray-400">Cargando archivos...</p>
-                    ) : clientAssets?.photos.length ? (
-                      <div className="grid grid-cols-2 gap-3">
-                        {clientAssets.photos.map((asset) => (
-                          <div key={asset.id} className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-                            <img src={asset.previewUrl} alt={asset.originalName} className="h-28 w-full object-cover" />
-                            <div className="p-3 space-y-2">
-                              <p className="text-xs text-gray-600 dark:text-gray-400 truncate">{asset.originalName}</p>
-                              <div className="flex flex-wrap gap-2">
-                                <button onClick={() => handleSetPrimaryPhoto(asset.id)} className={`btn btn-sm ${asset.isPrimaryPhoto ? 'btn-primary' : 'btn-secondary'}`}>
-                                  <Star className="w-3.5 h-3.5 mr-1" />
-                                  Principal
-                                </button>
-                                <button onClick={() => handleDeleteAsset(asset.id)} className="btn btn-sm btn-secondary text-red-600">
-                                  <Trash2 className="w-3.5 h-3.5 mr-1" />
-                                  Borrar
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-gray-500 dark:text-gray-400">No hay fotos locales.</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <div className="flex items-center gap-2 mb-2">
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">Consentimientos</p>
-                      {(clientAssets?.consents.length || 0) > 0 && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-300">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          OK
-                        </span>
-                      )}
-                    </div>
-                    {clientAssets?.consents.length ? (
-                      <div className="space-y-2">
-                        {clientAssets.consents.map((asset) => (
-                          <div key={asset.id} className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2">
-                            <a href={asset.previewUrl} target="_blank" rel="noreferrer" className="text-sm text-primary-600 hover:underline">
-                              {asset.originalName}
-                            </a>
-                            <button onClick={() => handleDeleteAsset(asset.id)} className="btn btn-sm btn-secondary text-red-600">
-                              <Trash2 className="w-3.5 h-3.5 mr-1" />
-                              Borrar
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-gray-500 dark:text-gray-400">No hay consentimientos locales.</p>
-                    )}
-                  </div>
-                </>
-              )}
+            <div className="card">
+              <ClientAssetExplorer
+                clientId={client.id}
+                clientName={`${client.firstName} ${client.lastName}`}
+                clientAssets={clientAssets}
+                assetsLoading={assetsLoading}
+                onAssetsChange={setClientAssets}
+                onAssetsLoadingChange={setAssetsLoading}
+              />
             </div>
           </div>
         )}
@@ -975,6 +729,9 @@ export default function ClientDetail() {
                       <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
                         Items
                       </th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                        Tratamiento
+                      </th>
                       <th className="text-right py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
                         Total
                       </th>
@@ -1000,6 +757,9 @@ export default function ClientDetail() {
                         </td>
                         <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400">
                           {sale.items.length} items
+                        </td>
+                        <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400">
+                          <span className="block max-w-xs line-clamp-2">{getSaleTreatmentLabel(sale)}</span>
                         </td>
                         <td className="py-3 px-4 text-sm text-right font-medium text-gray-900 dark:text-white">
                           {formatCurrency(Number(sale.total))}
@@ -1184,182 +944,30 @@ export default function ClientDetail() {
 
         {activeTab === 'bonos' && (
           <div className="space-y-6">
-            <div className="card space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Nueva venta de bono</h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                    Busca tratamientos, filtra por familia y crea el bono para este cliente.
-                  </p>
-                </div>
-                <span className="badge badge-secondary">{filteredBonoServices.length} resultados</span>
-              </div>
-
-              <div className="relative">
-                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={bonoSearch}
-                  onChange={(event) => setBonoSearch(event.target.value)}
-                  className="input pl-9"
-                  placeholder="Buscar bono por código, familia o tratamiento..."
-                />
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-3">
-                {familyServiceCounts.map((family) => (
-                  <button
-                    key={family.key}
-                    type="button"
-                    onClick={() => setSelectedBonoFamily((current) => (current === family.key ? null : family.key))}
-                    className={`text-left rounded-lg border p-3 transition-colors ${
-                      selectedBonoFamily === family.key
-                        ? 'border-primary-600 bg-primary-50 dark:bg-primary-900/20'
-                        : 'border-gray-200 dark:border-gray-700 hover:border-primary-400'
-                    }`}
-                  >
-                    <p className="text-sm font-semibold text-gray-900 dark:text-white">{family.label}</p>
-                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">{family.total} tratamientos</p>
-                  </button>
-                ))}
-              </div>
-
-              {servicesLoading ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">Cargando tratamientos...</p>
-              ) : filteredBonoServices.length === 0 ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  No hay tratamientos para ese criterio en Depilación eléctrica, Corporal o Facial.
-                </p>
-              ) : (
-                <div className="grid gap-3 lg:grid-cols-2">
-                  {filteredBonoServices.map((service) => {
-                    const familyKey = resolveBonoFamily(service)
-                    const familyLabel =
-                      BONO_FAMILY_META.find((family) => family.key === familyKey)?.label || service.category || 'Sin familia'
-                    return (
-                      <button
-                        key={service.id}
-                        type="button"
-                        onClick={() => handleSelectBonoService(service)}
-                        className={`rounded-lg border p-4 text-left transition-colors ${
-                          selectedBonoServiceId === service.id
-                            ? 'border-primary-600 bg-primary-50 dark:bg-primary-900/20'
-                            : 'border-gray-200 dark:border-gray-700 hover:border-primary-500'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-semibold text-gray-900 dark:text-white">{service.name}</p>
-                            <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                              Código: {service.serviceCode || '-'} · {familyLabel}
-                            </p>
-                            <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                              Duración: {service.duration || 0} min · IVA: {formatTaxRate(service.taxRate)}
-                            </p>
-                          </div>
-                          <span className="text-sm font-bold text-primary-600">
-                            {formatCurrency(Number(service.price || 0))}
-                          </span>
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-
-              {selectedBonoService && (
-                <div className="border border-primary-200 dark:border-primary-800 rounded-lg p-4 space-y-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h4 className="text-sm font-semibold text-gray-900 dark:text-white">
-                        Bono seleccionado: {selectedBonoService.name}
-                      </h4>
-                      <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                        Define sesiones, precio y caducidad para registrar la venta.
-                      </p>
-                    </div>
-                    <span className="badge badge-primary">Cliente #{client.externalCode || client.id.slice(0, 6)}</span>
-                  </div>
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div>
-                      <label className="label">Nombre del bono</label>
-                      <input
-                        type="text"
-                        value={bonoDraft.name}
-                        onChange={(event) => setBonoDraft((prev) => ({ ...prev, name: event.target.value }))}
-                        className="input"
-                        placeholder={`Bono ${selectedBonoService.name}`}
-                      />
-                    </div>
-                    <div>
-                      <label className="label">Sesiones</label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={bonoDraft.totalSessions}
-                        onChange={(event) => setBonoDraft((prev) => ({ ...prev, totalSessions: event.target.value }))}
-                        className="input"
-                      />
-                    </div>
-                    <div>
-                      <label className="label">Precio total</label>
-                      <input
-                        type="text"
-                        value={bonoDraft.price}
-                        onChange={(event) => setBonoDraft((prev) => ({ ...prev, price: event.target.value }))}
-                        className="input"
-                        placeholder="0,00"
-                      />
-                    </div>
-                    <div>
-                      <label className="label">Caducidad</label>
-                      <input
-                        type="date"
-                        value={bonoDraft.expiryDate}
-                        onChange={(event) => setBonoDraft((prev) => ({ ...prev, expiryDate: event.target.value }))}
-                        className="input"
-                      />
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="label">Notas internas del bono</label>
-                      <textarea
-                        value={bonoDraft.notes}
-                        onChange={(event) => setBonoDraft((prev) => ({ ...prev, notes: event.target.value }))}
-                        className="input resize-none"
-                        rows={2}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end">
-                    <button
-                      type="button"
-                      onClick={handleCreateBonoSale}
-                      className="btn btn-primary"
-                      disabled={creatingBono}
-                    >
-                      {creatingBono ? 'Guardando bono...' : 'Crear venta de bono'}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
             <div className="card">
               <div className="flex items-center justify-between gap-3 mb-4">
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Bonos del cliente</h3>
-                <span className="badge badge-secondary">{client.bonoPacks?.length || 0}</span>
+                <div className="flex items-center gap-2">
+                  <span className="badge badge-secondary">{clientBonoPacks.length}</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowBonoPackModal(true)}
+                    className="btn btn-primary btn-sm"
+                  >
+                    Nuevo bono
+                  </button>
+                </div>
               </div>
 
-              {client.bonoPacks && client.bonoPacks.length > 0 ? (
+              {clientBonoPacks.length > 0 ? (
                 <div className="space-y-4">
-                  {client.bonoPacks.map((bonoPack: any) => (
+                  {clientBonoPacks.map((bonoPack: any) => (
                     <BonoCard
                       key={bonoPack.id}
                       bonoPack={bonoPack}
                       onConsume={handleConsumeBonoSession}
                       onDelete={handleDeleteBono}
+                      onScheduleAppointment={handleOpenBonoAppointmentModal}
                     />
                   ))}
                 </div>
@@ -1404,7 +1012,7 @@ export default function ClientDetail() {
                     )}
                     {history.photoUrl && (
                       <img
-                        src={history.photoUrl}
+                        src={normalizeDesktopAssetUrl(history.photoUrl) || history.photoUrl}
                         alt="Servicio"
                         className="mt-3 rounded-lg w-full max-w-xs"
                       />
@@ -1420,6 +1028,35 @@ export default function ClientDetail() {
           </div>
         )}
       </div>
+
+      <BonoPackModal
+        isOpen={showBonoPackModal}
+        onClose={() => setShowBonoPackModal(false)}
+        clientId={client.id}
+        onSuccess={handleBonoCreateSuccess}
+      />
+
+      <Modal
+        isOpen={showBonoAppointmentModal}
+        onClose={handleCloseBonoAppointmentModal}
+        title={selectedBonoForAppointment ? `Nueva cita desde bono: ${selectedBonoForAppointment.name}` : 'Nueva cita desde bono'}
+        maxWidth="xl"
+      >
+        {selectedBonoForAppointment && (
+          <AppointmentForm
+            onSuccess={handleBonoAppointmentSuccess}
+            onCancel={handleCloseBonoAppointmentModal}
+            fromBono={{
+              bonoPackId: selectedBonoForAppointment.id,
+              clientId: client.id,
+              serviceId: selectedBonoForAppointment.service?.id || null,
+              lockClient: true,
+              lockService: Boolean(selectedBonoForAppointment.service?.id)
+            }}
+            initialCabin="LUCY"
+          />
+        )}
+      </Modal>
 
       {/* Edit Modal */}
       <Modal

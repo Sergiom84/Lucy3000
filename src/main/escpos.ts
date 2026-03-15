@@ -1,5 +1,10 @@
 import net from 'node:net'
 import type { TicketPrintPayload } from '../shared/ticketPrinter'
+import {
+  TICKET_BUSINESS_NAME,
+  TICKET_DEFAULT_FOOTER,
+  TICKET_FISCAL_HEADER_LINES
+} from '../shared/ticketIdentity'
 
 const ESC = 0x1b
 const GS = 0x1d
@@ -76,6 +81,11 @@ const separator = '-'.repeat(RECEIPT_WIDTH)
 
 const command = (...bytes: number[]) => Buffer.from(bytes)
 const text = (value = '') => Buffer.from(`${value}\n`, 'ascii')
+const toTicketLines = (value: string) =>
+  value
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
 
 export const buildEscPosTicketBuffer = (payload: TicketPrintPayload) => {
   const parts: Buffer[] = [command(ESC, 0x40)]
@@ -85,10 +95,16 @@ export const buildEscPosTicketBuffer = (payload: TicketPrintPayload) => {
 
   parts.push(command(ESC, 0x61, 0x01))
   parts.push(command(ESC, 0x45, 0x01))
-  for (const line of wrapText(payload.title || 'Lucy3000', RECEIPT_WIDTH)) {
+  for (const line of wrapText(payload.title || TICKET_BUSINESS_NAME, RECEIPT_WIDTH)) {
     pushLine(centerLine(line))
   }
   parts.push(command(ESC, 0x45, 0x00))
+
+  for (const fiscalLine of TICKET_FISCAL_HEADER_LINES) {
+    for (const line of wrapText(fiscalLine, RECEIPT_WIDTH)) {
+      pushLine(centerLine(line))
+    }
+  }
 
   for (const line of wrapText(payload.subtitle || 'Ticket', RECEIPT_WIDTH)) {
     pushLine(centerLine(line))
@@ -119,12 +135,8 @@ export const buildEscPosTicketBuffer = (payload: TicketPrintPayload) => {
       pushLine(line)
     }
 
-    pushLine(
-      padLine(
-        `${Number(item.quantity).toFixed(2)} x ${Number(item.unitPrice).toFixed(2)}`,
-        Number(item.total).toFixed(2)
-      )
-    )
+    pushLine(padLine(`Precio: ${Number(item.unitPrice).toFixed(2)}`, `Ud: ${Number(item.quantity).toFixed(2)}`))
+    pushLine(padLine('Importe', Number(item.total).toFixed(2)))
   }
 
   if ((payload.totals || []).length > 0) {
@@ -137,8 +149,10 @@ export const buildEscPosTicketBuffer = (payload: TicketPrintPayload) => {
 
   pushLine()
   parts.push(command(ESC, 0x61, 0x01))
-  for (const line of wrapText(payload.footer || 'Gracias por tu visita', RECEIPT_WIDTH)) {
-    pushLine(centerLine(line))
+  for (const footerLine of toTicketLines(payload.footer || TICKET_DEFAULT_FOOTER)) {
+    for (const line of wrapText(footerLine, RECEIPT_WIDTH)) {
+      pushLine(centerLine(line))
+    }
   }
 
   pushLine()

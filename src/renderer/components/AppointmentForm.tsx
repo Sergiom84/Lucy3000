@@ -3,6 +3,15 @@ import { Save, X } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '../stores/authStore'
+import { formatCurrency } from '../utils/format'
+
+interface BonoAppointmentContext {
+  bonoPackId: string
+  clientId: string
+  serviceId?: string | null
+  lockClient?: boolean
+  lockService?: boolean
+}
 
 interface AppointmentFormProps {
   appointment?: any
@@ -10,6 +19,22 @@ interface AppointmentFormProps {
   onCancel: () => void
   preselectedDate?: Date
   initialCabin?: 'LUCY' | 'TAMARA' | 'CABINA_1' | 'CABINA_2'
+  fromBono?: BonoAppointmentContext | null
+}
+
+type SearchableOption = {
+  id: string
+  label: string
+  detail?: string
+  searchText: string
+}
+
+type ClientBonoSummary = {
+  id: string
+  name: string
+  totalSessions: number
+  status: 'ACTIVE' | 'DEPLETED' | 'EXPIRED'
+  sessions: Array<{ status: 'AVAILABLE' | 'CONSUMED' }>
 }
 
 const statusOptions = [
@@ -18,15 +43,8 @@ const statusOptions = [
   { value: 'IN_PROGRESS', label: 'En Progreso', color: 'warning' },
   { value: 'COMPLETED', label: 'Completada', color: 'success' },
   { value: 'CANCELLED', label: 'Cancelada', color: 'danger' },
-  { value: 'NO_SHOW', label: 'No Asistió', color: 'danger' }
+  { value: 'NO_SHOW', label: 'No Asistio', color: 'danger' }
 ]
-
-type SearchableOption = {
-  id: string
-  label: string
-  detail?: string
-  searchText: string
-}
 
 const normalizeText = (value: unknown) =>
   String(value ?? '')
@@ -40,13 +58,15 @@ function SearchableSelect({
   options,
   onSelect,
   placeholder,
-  emptyText
+  emptyText,
+  disabled = false
 }: {
   value: string
   options: SearchableOption[]
   onSelect: (id: string) => void
   placeholder: string
   emptyText: string
+  disabled?: boolean
 }) {
   const [query, setQuery] = useState('')
   const [isOpen, setIsOpen] = useState(false)
@@ -69,6 +89,15 @@ function SearchableSelect({
     }
   }, [value, selectedOption, isOpen])
 
+  useEffect(() => {
+    if (disabled) {
+      setIsOpen(false)
+      if (selectedOption) {
+        setQuery(selectedOption.label)
+      }
+    }
+  }, [disabled, selectedOption])
+
   const filteredOptions = useMemo(() => {
     const term = normalizeText(query)
     if (!term) return options
@@ -84,7 +113,9 @@ function SearchableSelect({
   return (
     <div
       className="relative"
-      onFocus={() => setIsOpen(true)}
+      onFocus={() => {
+        if (!disabled) setIsOpen(true)
+      }}
       onBlur={() => {
         window.setTimeout(() => setIsOpen(false), 120)
       }}
@@ -100,11 +131,12 @@ function SearchableSelect({
             onSelect('')
           }
         }}
-        className="input"
+        className="input disabled:cursor-not-allowed disabled:opacity-70"
         placeholder={placeholder}
+        disabled={disabled}
       />
 
-      {isOpen && (
+      {!disabled && isOpen && (
         <div className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800">
           {filteredOptions.length === 0 ? (
             <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
@@ -145,27 +177,38 @@ const cabinOptions = [
   { value: 'CABINA_2', label: 'Cabina 2' }
 ]
 
+const getRemainingSessions = (bonoPack: ClientBonoSummary) => {
+  const consumed = bonoPack.sessions.filter((session) => session.status === 'CONSUMED').length
+  return Math.max(Number(bonoPack.totalSessions || 0) - consumed, 0)
+}
+
 export default function AppointmentForm({
   appointment,
   onSuccess,
   onCancel,
   preselectedDate,
-  initialCabin = 'LUCY'
+  initialCabin = 'LUCY',
+  fromBono = null
 }: AppointmentFormProps) {
   const { user } = useAuthStore()
   const [loading, setLoading] = useState(false)
   const [clients, setClients] = useState<any[]>([])
   const [services, setServices] = useState<any[]>([])
   const [selectedService, setSelectedService] = useState<any>(null)
+  const [clientBonos, setClientBonos] = useState<ClientBonoSummary[]>([])
+
+  const isCreatingFromBono = !appointment && Boolean(fromBono?.bonoPackId)
+  const lockClient = isCreatingFromBono && Boolean(fromBono?.lockClient)
+  const lockService = isCreatingFromBono && Boolean(fromBono?.lockService)
 
   const [formData, setFormData] = useState({
-    clientId: '',
-    serviceId: '',
-      userId: user?.id || '',
-      cabin: 'LUCY',
-      date: '',
-      startTime: '',
-      endTime: '',
+    clientId: fromBono?.clientId || '',
+    serviceId: fromBono?.serviceId || '',
+    userId: user?.id || '',
+    cabin: initialCabin,
+    date: '',
+    startTime: '',
+    endTime: '',
     status: 'SCHEDULED',
     notes: '',
     reminder: true
@@ -194,24 +237,59 @@ export default function AppointmentForm({
       if (appointment.service) {
         setSelectedService(appointment.service)
       }
-    } else if (preselectedDate) {
-      setFormData(prev => ({
-        ...prev,
-        cabin: initialCabin,
-        date: preselectedDate.toISOString().split('T')[0]
-      }))
-    } else {
-      setFormData((prev) => ({
-        ...prev,
-        cabin: initialCabin
-      }))
+      return
     }
-  }, [appointment, preselectedDate, user, initialCabin])
+
+    setFormData((prev) => ({
+      ...prev,
+      clientId: fromBono?.clientId || prev.clientId,
+      serviceId: fromBono?.serviceId || prev.serviceId,
+      userId: user?.id || prev.userId || '',
+      cabin: initialCabin,
+      date: preselectedDate ? preselectedDate.toISOString().split('T')[0] : prev.date
+    }))
+  }, [appointment, preselectedDate, user, initialCabin, fromBono])
+
+  useEffect(() => {
+    if (!formData.clientId) {
+      setClientBonos([])
+      return
+    }
+
+    let cancelled = false
+    const fetchBonos = async () => {
+      try {
+        const response = await api.get(`/bonos/client/${formData.clientId}`)
+        if (!cancelled) {
+          setClientBonos(Array.isArray(response.data) ? response.data : [])
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setClientBonos([])
+        }
+      }
+    }
+
+    void fetchBonos()
+
+    return () => {
+      cancelled = true
+    }
+  }, [formData.clientId])
+
+  useEffect(() => {
+    if (!formData.serviceId) {
+      setSelectedService(null)
+      return
+    }
+
+    const matchedService = services.find((service) => service.id === formData.serviceId) || null
+    setSelectedService(matchedService)
+  }, [formData.serviceId, services])
 
   const fetchClients = async () => {
     try {
       const response = await api.get('/clients?isActive=true')
-      // Ordenar alfabéticamente por nombre
       const sortedClients = response.data.sort((a: any, b: any) => {
         const fullNameA = `${a.firstName} ${a.lastName}`
         const fullNameB = `${b.firstName} ${b.lastName}`
@@ -226,7 +304,6 @@ export default function AppointmentForm({
   const fetchServices = async () => {
     try {
       const response = await api.get('/services?isActive=true')
-      // Ordenar alfabéticamente por nombre
       const sortedServices = response.data.sort((a: any, b: any) =>
         a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })
       )
@@ -236,10 +313,28 @@ export default function AppointmentForm({
     }
   }
 
+  const selectedClient = useMemo(
+    () => clients.find((client) => client.id === formData.clientId) || null,
+    [clients, formData.clientId]
+  )
+
+  const accountBalance = Number(selectedClient?.accountBalance || 0)
+
+  const activeBonos = useMemo(() => {
+    return clientBonos
+      .map((bonoPack) => ({
+        ...bonoPack,
+        remainingSessions: getRemainingSessions(bonoPack)
+      }))
+      .filter((bonoPack) => bonoPack.status === 'ACTIVE' && bonoPack.remainingSessions > 0)
+  }, [clientBonos])
+
+  const showClientFinancialSummary = Boolean(formData.clientId) && (accountBalance > 0 || activeBonos.length > 0)
+
   const clientOptions = useMemo<SearchableOption[]>(() => {
     return clients.map((client) => {
       const fullName = `${client.firstName || ''} ${client.lastName || ''}`.trim()
-      const phone = String(client.phone || 'Sin teléfono')
+      const phone = String(client.phone || 'Sin telefono')
       const email = client.email ? String(client.email) : ''
       const detail = email ? `${phone} · ${email}` : phone
 
@@ -270,12 +365,13 @@ export default function AppointmentForm({
   const calculateEndTime = (startTime: string, duration: number) => {
     const [hours, minutes] = startTime.split(':')
     const startDate = new Date()
-    startDate.setHours(parseInt(hours), parseInt(minutes))
+    startDate.setHours(parseInt(hours, 10), parseInt(minutes, 10))
     startDate.setMinutes(startDate.getMinutes() + duration)
     return `${startDate.getHours().toString().padStart(2, '0')}:${startDate.getMinutes().toString().padStart(2, '0')}`
   }
 
   const handleClientSelect = (clientId: string) => {
+    if (lockClient) return
     setFormData((prev) => ({
       ...prev,
       clientId
@@ -283,6 +379,7 @@ export default function AppointmentForm({
   }
 
   const handleServiceSelect = (serviceId: string) => {
+    if (lockService) return
     const service = services.find((item) => item.id === serviceId) || null
     setSelectedService(service)
 
@@ -295,15 +392,14 @@ export default function AppointmentForm({
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
       [name]: type === 'checkbox' ? (e.target as HTMLInputElement).checked : value
     }))
 
-    // Si cambia startTime y hay un servicio seleccionado, recalcular endTime
     if (name === 'startTime' && selectedService) {
       const endTime = calculateEndTime(value, selectedService.duration)
-      setFormData(prev => ({ ...prev, endTime }))
+      setFormData((prev) => ({ ...prev, endTime }))
     }
   }
 
@@ -312,7 +408,6 @@ export default function AppointmentForm({
     setLoading(true)
 
     try {
-      // Validaciones
       if (!formData.clientId) {
         toast.error('Debe seleccionar un cliente')
         setLoading(false)
@@ -337,8 +432,7 @@ export default function AppointmentForm({
         return
       }
 
-      // Preparar datos
-      const dataToSend = {
+      const dataToSend: Record<string, unknown> = {
         clientId: formData.clientId,
         serviceId: formData.serviceId,
         userId: formData.userId || user?.id,
@@ -354,6 +448,20 @@ export default function AppointmentForm({
       if (appointment) {
         await api.put(`/appointments/${appointment.id}`, dataToSend)
         toast.success('Cita actualizada exitosamente')
+      } else if (isCreatingFromBono && fromBono?.bonoPackId) {
+        const bonoPayload = {
+          userId: dataToSend.userId,
+          serviceId: dataToSend.serviceId,
+          cabin: dataToSend.cabin,
+          date: dataToSend.date,
+          startTime: dataToSend.startTime,
+          endTime: dataToSend.endTime,
+          status: dataToSend.status,
+          notes: dataToSend.notes,
+          reminder: dataToSend.reminder
+        }
+        await api.post(`/bonos/${fromBono.bonoPackId}/appointments`, bonoPayload)
+        toast.success('Cita creada y sesion reservada')
       } else {
         await api.post('/appointments', dataToSend)
         toast.success('Cita creada exitosamente')
@@ -370,7 +478,6 @@ export default function AppointmentForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      {/* Cliente y Servicio */}
       <div>
         <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-4">
           Cliente y Servicio
@@ -384,9 +491,15 @@ export default function AppointmentForm({
               value={formData.clientId}
               options={clientOptions}
               onSelect={handleClientSelect}
-              placeholder="Buscar cliente por nombre, teléfono o email..."
+              placeholder="Buscar cliente por nombre, telefono o email..."
               emptyText="No se encontraron clientes"
+              disabled={lockClient}
             />
+            {lockClient && (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Cliente fijado por el bono seleccionado.
+              </p>
+            )}
           </div>
 
           <div>
@@ -397,14 +510,56 @@ export default function AppointmentForm({
               value={formData.serviceId}
               options={serviceOptions}
               onSelect={handleServiceSelect}
-              placeholder="Buscar servicio por nombre o categoría..."
+              placeholder="Buscar servicio por nombre o categoria..."
               emptyText="No se encontraron servicios"
+              disabled={lockService}
             />
+            {lockService && (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Servicio fijado por el bono seleccionado.
+              </p>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Fecha y Hora */}
+      {showClientFinancialSummary && (
+        <div className="rounded-lg border border-primary-200 bg-primary-50/70 p-4 dark:border-primary-900/40 dark:bg-primary-900/20">
+          <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Resumen del cliente</h4>
+          <div className="space-y-3">
+            {accountBalance > 0 && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/30">
+                <p className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300">Abono disponible</p>
+                <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+                  {formatCurrency(accountBalance)}
+                </p>
+              </div>
+            )}
+
+            {activeBonos.length > 0 && (
+              <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 dark:border-blue-900/50 dark:bg-blue-950/30">
+                <p className="text-xs uppercase tracking-wide text-blue-700 dark:text-blue-300 mb-2">
+                  Bonos activos
+                </p>
+                <div className="space-y-1.5">
+                  {activeBonos.map((bonoPack) => (
+                    <div
+                      key={bonoPack.id}
+                      className="flex items-center justify-between text-sm text-blue-900 dark:text-blue-100"
+                    >
+                      <span className="truncate pr-3">{bonoPack.name}</span>
+                      <span className="font-semibold whitespace-nowrap">
+                        {bonoPack.remainingSessions} sesiones
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div>
         <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-4">
           Fecha y Horario
@@ -472,7 +627,6 @@ export default function AppointmentForm({
         </div>
       </div>
 
-      {/* Estado */}
       <div>
         <label className="label">Estado</label>
         <select
@@ -489,7 +643,6 @@ export default function AppointmentForm({
         </select>
       </div>
 
-      {/* Notas */}
       <div>
         <label className="label">Notas internas</label>
         <textarea
@@ -502,7 +655,6 @@ export default function AppointmentForm({
         />
       </div>
 
-      {/* Recordatorio */}
       <div className="flex items-center">
         <input
           type="checkbox"
@@ -517,7 +669,6 @@ export default function AppointmentForm({
         </label>
       </div>
 
-      {/* Botones */}
       <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200 dark:border-gray-700">
         <button
           type="button"

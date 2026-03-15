@@ -1,11 +1,27 @@
 import type { TicketPrintPayload } from './ticketPrinter'
+import {
+  TICKET_BUSINESS_NAME,
+  TICKET_DEFAULT_FOOTER,
+  TICKET_FISCAL_HEADER_LINES
+} from './ticketIdentity'
+
+const toTextLines = (value: string) =>
+  value
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
 
 export const buildTicketHtml = (payload: TicketPrintPayload) => {
+  const fiscalHeaderHtml = TICKET_FISCAL_HEADER_LINES.map((line) => `<div>${line}</div>`).join('')
+  const footerLines = toTextLines(payload.footer || TICKET_DEFAULT_FOOTER)
+  const footerHtml = footerLines.map((line) => `<div>${line}</div>`).join('')
+
   const itemsHtml = (payload.items || [])
     .map(
       (item) => `
         <tr>
           <td class="desc">${item.description}</td>
+          <td class="price">${item.unitPrice.toFixed(2)} €</td>
           <td class="qty">${item.quantity}</td>
           <td class="amount">${item.total.toFixed(2)} €</td>
         </tr>
@@ -29,7 +45,7 @@ export const buildTicketHtml = (payload: TicketPrintPayload) => {
     <html lang="es">
       <head>
         <meta charset="UTF-8" />
-        <title>${payload.title || 'Lucy3000'}</title>
+        <title>${payload.title || TICKET_BUSINESS_NAME}</title>
         <style>
           @page {
             margin: 0;
@@ -47,11 +63,21 @@ export const buildTicketHtml = (payload: TicketPrintPayload) => {
             font-size: 18px;
             margin: 0 0 4px;
             text-align: center;
+            letter-spacing: 0.04em;
           }
           .muted {
             text-align: center;
             color: #4b5563;
+            margin-bottom: 6px;
+            font-size: 11px;
+          }
+          .fiscal-header {
+            text-align: center;
             margin-bottom: 8px;
+          }
+          .fiscal-header div {
+            font-size: 11px;
+            line-height: 1.3;
           }
           .meta {
             border-top: 1px dashed #9ca3af;
@@ -75,6 +101,13 @@ export const buildTicketHtml = (payload: TicketPrintPayload) => {
             padding: 2px 0;
             vertical-align: top;
           }
+          th {
+            font-size: 11px;
+            text-align: left;
+            border-bottom: 1px dashed #9ca3af;
+            padding-bottom: 4px;
+          }
+          .price,
           .qty,
           .amount {
             white-space: nowrap;
@@ -89,11 +122,14 @@ export const buildTicketHtml = (payload: TicketPrintPayload) => {
             padding-top: 8px;
             text-align: center;
             color: #4b5563;
+            font-size: 11px;
+            line-height: 1.4;
           }
         </style>
       </head>
       <body>
-        <h1>${payload.title || 'Lucy3000'}</h1>
+        <h1>${payload.title || TICKET_BUSINESS_NAME}</h1>
+        <div class="fiscal-header">${fiscalHeaderHtml}</div>
         <div class="muted">${payload.subtitle || 'Ticket'}</div>
         <div class="meta">
           ${payload.saleNumber ? `<div><span>Ticket</span><strong>${payload.saleNumber}</strong></div>` : ''}
@@ -102,10 +138,18 @@ export const buildTicketHtml = (payload: TicketPrintPayload) => {
           ${payload.paymentMethod ? `<div><span>Pago</span><strong>${payload.paymentMethod}</strong></div>` : ''}
         </div>
         <table>
+          <thead>
+            <tr>
+              <th>Producto / Tratamiento</th>
+              <th class="price">Precio</th>
+              <th class="qty">Ud.</th>
+              <th class="amount">Importe</th>
+            </tr>
+          </thead>
           <tbody>${itemsHtml}</tbody>
         </table>
         <div>${totalsHtml}</div>
-        <div class="footer">${payload.footer || 'Gracias por tu visita'}</div>
+        <div class="footer">${footerHtml}</div>
       </body>
     </html>
   `

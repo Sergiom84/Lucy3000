@@ -1,8 +1,18 @@
-import { Prisma } from '@prisma/client'
+import { AppointmentStatus, Cabin, Prisma } from '@prisma/client'
 import { Request, Response } from 'express'
 import { prisma } from '../db'
+import { AppointmentSyncInput, googleCalendarService } from '../services/googleCalendar.service'
 
 class AccountBalanceError extends Error {
+  statusCode: number
+
+  constructor(statusCode: number, message: string) {
+    super(message)
+    this.statusCode = statusCode
+  }
+}
+
+class BonoOperationError extends Error {
   statusCode: number
 
   constructor(statusCode: number, message: string) {
@@ -33,11 +43,91 @@ const serializeMovement = (movement: {
 })
 
 const toHttpError = (error: unknown) => {
-  if (error instanceof AccountBalanceError) {
+  if (error instanceof AccountBalanceError || error instanceof BonoOperationError) {
     return { statusCode: error.statusCode, message: error.message }
   }
 
   return { statusCode: 500, message: 'Internal server error' }
+}
+
+const appointmentInclude = {
+  client: true,
+  user: {
+    select: { id: true, name: true, email: true }
+  },
+  service: true,
+  sale: {
+    select: {
+      id: true,
+      saleNumber: true,
+      total: true,
+      paymentMethod: true,
+      status: true,
+      date: true
+    }
+  }
+} satisfies Prisma.AppointmentInclude
+
+type AppointmentRecord = Prisma.AppointmentGetPayload<{ include: typeof appointmentInclude }>
+
+const sessionInclude = {
+  orderBy: { sessionNumber: 'asc' as const },
+  include: {
+    appointment: {
+      select: {
+        id: true,
+        date: true,
+        startTime: true,
+        endTime: true,
+        status: true,
+        cabin: true
+      }
+    }
+  }
+}
+
+const toDate = (value: string | Date) => new Date(value)
+
+const toAppointmentDateTime = (appointment: { date: Date; startTime: string }) => {
+  const at = new Date(appointment.date)
+  const [hours, minutes] = String(appointment.startTime || '00:00')
+    .split(':')
+    .map((value) => Number.parseInt(value, 10))
+  at.setHours(Number.isFinite(hours) ? hours : 0, Number.isFinite(minutes) ? minutes : 0, 0, 0)
+  return at
+}
+
+const buildCalendarSyncInput = (appointment: AppointmentRecord): AppointmentSyncInput => {
+  const clientName = `${appointment.client.firstName} ${appointment.client.lastName}`.trim()
+  const phoneLine = appointment.client.phone ? `\nTelefono: ${appointment.client.phone}` : ''
+
+  return {
+    appointmentId: appointment.id,
+    existingEventId: appointment.googleCalendarEventId || null,
+    title: `${appointment.service.name} - ${clientName}`,
+    description: `Cita para ${appointment.service.name}\nCliente: ${clientName}${phoneLine}`,
+    date: appointment.date,
+    startTime: appointment.startTime,
+    endTime: appointment.endTime,
+    clientEmail: appointment.client.email,
+    clientName
+  }
+}
+
+const persistCalendarSyncResult = async (
+  appointmentId: string,
+  syncResult: Awaited<ReturnType<typeof googleCalendarService.upsertAppointmentEvent>>
+) => {
+  return prisma.appointment.update({
+    where: { id: appointmentId },
+    data: {
+      googleCalendarEventId: syncResult.eventId,
+      googleCalendarSyncStatus: syncResult.status,
+      googleCalendarSyncError: syncResult.error,
+      googleCalendarSyncedAt: syncResult.status === 'SYNCED' ? new Date() : null
+    },
+    include: appointmentInclude
+  })
 }
 
 export const getClientBonos = async (req: Request, res: Response) => {
@@ -48,7 +138,7 @@ export const getClientBonos = async (req: Request, res: Response) => {
       where: { clientId },
       include: {
         service: { select: { id: true, name: true } },
-        sessions: { orderBy: { sessionNumber: 'asc' } }
+        sessions: sessionInclude
       },
       orderBy: { purchaseDate: 'desc' }
     })
@@ -92,7 +182,7 @@ export const createBonoPack = async (req: Request, res: Response) => {
       },
       include: {
         service: { select: { id: true, name: true } },
-        sessions: { orderBy: { sessionNumber: 'asc' } }
+        sessions: sessionInclude
       }
     })
 
@@ -103,6 +193,112 @@ export const createBonoPack = async (req: Request, res: Response) => {
   }
 }
 
+export const createBonoAppointment = async (req: Request, res: Response) => {
+  try {
+    const { bonoPackId } = req.params
+    const {
+      serviceId,
+      userId,
+      cabin,
+      date,
+      startTime,
+      endTime,
+      status,
+      notes,
+      reminder
+    } = req.body
+
+    const bonoPack = await prisma.bonoPack.findUnique({
+      where: { id: bonoPackId },
+      include: {
+        client: true,
+        service: true,
+        sessions: {
+          orderBy: { sessionNumber: 'asc' }
+        }
+      }
+    })
+
+    if (!bonoPack) {
+      throw new BonoOperationError(404, 'BonoPack not found')
+    }
+
+    if (bonoPack.status !== 'ACTIVE') {
+      throw new BonoOperationError(400, 'BonoPack is not active')
+    }
+
+    const resolvedServiceId = String(serviceId || bonoPack.serviceId || '').trim()
+    if (!resolvedServiceId) {
+      throw new BonoOperationError(400, 'serviceId is required for this bono')
+    }
+
+    const nextReservableSession = bonoPack.sessions.find(
+      (session) => session.status === 'AVAILABLE' && !session.appointmentId
+    )
+
+    if (!nextReservableSession) {
+      throw new BonoOperationError(400, 'No available sessions to reserve')
+    }
+
+    const appointmentPayload: Prisma.AppointmentUncheckedCreateInput = {
+      clientId: bonoPack.clientId,
+      userId: String(userId),
+      serviceId: resolvedServiceId,
+      cabin: cabin as Cabin,
+      date: toDate(String(date)),
+      startTime: String(startTime),
+      endTime: String(endTime),
+      status: (status as AppointmentStatus) || 'SCHEDULED',
+      notes: notes ? String(notes) : null,
+      reminder: reminder === undefined ? true : Boolean(reminder)
+    }
+
+    const createdAppointment = await prisma.$transaction(async (tx) => {
+      const created = await tx.appointment.create({
+        data: appointmentPayload,
+        include: appointmentInclude
+      })
+
+      const reservedCount = await tx.bonoSession.updateMany({
+        where: {
+          id: nextReservableSession.id,
+          status: 'AVAILABLE',
+          appointmentId: null
+        },
+        data: {
+          appointmentId: created.id
+        }
+      })
+
+      if (reservedCount.count === 0) {
+        throw new BonoOperationError(409, 'The selected bono session is no longer available')
+      }
+
+      return created
+    })
+
+    const syncResult = await googleCalendarService.upsertAppointmentEvent(buildCalendarSyncInput(createdAppointment))
+    const appointment = await persistCalendarSyncResult(createdAppointment.id, syncResult)
+
+    if (appointmentPayload.reminder) {
+      await prisma.notification.create({
+        data: {
+          type: 'APPOINTMENT',
+          title: 'Nueva cita programada desde bono',
+          message: `Cita con ${appointment.client.firstName} ${appointment.client.lastName} el ${new Date(appointment.date).toLocaleDateString()}`,
+          priority: 'NORMAL'
+        }
+      })
+    }
+
+    res.status(201).json(appointment)
+  } catch (error) {
+    const { statusCode, message } = toHttpError(error)
+    console.error('Create bono appointment error:', error)
+    res.status(statusCode).json({ error: message })
+  }
+}
+
 export const consumeSession = async (req: Request, res: Response) => {
   try {
     const { bonoPackId } = req.params
@@ -110,7 +306,7 @@ export const consumeSession = async (req: Request, res: Response) => {
     const bonoPack = await prisma.bonoPack.findUnique({
       where: { id: bonoPackId },
       include: {
-        sessions: { orderBy: { sessionNumber: 'asc' } },
+        sessions: sessionInclude,
         client: { select: { id: true, firstName: true, lastName: true } }
       }
     })
@@ -123,9 +319,21 @@ export const consumeSession = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'BonoPack is not active' })
     }
 
-    const nextAvailable = bonoPack.sessions.find((session) => session.status === 'AVAILABLE')
+    const isFutureReservation = (session: (typeof bonoPack.sessions)[number]) => {
+      if (session.status !== 'AVAILABLE' || !session.appointment) return false
+      const status = String(session.appointment.status || '').toUpperCase()
+      if (status === 'CANCELLED' || status === 'NO_SHOW' || status === 'COMPLETED') return false
+      return toAppointmentDateTime({
+        date: session.appointment.date,
+        startTime: session.appointment.startTime
+      }) > new Date()
+    }
+
+    const nextAvailable = bonoPack.sessions.find(
+      (session) => session.status === 'AVAILABLE' && !isFutureReservation(session)
+    )
     if (!nextAvailable) {
-      return res.status(400).json({ error: 'No available sessions' })
+      return res.status(400).json({ error: 'No available sessions ready to consume' })
     }
 
     await prisma.bonoSession.update({
@@ -154,7 +362,7 @@ export const consumeSession = async (req: Request, res: Response) => {
       where: { id: bonoPackId },
       include: {
         service: { select: { id: true, name: true } },
-        sessions: { orderBy: { sessionNumber: 'asc' } }
+        sessions: sessionInclude
       }
     })
 
