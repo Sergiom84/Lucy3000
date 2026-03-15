@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildEscPosTicketBuffer } from '../../../src/main/escpos'
+import { buildTicketHtml } from '../../../src/shared/ticketHtml'
 import {
   DEFAULT_NETWORK_TICKET_PORT,
   normalizeTicketPrinterConfig,
@@ -73,5 +74,30 @@ describe('ESC/POS ticket buffer', () => {
     expect(ascii).toContain('Maria Lopez')
     expect(ascii).toContain('Champu reparacion')
     expect(buffer.includes(Buffer.from([0x1d, 0x56, 0x00]))).toBe(true)
+  })
+})
+
+describe('ticket html', () => {
+  it('builds a printable document for browser and Electron', () => {
+    const html = buildTicketHtml({
+      title: 'Lucy3000',
+      subtitle: 'Ticket web',
+      saleNumber: 'WEB-1',
+      customer: 'Cliente Web',
+      items: [
+        {
+          description: 'Producto prueba',
+          quantity: 1,
+          unitPrice: 10,
+          total: 10
+        }
+      ],
+      totals: [{ label: 'Total', value: '10,00 EUR' }]
+    })
+
+    expect(html).toContain('<!DOCTYPE html>')
+    expect(html).toContain('@page')
+    expect(html).toContain('Ticket web')
+    expect(html).toContain('Producto prueba')
   })
 })

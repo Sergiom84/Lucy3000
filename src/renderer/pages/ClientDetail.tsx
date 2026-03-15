@@ -36,6 +36,7 @@ import {
   deleteClientAsset,
   importClientAssets,
   isDesktop,
+  getPrintTicketSuccessMessage,
   listClientAssets,
   openClientFolder,
   printTicket,
@@ -258,8 +259,8 @@ export default function ClientDetail() {
   const handlePrintSale = async (saleId: string) => {
     try {
       const response = await api.get(`/sales/${saleId}`)
-      await printTicket(buildSaleTicketPayload(response.data))
-      toast.success('Ticket enviado a la impresora')
+      const printResult = await printTicket(buildSaleTicketPayload(response.data))
+      toast.success(getPrintTicketSuccessMessage(printResult))
     } catch (error: any) {
       toast.error(error.message || 'No se pudo imprimir el ticket')
     }

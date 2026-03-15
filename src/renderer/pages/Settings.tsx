@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { AlertCircle, Calendar, CheckCircle2, Link2, Printer, RefreshCw, Save, Unlink } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
+  getPrintTicketSuccessMessage,
   isDesktop,
   getTicketPrinterConfig,
   listTicketPrinters,
@@ -205,16 +206,22 @@ export default function Settings() {
   }
 
   const handleTestPrinter = async () => {
-    const config = buildPrinterConfig()
-    if (!validatePrinterConfig(config)) {
-      return
-    }
-
     try {
       setTestingPrinter(true)
+      if (!desktopMode) {
+        const result = await printTicket(buildTestTicketPayload())
+        toast.success(getPrintTicketSuccessMessage(result))
+        return
+      }
+
+      const config = buildPrinterConfig()
+      if (!validatePrinterConfig(config)) {
+        return
+      }
+
       await saveTicketPrinterConfig(config)
-      await printTicket(buildTestTicketPayload())
-      toast.success('Ticket de prueba enviado')
+      const result = await printTicket(buildTestTicketPayload())
+      toast.success(getPrintTicketSuccessMessage(result))
     } catch (error: any) {
       toast.error(error.message || 'No se pudo imprimir el ticket de prueba')
     } finally {
@@ -274,8 +281,19 @@ export default function Settings() {
           </div>
 
           {!desktopMode ? (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-              La configuración de impresora solo está disponible al abrir Lucy3000 como app de escritorio Electron.
+            <div className="space-y-4">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                En navegador no hay acceso a Electron ni configuración silenciosa de impresora. Lucy3000 usará el diálogo de impresión del navegador y podrás elegir `POS-80c` manualmente.
+              </div>
+
+              <button
+                onClick={handleTestPrinter}
+                className="btn btn-primary"
+                disabled={testingPrinter}
+              >
+                <Printer className="mr-2 h-4 w-4" />
+                {testingPrinter ? 'Abriendo impresión...' : 'Imprimir prueba en navegador'}
+              </button>
             </div>
           ) : (
             <>
@@ -499,6 +517,10 @@ export default function Settings() {
             <p className="flex gap-2">
               <CheckCircle2 className="mt-0.5 h-4 w-4 text-green-600" />
               La impresora de tickets se configura por equipo; Google Calendar se configura una sola vez para toda la app.
+            </p>
+            <p className="flex gap-2">
+              <CheckCircle2 className="mt-0.5 h-4 w-4 text-green-600" />
+              Si Lucy3000 se abre en navegador, el fallback usa el diálogo de impresión del sistema y aprovecha los drivers instalados en ese equipo.
             </p>
             <p className="flex gap-2">
               <AlertCircle className="mt-0.5 h-4 w-4 text-amber-600" />

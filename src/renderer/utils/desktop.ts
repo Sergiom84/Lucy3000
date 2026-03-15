@@ -1,7 +1,8 @@
 import {
   DEFAULT_NETWORK_TICKET_PORT
 } from '../../shared/ticketPrinter'
-import type { TicketPrinterConfig } from '../../shared/ticketPrinter'
+import { buildTicketHtml } from '../../shared/ticketHtml'
+import type { TicketPrintPayload, TicketPrinterConfig } from '../../shared/ticketPrinter'
 
 export type ClientAssetKind = 'photos' | 'consents'
 
@@ -30,28 +31,91 @@ export type TicketPrinter = {
 }
 
 export type { TicketPrinterConfig }
-
-export type TicketPayload = {
-  title?: string
-  subtitle?: string
-  saleNumber?: string
-  customer?: string
-  createdAt?: string
-  paymentMethod?: string
-  items?: Array<{
-    description: string
-    quantity: number
-    unitPrice: number
-    total: number
-  }>
-  totals?: Array<{
-    label: string
-    value: string
-  }>
-  footer?: string
+export type TicketPayload = TicketPrintPayload
+export type TicketPrintResult = {
+  mode: 'desktop' | 'browser'
 }
 
 const desktopUnavailableError = 'Disponible solo en la app de escritorio'
+let browserPrintFrame: HTMLIFrameElement | null = null
+
+const removeBrowserPrintFrame = () => {
+  if (!browserPrintFrame) {
+    return
+  }
+
+  browserPrintFrame.remove()
+  browserPrintFrame = null
+}
+
+const printTicketInBrowser = async (payload: TicketPayload): Promise<TicketPrintResult> => {
+  if (typeof document === 'undefined') {
+    throw new Error('La impresión web no está disponible en este entorno')
+  }
+
+  removeBrowserPrintFrame()
+
+  const iframe = document.createElement('iframe')
+  iframe.setAttribute('aria-hidden', 'true')
+  iframe.style.position = 'fixed'
+  iframe.style.width = '0'
+  iframe.style.height = '0'
+  iframe.style.border = '0'
+  iframe.style.opacity = '0'
+  iframe.style.pointerEvents = 'none'
+  document.body.appendChild(iframe)
+  browserPrintFrame = iframe
+
+  return new Promise((resolve, reject) => {
+    let settled = false
+    let fallbackTimer = 0
+
+    const finish = (error?: Error) => {
+      if (settled) {
+        return
+      }
+
+      settled = true
+      window.clearTimeout(fallbackTimer)
+      if (browserPrintFrame === iframe) {
+        browserPrintFrame = null
+      }
+      iframe.remove()
+
+      if (error) {
+        reject(error)
+        return
+      }
+
+      resolve({ mode: 'browser' })
+    }
+
+    iframe.onload = () => {
+      const frameWindow = iframe.contentWindow
+      if (!frameWindow) {
+        finish(new Error('No se pudo abrir la vista previa de impresión'))
+        return
+      }
+
+      const handleAfterPrint = () => {
+        frameWindow.removeEventListener('afterprint', handleAfterPrint)
+        finish()
+      }
+
+      frameWindow.addEventListener('afterprint', handleAfterPrint)
+      fallbackTimer = window.setTimeout(() => finish(), 1500)
+
+      try {
+        frameWindow.focus()
+        frameWindow.print()
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error('No se pudo abrir el diálogo de impresión'))
+      }
+    }
+
+    iframe.srcdoc = buildTicketHtml(payload)
+  })
+}
 
 export const isDesktop = () => Boolean(window.electronAPI)
 
@@ -153,13 +217,18 @@ export const saveTicketPrinterConfig = async (config: TicketPrinterConfig) => {
   return window.electronAPI.ticket.setConfig(config)
 }
 
-export const printTicket = async (payload: TicketPayload) => {
+export const getPrintTicketSuccessMessage = (result: TicketPrintResult) =>
+  result.mode === 'browser' ? 'Se abrió el diálogo de impresión del navegador' : 'Ticket enviado a la impresora'
+
+export const printTicket = async (payload: TicketPayload): Promise<TicketPrintResult> => {
   if (!window.electronAPI) {
-    throw new Error(desktopUnavailableError)
+    return printTicketInBrowser(payload)
   }
 
   const response = await window.electronAPI.ticket.print(payload)
   if (!response.success) {
     throw new Error(response.error || 'No se pudo imprimir el ticket')
   }
+
+  return { mode: 'desktop' }
 }

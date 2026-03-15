@@ -20,7 +20,7 @@ import ClientCalendarDock from '../components/ClientCalendarDock'
 import ClientForm from '../components/ClientForm'
 import Modal from '../components/Modal'
 import api from '../utils/api'
-import { printTicket } from '../utils/desktop'
+import { getPrintTicketSuccessMessage, printTicket } from '../utils/desktop'
 import { formatCurrency, formatDate, formatPhone } from '../utils/format'
 import { buildSaleTicketPayload, paymentMethodLabel } from '../utils/tickets'
 
@@ -162,8 +162,8 @@ export default function Clients() {
   const handlePrintSale = async (saleId: string) => {
     try {
       const response = await api.get(`/sales/${saleId}`)
-      await printTicket(buildSaleTicketPayload(response.data))
-      toast.success('Ticket enviado a la impresora')
+      const printResult = await printTicket(buildSaleTicketPayload(response.data))
+      toast.success(getPrintTicketSuccessMessage(printResult))
     } catch (error: any) {
       toast.error(error.message || 'No se pudo imprimir el ticket')
     }

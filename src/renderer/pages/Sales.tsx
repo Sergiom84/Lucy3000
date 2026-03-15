@@ -18,6 +18,7 @@ import toast from 'react-hot-toast'
 import Modal from '../components/Modal'
 import api from '../utils/api'
 import { printTicket } from '../utils/desktop'
+import { getPrintTicketSuccessMessage } from '../utils/desktop'
 import { formatCurrency } from '../utils/format'
 import { buildSaleTicketPayload, paymentMethodLabel } from '../utils/tickets'
 
@@ -341,7 +342,8 @@ export default function Sales() {
       const createdSale = response.data
       if (options.printTicketAfterSale) {
         try {
-          await printTicket(buildSaleTicketPayload(createdSale))
+          const printResult = await printTicket(buildSaleTicketPayload(createdSale))
+          toast.success(getPrintTicketSuccessMessage(printResult))
         } catch (error: any) {
           toast.error(error.message || 'La venta se guardó, pero no se pudo imprimir el ticket')
         }
@@ -470,8 +472,8 @@ export default function Sales() {
 
   const handlePrintSale = async (sale: any) => {
     try {
-      await printTicket(buildSaleTicketPayload(sale))
-      toast.success('Ticket enviado a la impresora')
+      const printResult = await printTicket(buildSaleTicketPayload(sale))
+      toast.success(getPrintTicketSuccessMessage(printResult))
     } catch (error: any) {
       toast.error(error.message || 'No se pudo imprimir el ticket')
     }
