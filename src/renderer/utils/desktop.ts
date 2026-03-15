@@ -1,3 +1,8 @@
+import {
+  DEFAULT_NETWORK_TICKET_PORT
+} from '../../shared/ticketPrinter'
+import type { TicketPrinterConfig } from '../../shared/ticketPrinter'
+
 export type ClientAssetKind = 'photos' | 'consents'
 
 export type ClientAsset = {
@@ -23,6 +28,8 @@ export type TicketPrinter = {
   displayName: string
   isDefault: boolean
 }
+
+export type { TicketPrinterConfig }
 
 export type TicketPayload = {
   title?: string
@@ -117,12 +124,33 @@ export const getConfiguredTicketPrinter = async (): Promise<string | null> => {
   return response.ticketPrinterName
 }
 
+export const getTicketPrinterConfig = async (): Promise<TicketPrinterConfig> => {
+  if (!window.electronAPI) {
+    return {
+      mode: 'system',
+      ticketPrinterName: null,
+      networkHost: '',
+      networkPort: DEFAULT_NETWORK_TICKET_PORT
+    }
+  }
+
+  return window.electronAPI.ticket.getConfig()
+}
+
 export const setConfiguredTicketPrinter = async (printerName: string | null) => {
   if (!window.electronAPI) {
     throw new Error(desktopUnavailableError)
   }
 
   return window.electronAPI.ticket.setPrinter(printerName)
+}
+
+export const saveTicketPrinterConfig = async (config: TicketPrinterConfig) => {
+  if (!window.electronAPI) {
+    throw new Error(desktopUnavailableError)
+  }
+
+  return window.electronAPI.ticket.setConfig(config)
 }
 
 export const printTicket = async (payload: TicketPayload) => {
