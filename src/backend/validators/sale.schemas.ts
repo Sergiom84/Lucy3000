@@ -5,6 +5,7 @@ const saleStatusSchema = z.enum(['PENDING', 'COMPLETED', 'CANCELLED', 'REFUNDED'
 const paymentMethodSchema = z.enum(['CASH', 'CARD', 'BIZUM', 'OTHER'])
 
 const moneySchema = z.coerce.number().finite().min(0, 'Value cannot be negative')
+const positiveMoneySchema = z.coerce.number().finite().positive('Value must be greater than zero')
 
 const saleItemSchema = z
   .object({
@@ -13,6 +14,19 @@ const saleItemSchema = z
     description: z.string().trim().min(1, 'Description is required').max(250, 'Description is too long'),
     quantity: z.coerce.number().int('Quantity must be an integer').positive('Quantity must be positive'),
     price: moneySchema
+  })
+  .strict()
+
+const accountBalanceUsageSchema = z
+  .object({
+    operationDate: z.coerce.date(),
+    referenceItem: z
+      .string()
+      .trim()
+      .min(1, 'Reference item is required')
+      .max(250, 'Reference item is too long'),
+    amount: positiveMoneySchema,
+    notes: optionalNullableTextSchema(500)
   })
   .strict()
 
@@ -43,6 +57,8 @@ export const createSaleBodySchema = z
     discount: moneySchema.optional().default(0),
     tax: moneySchema.optional().default(0),
     paymentMethod: paymentMethodSchema,
+    accountBalanceUsage: accountBalanceUsageSchema.optional(),
+    showInOfficialCash: z.boolean().optional().default(true),
     notes: optionalNullableTextSchema(1000),
     subtotal: moneySchema.optional()
   })

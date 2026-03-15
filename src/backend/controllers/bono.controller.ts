@@ -1,5 +1,44 @@
+import { Prisma } from '@prisma/client'
 import { Request, Response } from 'express'
 import { prisma } from '../db'
+
+class AccountBalanceError extends Error {
+  statusCode: number
+
+  constructor(statusCode: number, message: string) {
+    super(message)
+    this.statusCode = statusCode
+  }
+}
+
+const toNumber = (value: unknown) => Number(value || 0)
+const normalizeMoney = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100
+
+const serializeMovement = (movement: {
+  id: string
+  clientId: string
+  saleId: string | null
+  type: string
+  operationDate: Date
+  description: string
+  referenceItem: string | null
+  amount: Prisma.Decimal
+  balanceAfter: Prisma.Decimal
+  notes: string | null
+  createdAt: Date
+}) => ({
+  ...movement,
+  amount: toNumber(movement.amount),
+  balanceAfter: toNumber(movement.balanceAfter)
+})
+
+const toHttpError = (error: unknown) => {
+  if (error instanceof AccountBalanceError) {
+    return { statusCode: error.statusCode, message: error.message }
+  }
+
+  return { statusCode: 500, message: 'Internal server error' }
+}
 
 export const getClientBonos = async (req: Request, res: Response) => {
   try {
@@ -29,17 +68,24 @@ export const createBonoPack = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'clientId, name and totalSessions (>= 1) are required' })
     }
 
+    const parsedTotalSessions = Number.parseInt(String(totalSessions), 10)
+    if (!Number.isFinite(parsedTotalSessions) || parsedTotalSessions < 1) {
+      return res.status(400).json({ error: 'totalSessions must be a positive integer' })
+    }
+
+    const parsedPrice = Number(price || 0)
+
     const bonoPack = await prisma.bonoPack.create({
       data: {
         clientId,
         name,
         serviceId: serviceId || null,
-        totalSessions,
-        price: price || 0,
+        totalSessions: parsedTotalSessions,
+        price: Number.isFinite(parsedPrice) ? parsedPrice : 0,
         expiryDate: expiryDate ? new Date(expiryDate) : null,
         notes: notes || null,
         sessions: {
-          create: Array.from({ length: totalSessions }, (_, i) => ({
+          create: Array.from({ length: parsedTotalSessions }, (_, i) => ({
             sessionNumber: i + 1
           }))
         }
@@ -77,7 +123,7 @@ export const consumeSession = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'BonoPack is not active' })
     }
 
-    const nextAvailable = bonoPack.sessions.find(s => s.status === 'AVAILABLE')
+    const nextAvailable = bonoPack.sessions.find((session) => session.status === 'AVAILABLE')
     if (!nextAvailable) {
       return res.status(400).json({ error: 'No available sessions' })
     }
@@ -87,8 +133,7 @@ export const consumeSession = async (req: Request, res: Response) => {
       data: { status: 'CONSUMED', consumedAt: new Date() }
     })
 
-    // Check if all sessions consumed
-    const remainingAvailable = bonoPack.sessions.filter(s => s.status === 'AVAILABLE').length - 1
+    const remainingAvailable = bonoPack.sessions.filter((session) => session.status === 'AVAILABLE').length - 1
     if (remainingAvailable === 0) {
       await prisma.bonoPack.update({
         where: { id: bonoPackId },
@@ -105,7 +150,6 @@ export const consumeSession = async (req: Request, res: Response) => {
       })
     }
 
-    // Return updated pack
     const updated = await prisma.bonoPack.findUnique({
       where: { id: bonoPackId },
       include: {
@@ -136,19 +180,208 @@ export const deleteBonoPack = async (req: Request, res: Response) => {
   }
 }
 
+export const getAccountBalanceHistory = async (req: Request, res: Response) => {
+  try {
+    const { clientId } = req.params
+    const parsedLimit = Number.parseInt(String(req.query.limit ?? '50'), 10)
+    const limit = Number.isFinite(parsedLimit) ? Math.min(200, Math.max(1, parsedLimit)) : 50
+
+    const [client, movements] = await prisma.$transaction([
+      prisma.client.findUnique({
+        where: { id: clientId },
+        select: {
+          id: true,
+          accountBalance: true
+        }
+      }),
+      prisma.accountBalanceMovement.findMany({
+        where: { clientId },
+        orderBy: [{ operationDate: 'desc' }, { createdAt: 'desc' }],
+        take: limit
+      })
+    ])
+
+    if (!client) {
+      return res.status(404).json({ error: 'Client not found' })
+    }
+
+    res.json({
+      clientId: client.id,
+      currentBalance: toNumber(client.accountBalance),
+      movements: movements.map(serializeMovement)
+    })
+  } catch (error) {
+    console.error('Get account balance history error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const createAccountBalanceTopUp = async (req: Request, res: Response) => {
+  try {
+    const { clientId } = req.params
+    const { description, amount, operationDate, notes } = req.body
+
+    const parsedAmount = Number(amount)
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      throw new AccountBalanceError(400, 'Amount must be greater than zero')
+    }
+
+    const response = await prisma.$transaction(async (tx) => {
+      const client = await tx.client.findUnique({
+        where: { id: clientId },
+        select: { id: true, accountBalance: true }
+      })
+
+      if (!client) {
+        throw new AccountBalanceError(404, 'Client not found')
+      }
+
+      const currentBalance = toNumber(client.accountBalance)
+      const nextBalance = normalizeMoney(currentBalance + parsedAmount)
+
+      await tx.client.update({
+        where: { id: clientId },
+        data: { accountBalance: nextBalance }
+      })
+
+      const movement = await tx.accountBalanceMovement.create({
+        data: {
+          clientId,
+          type: 'TOP_UP',
+          operationDate: operationDate ? new Date(operationDate) : new Date(),
+          description: String(description).trim(),
+          referenceItem: null,
+          amount: parsedAmount,
+          balanceAfter: nextBalance,
+          notes: notes || null
+        }
+      })
+
+      return {
+        currentBalance: nextBalance,
+        movement: serializeMovement(movement)
+      }
+    })
+
+    res.status(201).json(response)
+  } catch (error) {
+    const { statusCode, message } = toHttpError(error)
+    console.error('Create account balance top-up error:', error)
+    res.status(statusCode).json({ error: message })
+  }
+}
+
+export const consumeAccountBalance = async (req: Request, res: Response) => {
+  try {
+    const { clientId } = req.params
+    const { operationDate, referenceItem, amount, notes, saleId, description } = req.body
+
+    const parsedAmount = Number(amount)
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      throw new AccountBalanceError(400, 'Amount must be greater than zero')
+    }
+
+    const response = await prisma.$transaction(async (tx) => {
+      const client = await tx.client.findUnique({
+        where: { id: clientId },
+        select: { id: true, accountBalance: true }
+      })
+
+      if (!client) {
+        throw new AccountBalanceError(404, 'Client not found')
+      }
+
+      const currentBalance = toNumber(client.accountBalance)
+      if (currentBalance < parsedAmount) {
+        throw new AccountBalanceError(400, 'Insufficient account balance')
+      }
+
+      const nextBalance = normalizeMoney(currentBalance - parsedAmount)
+
+      await tx.client.update({
+        where: { id: clientId },
+        data: { accountBalance: nextBalance }
+      })
+
+      const movement = await tx.accountBalanceMovement.create({
+        data: {
+          clientId,
+          saleId: saleId || null,
+          type: 'CONSUMPTION',
+          operationDate: operationDate ? new Date(operationDate) : new Date(),
+          description: String(description || 'Consumo de abono').trim(),
+          referenceItem: String(referenceItem).trim(),
+          amount: parsedAmount,
+          balanceAfter: nextBalance,
+          notes: notes || null
+        }
+      })
+
+      return {
+        currentBalance: nextBalance,
+        movement: serializeMovement(movement)
+      }
+    })
+
+    res.status(201).json(response)
+  } catch (error) {
+    const { statusCode, message } = toHttpError(error)
+    console.error('Consume account balance error:', error)
+    res.status(statusCode).json({ error: message })
+  }
+}
+
 export const updateAccountBalance = async (req: Request, res: Response) => {
   try {
     const { clientId } = req.params
     const { accountBalance } = req.body
 
-    const client = await prisma.client.update({
-      where: { id: clientId },
-      data: { accountBalance: accountBalance !== null && accountBalance !== undefined ? Number(accountBalance) : null }
+    const nextBalance = accountBalance !== null && accountBalance !== undefined ? Number(accountBalance) : 0
+    if (!Number.isFinite(nextBalance) || nextBalance < 0) {
+      return res.status(400).json({ error: 'accountBalance must be a valid number >= 0' })
+    }
+
+    const response = await prisma.$transaction(async (tx) => {
+      const client = await tx.client.findUnique({
+        where: { id: clientId },
+        select: { id: true, accountBalance: true }
+      })
+
+      if (!client) {
+        throw new AccountBalanceError(404, 'Client not found')
+      }
+
+      const previousBalance = toNumber(client.accountBalance)
+      const normalizedNext = normalizeMoney(nextBalance)
+
+      const updatedClient = await tx.client.update({
+        where: { id: clientId },
+        data: { accountBalance: normalizedNext }
+      })
+
+      if (previousBalance !== normalizedNext) {
+        const difference = Math.abs(normalizedNext - previousBalance)
+        await tx.accountBalanceMovement.create({
+          data: {
+            clientId,
+            type: 'ADJUSTMENT',
+            operationDate: new Date(),
+            description: `Ajuste manual de saldo: ${previousBalance.toFixed(2)}€ -> ${normalizedNext.toFixed(2)}€`,
+            referenceItem: null,
+            amount: difference,
+            balanceAfter: normalizedNext,
+            notes: null
+          }
+        })
+      }
+
+      return updatedClient
     })
 
-    res.json(client)
+    res.json(response)
   } catch (error) {
+    const { statusCode, message } = toHttpError(error)
     console.error('Update account balance error:', error)
-    res.status(500).json({ error: 'Internal server error' })
+    res.status(statusCode).json({ error: message })
   }
 }

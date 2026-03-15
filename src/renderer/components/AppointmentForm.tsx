@@ -491,14 +491,14 @@ export default function AppointmentForm({
 
       {/* Notas */}
       <div>
-        <label className="label">Notas</label>
+        <label className="label">Notas internas</label>
         <textarea
           name="notes"
           value={formData.notes}
           onChange={handleChange}
           className="input resize-none"
           rows={3}
-          placeholder="Instrucciones especiales, preferencias del cliente..."
+          placeholder="Observaciones privadas para el equipo..."
         />
       </div>
 
@@ -513,7 +513,7 @@ export default function AppointmentForm({
           className="w-4 h-4 text-primary-600 bg-gray-100 border-gray-300 rounded focus:ring-primary-500"
         />
         <label htmlFor="reminder" className="ml-2 text-sm text-gray-900 dark:text-white">
-          Enviar recordatorio al cliente
+          Crear recordatorio interno para el equipo
         </label>
       </div>
 

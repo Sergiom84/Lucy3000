@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -22,6 +22,8 @@ import {
   FileText,
   FolderOpen,
   Printer,
+  CheckCircle2,
+  Search,
   Star,
   StickyNote,
   Trash2,
@@ -43,9 +45,11 @@ import { buildSaleTicketPayload, paymentMethodLabel } from '../utils/tickets'
 import toast from 'react-hot-toast'
 import Modal from '../components/Modal'
 import ClientForm from '../components/ClientForm'
+import BonoCard from '../components/BonoCard'
 
 const toolbarItems = [
-  { icon: Ticket, label: 'Bonos' },
+  { icon: CreditCard, label: 'Abonos', tab: 'abonos' as const },
+  { icon: Ticket, label: 'Bonos', tab: 'bonos' as const },
   { icon: BarChart3, label: 'Análisis' },
   { icon: Scale, label: 'Control Peso' },
   { icon: ClipboardList, label: 'Ficha Bio' },
@@ -53,19 +57,90 @@ const toolbarItems = [
   { icon: FolderOpen, label: 'Documentos' }
 ]
 
+const BONO_FAMILY_META = [
+  { key: 'ELECTRICA', label: 'Depilación eléctrica', keywords: ['dep', 'electr'] },
+  { key: 'CORPORAL', label: 'Tratamiento corporal', keywords: ['corporal'] },
+  { key: 'FACIAL', label: 'Tratamientos faciales', keywords: ['facial'] }
+] as const
+
+type BonoFamilyKey = (typeof BONO_FAMILY_META)[number]['key']
+
+type AccountBalanceMovement = {
+  id: string
+  type: 'TOP_UP' | 'CONSUMPTION' | 'ADJUSTMENT'
+  operationDate: string
+  description: string
+  referenceItem?: string | null
+  amount: number
+  balanceAfter: number
+  notes?: string | null
+}
+
+const normalizeText = (value: unknown) =>
+  String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+
+const accountBalanceMovementTypeLabel: Record<AccountBalanceMovement['type'], string> = {
+  TOP_UP: 'Recarga',
+  CONSUMPTION: 'Consumo',
+  ADJUSTMENT: 'Ajuste'
+}
+
+const accountBalanceDateInput = () => new Date().toISOString().split('T')[0]
+
+const resolveBonoFamily = (service: any): BonoFamilyKey | null => {
+  const category = normalizeText(service?.category)
+  const name = normalizeText(service?.name)
+  const haystack = `${category} ${name}`
+
+  if (haystack.includes('facial')) return 'FACIAL'
+  if (haystack.includes('corporal')) return 'CORPORAL'
+  if ((haystack.includes('dep') && haystack.includes('electr')) || haystack.includes('electrica')) {
+    return 'ELECTRICA'
+  }
+
+  return null
+}
+
 export default function ClientDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [client, setClient] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [showEditModal, setShowEditModal] = useState(false)
-  const [activeTab, setActiveTab] = useState<'overview' | 'appointments' | 'sales' | 'history' | 'bonos'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'appointments' | 'sales' | 'history' | 'bonos' | 'abonos'>('overview')
   const [clientAssets, setClientAssets] = useState<ClientAssetsResponse | null>(null)
   const [assetsLoading, setAssetsLoading] = useState(false)
+  const [accountBalanceHistory, setAccountBalanceHistory] = useState<AccountBalanceMovement[]>([])
+  const [accountBalanceLoading, setAccountBalanceLoading] = useState(false)
+  const [accountBalanceSaving, setAccountBalanceSaving] = useState(false)
+  const [accountBalanceDraft, setAccountBalanceDraft] = useState({
+    description: '',
+    amount: '',
+    operationDate: accountBalanceDateInput(),
+    notes: ''
+  })
+  const [servicesCatalog, setServicesCatalog] = useState<any[]>([])
+  const [servicesLoading, setServicesLoading] = useState(false)
+  const [bonoSearch, setBonoSearch] = useState('')
+  const [selectedBonoFamily, setSelectedBonoFamily] = useState<BonoFamilyKey | null>(null)
+  const [selectedBonoServiceId, setSelectedBonoServiceId] = useState('')
+  const [creatingBono, setCreatingBono] = useState(false)
+  const [bonoDraft, setBonoDraft] = useState({
+    name: '',
+    totalSessions: '12',
+    price: '',
+    expiryDate: '',
+    notes: ''
+  })
 
   useEffect(() => {
     if (id) {
       fetchClient()
+      fetchBonoServices()
     }
   }, [id])
 
@@ -73,6 +148,7 @@ export default function ClientDetail() {
     try {
       const response = await api.get(`/clients/${id}`)
       setClient(response.data)
+      void fetchAccountBalanceHistory(response.data.id)
       if (isDesktop()) {
         setAssetsLoading(true)
         try {
@@ -88,6 +164,38 @@ export default function ClientDetail() {
       navigate('/clients')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchBonoServices = async () => {
+    try {
+      setServicesLoading(true)
+      const response = await api.get('/services?isActive=true')
+      setServicesCatalog(response.data || [])
+    } catch (error) {
+      console.error('Error loading services for bono sale:', error)
+      toast.error('No se pudo cargar el catálogo de tratamientos')
+    } finally {
+      setServicesLoading(false)
+    }
+  }
+
+  const fetchAccountBalanceHistory = async (clientId: string) => {
+    try {
+      setAccountBalanceLoading(true)
+      const response = await api.get(`/bonos/account-balance/${clientId}/history`, {
+        params: { limit: 60 }
+      })
+      const movements = Array.isArray(response.data?.movements) ? response.data.movements : []
+      setAccountBalanceHistory(movements)
+      const currentBalance = Number(response.data?.currentBalance || 0)
+      setClient((current: any) => (current ? { ...current, accountBalance: currentBalance } : current))
+    } catch (error) {
+      console.error('Error loading account balance history:', error)
+      toast.error('No se pudo cargar el historial de abonos')
+      setAccountBalanceHistory([])
+    } finally {
+      setAccountBalanceLoading(false)
     }
   }
 
@@ -157,6 +265,209 @@ export default function ClientDetail() {
     }
   }
 
+  const familyServiceCounts = useMemo(
+    () =>
+      BONO_FAMILY_META.map((family) => ({
+        ...family,
+        total: servicesCatalog.filter((service) => resolveBonoFamily(service) === family.key).length
+      })),
+    [servicesCatalog]
+  )
+
+  const filteredBonoServices = useMemo(() => {
+    const term = normalizeText(bonoSearch)
+
+    return servicesCatalog
+      .filter((service) => {
+        const family = resolveBonoFamily(service)
+        if (!family) return false
+        if (selectedBonoFamily && family !== selectedBonoFamily) return false
+        if (!term) return true
+
+        const haystack = normalizeText(
+          `${service.serviceCode || ''} ${service.name || ''} ${service.category || ''} ${service.description || ''}`
+        )
+        return haystack.includes(term)
+      })
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es', { sensitivity: 'base' }))
+  }, [servicesCatalog, bonoSearch, selectedBonoFamily])
+
+  const selectedBonoService = useMemo(
+    () => servicesCatalog.find((service) => service.id === selectedBonoServiceId) || null,
+    [servicesCatalog, selectedBonoServiceId]
+  )
+
+  const formatTaxRate = (value: unknown): string => {
+    if (value === null || value === undefined || String(value).trim() === '') return '-'
+    const parsed = Number(value)
+    if (!Number.isFinite(parsed)) return '-'
+    const percent = parsed <= 1 ? parsed * 100 : parsed
+    return `${percent.toLocaleString('es-ES', { maximumFractionDigits: 2 })}%`
+  }
+
+  const handleSelectBonoService = (service: any) => {
+    setSelectedBonoServiceId(service.id)
+    setBonoDraft((prev) => {
+      const normalizedPrice = Number(service.price || 0)
+      const fallbackPrice = Number.isFinite(normalizedPrice)
+        ? normalizedPrice.toFixed(2).replace('.', ',')
+        : ''
+      return {
+        ...prev,
+        name: prev.name.trim() ? prev.name : `Bono ${service.name}`,
+        price: prev.price.trim() ? prev.price : fallbackPrice
+      }
+    })
+  }
+
+  const handleCreateBonoSale = async () => {
+    if (!client) return
+    if (!selectedBonoService) {
+      toast.error('Selecciona un tratamiento para crear el bono')
+      return
+    }
+
+    const totalSessions = Number.parseInt(bonoDraft.totalSessions, 10)
+    if (!Number.isFinite(totalSessions) || totalSessions < 1) {
+      toast.error('Indica un número de sesiones válido')
+      return
+    }
+
+    const parsedPrice = bonoDraft.price
+      ? Number.parseFloat(bonoDraft.price.replace(',', '.'))
+      : Number.parseFloat(String(selectedBonoService.price || '0'))
+
+    setCreatingBono(true)
+    try {
+      await api.post('/bonos', {
+        clientId: client.id,
+        serviceId: selectedBonoService.id,
+        name: bonoDraft.name.trim() || `Bono ${selectedBonoService.name}`,
+        totalSessions,
+        price: Number.isFinite(parsedPrice) ? parsedPrice : 0,
+        expiryDate: bonoDraft.expiryDate || null,
+        notes: bonoDraft.notes.trim() || null
+      })
+
+      toast.success('Bono creado y asignado al cliente')
+      setBonoDraft({
+        name: '',
+        totalSessions: '12',
+        price: '',
+        expiryDate: '',
+        notes: ''
+      })
+      setSelectedBonoServiceId('')
+      await fetchClient()
+    } catch (error: any) {
+      console.error('Error creating bono from client detail:', error)
+      toast.error(error.response?.data?.error || 'No se pudo crear el bono')
+    } finally {
+      setCreatingBono(false)
+    }
+  }
+
+  const handleConsumeBonoSession = async (bonoPackId: string) => {
+    try {
+      await api.put(`/bonos/${bonoPackId}/consume`)
+      toast.success('Sesión descontada')
+      await fetchClient()
+    } catch (error: any) {
+      console.error('Error consuming bono session:', error)
+      toast.error(error.response?.data?.error || 'No se pudo descontar la sesión')
+    }
+  }
+
+  const handleDeleteBono = async (bonoPackId: string) => {
+    if (!confirm('¿Eliminar este bono del cliente?')) return
+    try {
+      await api.delete(`/bonos/${bonoPackId}`)
+      toast.success('Bono eliminado')
+      await fetchClient()
+    } catch (error: any) {
+      console.error('Error deleting bono:', error)
+      toast.error(error.response?.data?.error || 'No se pudo eliminar el bono')
+    }
+  }
+
+  const handleCreateAccountBalanceTopUp = async () => {
+    if (!client?.id) return
+
+    if (!accountBalanceDraft.description.trim()) {
+      toast.error('Indica una descripción del abono')
+      return
+    }
+
+    const parsedAmount = Number.parseFloat(accountBalanceDraft.amount.replace(',', '.'))
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      toast.error('Indica un importe válido para el abono')
+      return
+    }
+
+    if (!accountBalanceDraft.operationDate) {
+      toast.error('Selecciona la fecha del abono')
+      return
+    }
+
+    try {
+      setAccountBalanceSaving(true)
+      await api.post(`/bonos/account-balance/${client.id}/top-up`, {
+        description: accountBalanceDraft.description.trim(),
+        amount: parsedAmount,
+        operationDate: accountBalanceDraft.operationDate,
+        notes: accountBalanceDraft.notes.trim() || null
+      })
+      toast.success('Abono registrado correctamente')
+      setAccountBalanceDraft({
+        description: '',
+        amount: '',
+        operationDate: accountBalanceDateInput(),
+        notes: ''
+      })
+      await fetchAccountBalanceHistory(client.id)
+    } catch (error: any) {
+      console.error('Error creating account balance top-up:', error)
+      toast.error(error.response?.data?.error || 'No se pudo registrar el abono')
+    } finally {
+      setAccountBalanceSaving(false)
+    }
+  }
+
+  const upcomingAppointments = useMemo(() => {
+    const now = new Date()
+    const source = Array.isArray(client?.appointments) ? client.appointments : []
+
+    return source
+      .filter((appointment: any) => {
+        const status = String(appointment.status || '').toUpperCase()
+        if (status === 'CANCELLED' || status === 'NO_SHOW' || status === 'COMPLETED') {
+          return false
+        }
+
+        const startAt = new Date(appointment.date)
+        const [hour, minute] = String(appointment.startTime || '00:00')
+          .split(':')
+          .map((value) => Number.parseInt(value, 10))
+        startAt.setHours(Number.isFinite(hour) ? hour : 0, Number.isFinite(minute) ? minute : 0, 0, 0)
+
+        return startAt >= now
+      })
+      .sort((a: any, b: any) => {
+        const aStart = new Date(a.date)
+        const bStart = new Date(b.date)
+        const [aHour, aMinute] = String(a.startTime || '00:00')
+          .split(':')
+          .map((value) => Number.parseInt(value, 10))
+        const [bHour, bMinute] = String(b.startTime || '00:00')
+          .split(':')
+          .map((value) => Number.parseInt(value, 10))
+        aStart.setHours(Number.isFinite(aHour) ? aHour : 0, Number.isFinite(aMinute) ? aMinute : 0, 0, 0)
+        bStart.setHours(Number.isFinite(bHour) ? bHour : 0, Number.isFinite(bMinute) ? bMinute : 0, 0, 0)
+        return aStart.getTime() - bStart.getTime()
+      })
+      .slice(0, 3)
+  }, [client?.appointments])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -177,6 +488,8 @@ export default function ClientDetail() {
     { id: 'overview', label: 'Resumen', icon: User },
     { id: 'appointments', label: 'Citas', icon: CalendarCheck, count: client.appointments?.length || 0 },
     { id: 'sales', label: 'Ventas', icon: ShoppingBag, count: client.sales?.length || 0 },
+    { id: 'abonos', label: 'Abonos', icon: CreditCard, count: accountBalanceHistory.length },
+    { id: 'bonos', label: 'Bonos', icon: Ticket, count: client.bonoPacks?.length || 0 },
     { id: 'history', label: 'Historial', icon: History, count: client.clientHistory?.length || 0 }
   ]
 
@@ -301,7 +614,7 @@ export default function ClientDetail() {
 
             {/* Stats row */}
             <div className="border-t border-gray-200 dark:border-gray-700 pt-3 mt-3">
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
                 <div className="text-center">
                   <p className="text-xs text-gray-500 dark:text-gray-400">Total Gastado</p>
                   <p className="text-lg font-bold text-gray-900 dark:text-white">
@@ -321,6 +634,12 @@ export default function ClientDetail() {
                   <p className="text-lg font-bold text-orange-600">{client.sales?.length || 0}</p>
                 </div>
                 <div className="text-center">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Abono</p>
+                  <p className="text-lg font-bold text-amber-600">
+                    {formatCurrency(Number(client.accountBalance || 0))}
+                  </p>
+                </div>
+                <div className="text-center">
                   <p className="text-xs text-gray-500 dark:text-gray-400">Pendiente</p>
                   <p className={`text-lg font-bold ${Number(client.pendingAmount || 0) > 0 ? 'text-red-600' : 'text-gray-900 dark:text-white'}`}>
                     {formatCurrency(Number(client.pendingAmount || 0))}
@@ -336,15 +655,24 @@ export default function ClientDetail() {
       <div className="flex flex-wrap gap-2">
         {toolbarItems.map((item) => {
           const Icon = item.icon
+          const isEnabled = Boolean(item.tab)
           return (
             <button
               key={item.label}
-              disabled
-              title="Próximamente"
-              className="flex flex-col items-center gap-1 px-4 py-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 opacity-50 cursor-not-allowed"
+              type="button"
+              onClick={() => item.tab && setActiveTab(item.tab)}
+              disabled={!isEnabled}
+              title={isEnabled ? 'Abrir sección' : 'Próximamente'}
+              className={`flex flex-col items-center gap-1 px-4 py-3 rounded-lg border transition-colors ${
+                isEnabled
+                  ? 'border-primary-200 dark:border-primary-700 bg-white dark:bg-gray-800 hover:border-primary-500'
+                  : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 opacity-50 cursor-not-allowed'
+              }`}
             >
-              <Icon className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-              <span className="text-xs text-gray-500 dark:text-gray-400">{item.label}</span>
+              <Icon className={`w-5 h-5 ${isEnabled ? 'text-primary-600' : 'text-gray-500 dark:text-gray-400'}`} />
+              <span className={`text-xs ${isEnabled ? 'text-primary-700 dark:text-primary-300' : 'text-gray-500 dark:text-gray-400'}`}>
+                {item.label}
+              </span>
             </button>
           )
         })}
@@ -492,7 +820,15 @@ export default function ClientDetail() {
                   </div>
 
                   <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-white mb-2">Consentimientos</p>
+                    <div className="flex items-center gap-2 mb-2">
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">Consentimientos</p>
+                      {(clientAssets?.consents.length || 0) > 0 && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-300">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          OK
+                        </span>
+                      )}
+                    </div>
                     {clientAssets?.consents.length ? (
                       <div className="space-y-2">
                         {clientAssets.consents.map((asset) => (
@@ -522,6 +858,38 @@ export default function ClientDetail() {
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
               Historial de Citas
             </h3>
+            <div className="mb-5 rounded-lg border border-blue-100 bg-blue-50 p-4 dark:border-blue-900 dark:bg-blue-950/20">
+              <p className="text-sm font-semibold text-blue-900 dark:text-blue-200 mb-2">
+                Próximas citas
+              </p>
+              {upcomingAppointments.length > 0 ? (
+                <div className="space-y-2">
+                  {upcomingAppointments.map((appointment: any, index: number) => (
+                    <div
+                      key={`upcoming-${appointment.id}`}
+                      className="flex items-center justify-between rounded-md bg-white/80 px-3 py-2 text-sm dark:bg-gray-900/40"
+                    >
+                      <div>
+                        <p className="font-medium text-gray-900 dark:text-white">
+                          {index === 0 ? 'Próxima:' : 'Siguiente:'} {appointment.service?.name || 'Servicio'}
+                        </p>
+                        <p className="text-xs text-gray-600 dark:text-gray-400">
+                          {appointment.startTime} - {appointment.endTime} ·{' '}
+                          {appointment.cabin?.replace('CABINA_', 'Cabina ') || 'Sin cabina'}
+                        </p>
+                      </div>
+                      <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">
+                        {formatDate(appointment.date)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-blue-800 dark:text-blue-300">
+                  No hay próximas citas registradas.
+                </p>
+              )}
+            </div>
             {client.appointments && client.appointments.length > 0 ? (
               <div className="space-y-3">
                 {client.appointments.map((appointment: any) => (
@@ -660,6 +1028,346 @@ export default function ClientDetail() {
                 No hay ventas registradas
               </p>
             )}
+          </div>
+        )}
+
+        {activeTab === 'abonos' && (
+          <div className="space-y-6">
+            <div className="card space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Nuevo abono</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                    Registra una recarga del cliente (ejemplo: regalo para mi hija) para su saldo.
+                  </p>
+                </div>
+                <span className="badge badge-primary">
+                  Saldo actual: {formatCurrency(Number(client.accountBalance || 0))}
+                </span>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="md:col-span-2">
+                  <label className="label">Descripción</label>
+                  <input
+                    type="text"
+                    value={accountBalanceDraft.description}
+                    onChange={(event) =>
+                      setAccountBalanceDraft((current) => ({ ...current, description: event.target.value }))
+                    }
+                    className="input"
+                    placeholder="Ejemplo: Regalo para mi hija"
+                  />
+                </div>
+                <div>
+                  <label className="label">Importe a regalar</label>
+                  <input
+                    type="text"
+                    value={accountBalanceDraft.amount}
+                    onChange={(event) =>
+                      setAccountBalanceDraft((current) => ({ ...current, amount: event.target.value }))
+                    }
+                    className="input"
+                    placeholder="0,00"
+                  />
+                </div>
+                <div>
+                  <label className="label">Fecha</label>
+                  <input
+                    type="date"
+                    value={accountBalanceDraft.operationDate}
+                    onChange={(event) =>
+                      setAccountBalanceDraft((current) => ({ ...current, operationDate: event.target.value }))
+                    }
+                    className="input"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="label">Notas</label>
+                  <textarea
+                    value={accountBalanceDraft.notes}
+                    onChange={(event) =>
+                      setAccountBalanceDraft((current) => ({ ...current, notes: event.target.value }))
+                    }
+                    className="input resize-none"
+                    rows={3}
+                    placeholder="Observaciones del abono..."
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleCreateAccountBalanceTopUp}
+                  className="btn btn-primary"
+                  disabled={accountBalanceSaving}
+                >
+                  {accountBalanceSaving ? 'Guardando...' : 'Registrar abono'}
+                </button>
+              </div>
+            </div>
+
+            <div className="card">
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Historial de abonos</h3>
+                <span className="badge badge-secondary">{accountBalanceHistory.length}</span>
+              </div>
+
+              {accountBalanceLoading ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400">Cargando historial...</p>
+              ) : accountBalanceHistory.length === 0 ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Este cliente todavía no tiene movimientos de abono.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {accountBalanceHistory.map((movement) => {
+                    const isConsumption = movement.type === 'CONSUMPTION'
+                    return (
+                      <div
+                        key={movement.id}
+                        className="rounded-lg border border-gray-200 dark:border-gray-700 p-4"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`badge ${
+                                  isConsumption
+                                    ? 'badge-danger'
+                                    : movement.type === 'TOP_UP'
+                                      ? 'badge-success'
+                                      : 'badge-secondary'
+                                }`}
+                              >
+                                {accountBalanceMovementTypeLabel[movement.type]}
+                              </span>
+                              <p className="text-sm text-gray-600 dark:text-gray-400">
+                                {formatDate(movement.operationDate)}
+                              </p>
+                            </div>
+                            <p className="text-sm font-medium text-gray-900 dark:text-white mt-2">
+                              {movement.description}
+                            </p>
+                            {movement.referenceItem && (
+                              <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                                Tratamiento / Producto: {movement.referenceItem}
+                              </p>
+                            )}
+                            {movement.notes && (
+                              <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                                Notas: {movement.notes}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="text-right">
+                            <p className={`text-sm font-bold ${isConsumption ? 'text-red-600' : 'text-green-600'}`}>
+                              {isConsumption ? '-' : '+'}
+                              {formatCurrency(Number(movement.amount || 0))}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                              Restante: {formatCurrency(Number(movement.balanceAfter || 0))}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'bonos' && (
+          <div className="space-y-6">
+            <div className="card space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Nueva venta de bono</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                    Busca tratamientos, filtra por familia y crea el bono para este cliente.
+                  </p>
+                </div>
+                <span className="badge badge-secondary">{filteredBonoServices.length} resultados</span>
+              </div>
+
+              <div className="relative">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={bonoSearch}
+                  onChange={(event) => setBonoSearch(event.target.value)}
+                  className="input pl-9"
+                  placeholder="Buscar bono por código, familia o tratamiento..."
+                />
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                {familyServiceCounts.map((family) => (
+                  <button
+                    key={family.key}
+                    type="button"
+                    onClick={() => setSelectedBonoFamily((current) => (current === family.key ? null : family.key))}
+                    className={`text-left rounded-lg border p-3 transition-colors ${
+                      selectedBonoFamily === family.key
+                        ? 'border-primary-600 bg-primary-50 dark:bg-primary-900/20'
+                        : 'border-gray-200 dark:border-gray-700 hover:border-primary-400'
+                    }`}
+                  >
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white">{family.label}</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">{family.total} tratamientos</p>
+                  </button>
+                ))}
+              </div>
+
+              {servicesLoading ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400">Cargando tratamientos...</p>
+              ) : filteredBonoServices.length === 0 ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  No hay tratamientos para ese criterio en Depilación eléctrica, Corporal o Facial.
+                </p>
+              ) : (
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {filteredBonoServices.map((service) => {
+                    const familyKey = resolveBonoFamily(service)
+                    const familyLabel =
+                      BONO_FAMILY_META.find((family) => family.key === familyKey)?.label || service.category || 'Sin familia'
+                    return (
+                      <button
+                        key={service.id}
+                        type="button"
+                        onClick={() => handleSelectBonoService(service)}
+                        className={`rounded-lg border p-4 text-left transition-colors ${
+                          selectedBonoServiceId === service.id
+                            ? 'border-primary-600 bg-primary-50 dark:bg-primary-900/20'
+                            : 'border-gray-200 dark:border-gray-700 hover:border-primary-500'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-gray-900 dark:text-white">{service.name}</p>
+                            <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                              Código: {service.serviceCode || '-'} · {familyLabel}
+                            </p>
+                            <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                              Duración: {service.duration || 0} min · IVA: {formatTaxRate(service.taxRate)}
+                            </p>
+                          </div>
+                          <span className="text-sm font-bold text-primary-600">
+                            {formatCurrency(Number(service.price || 0))}
+                          </span>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+
+              {selectedBonoService && (
+                <div className="border border-primary-200 dark:border-primary-800 rounded-lg p-4 space-y-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-900 dark:text-white">
+                        Bono seleccionado: {selectedBonoService.name}
+                      </h4>
+                      <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                        Define sesiones, precio y caducidad para registrar la venta.
+                      </p>
+                    </div>
+                    <span className="badge badge-primary">Cliente #{client.externalCode || client.id.slice(0, 6)}</span>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="label">Nombre del bono</label>
+                      <input
+                        type="text"
+                        value={bonoDraft.name}
+                        onChange={(event) => setBonoDraft((prev) => ({ ...prev, name: event.target.value }))}
+                        className="input"
+                        placeholder={`Bono ${selectedBonoService.name}`}
+                      />
+                    </div>
+                    <div>
+                      <label className="label">Sesiones</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={bonoDraft.totalSessions}
+                        onChange={(event) => setBonoDraft((prev) => ({ ...prev, totalSessions: event.target.value }))}
+                        className="input"
+                      />
+                    </div>
+                    <div>
+                      <label className="label">Precio total</label>
+                      <input
+                        type="text"
+                        value={bonoDraft.price}
+                        onChange={(event) => setBonoDraft((prev) => ({ ...prev, price: event.target.value }))}
+                        className="input"
+                        placeholder="0,00"
+                      />
+                    </div>
+                    <div>
+                      <label className="label">Caducidad</label>
+                      <input
+                        type="date"
+                        value={bonoDraft.expiryDate}
+                        onChange={(event) => setBonoDraft((prev) => ({ ...prev, expiryDate: event.target.value }))}
+                        className="input"
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="label">Notas internas del bono</label>
+                      <textarea
+                        value={bonoDraft.notes}
+                        onChange={(event) => setBonoDraft((prev) => ({ ...prev, notes: event.target.value }))}
+                        className="input resize-none"
+                        rows={2}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={handleCreateBonoSale}
+                      className="btn btn-primary"
+                      disabled={creatingBono}
+                    >
+                      {creatingBono ? 'Guardando bono...' : 'Crear venta de bono'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="card">
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Bonos del cliente</h3>
+                <span className="badge badge-secondary">{client.bonoPacks?.length || 0}</span>
+              </div>
+
+              {client.bonoPacks && client.bonoPacks.length > 0 ? (
+                <div className="space-y-4">
+                  {client.bonoPacks.map((bonoPack: any) => (
+                    <BonoCard
+                      key={bonoPack.id}
+                      bonoPack={bonoPack}
+                      onConsume={handleConsumeBonoSession}
+                      onDelete={handleDeleteBono}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Este cliente todavía no tiene bonos asignados.
+                </p>
+              )}
+            </div>
           </div>
         )}
 

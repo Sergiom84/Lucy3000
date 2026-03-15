@@ -13,7 +13,7 @@ describe('sale.controller', () => {
 
   it('creates a sale linked to an appointment and creates automatic cash movement', async () => {
     const tx: any = {
-      $queryRaw: vi.fn().mockResolvedValue(undefined),
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
       sale: {
         findFirst: vi.fn().mockResolvedValue({ saleNumber: 'V-000099' }),
         create: vi.fn().mockResolvedValue({
@@ -109,7 +109,7 @@ describe('sale.controller', () => {
 
   it('returns 400 when stock is insufficient', async () => {
     const tx: any = {
-      $queryRaw: vi.fn().mockResolvedValue(undefined),
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
       sale: {
         findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({

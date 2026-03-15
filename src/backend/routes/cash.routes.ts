@@ -9,7 +9,8 @@ import {
   closeCashRegister,
   addCashMovement,
   getCashMovements,
-  updateOpeningBalance
+  updateOpeningBalance,
+  getPrivateNoTicketCashSales
 } from '../controllers/cash.controller'
 import { authMiddleware } from '../middleware/auth.middleware'
 import { validateRequest } from '../middleware/validation.middleware'
@@ -21,6 +22,7 @@ import {
   cashSummaryQuerySchema,
   closeCashRegisterBodySchema,
   openCashRegisterBodySchema,
+  privateNoTicketCashQuerySchema,
   updateOpeningBalanceBodySchema
 } from '../validators/cash.schemas'
 
@@ -30,6 +32,11 @@ router.use(authMiddleware)
 
 router.get('/', validateRequest({ query: cashListQuerySchema }), getCashRegisters)
 router.get('/summary', validateRequest({ query: cashSummaryQuerySchema }), getCashSummary)
+router.get(
+  '/private/no-ticket-cash',
+  validateRequest({ query: privateNoTicketCashQuerySchema }),
+  getPrivateNoTicketCashSales
+)
 router.get('/analytics', validateRequest({ query: cashAnalyticsQuerySchema }), getCashAnalytics)
 router.get('/analytics/ranking', validateRequest({ query: cashAnalyticsQuerySchema }), getCashRanking)
 router.get('/:id', validateRequest({ params: cashIdParamSchema }), getCashRegisterById)

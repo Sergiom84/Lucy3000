@@ -46,9 +46,6 @@ export default function ClientForm({ client, onSuccess, onCancel }: ClientFormPr
     landlinePhone: '',
     gender: '',
     birthDate: '',
-    birthDay: '',
-    birthMonthName: '',
-    birthYear: '',
     registrationDate: '',
     lastVisit: '',
     address: '',
@@ -85,9 +82,6 @@ export default function ClientForm({ client, onSuccess, onCancel }: ClientFormPr
         landlinePhone: client.landlinePhone || '',
         gender: client.gender || '',
         birthDate: client.birthDate ? new Date(client.birthDate).toISOString().split('T')[0] : '',
-        birthDay: client.birthDay?.toString() || '',
-        birthMonthName: client.birthMonthName || '',
-        birthYear: client.birthYear?.toString() || '',
         registrationDate: client.registrationDate ? new Date(client.registrationDate).toISOString().split('T')[0] : '',
         lastVisit: client.lastVisit ? new Date(client.lastVisit).toISOString().split('T')[0] : '',
         address: client.address || '',
@@ -184,8 +178,14 @@ export default function ClientForm({ client, onSuccess, onCancel }: ClientFormPr
 
       const pendingAmount = parseDecimalInput(formData.pendingAmount) || 0
       const billedAmount = parseDecimalInput(formData.billedAmount)
-
       const accountBalance = parseDecimalInput(formData.accountBalance)
+      const birthDateValue = formData.birthDate ? new Date(`${formData.birthDate}T00:00:00`) : null
+      const birthMonthName = birthDateValue
+        ? birthDateValue.toLocaleDateString('es-ES', { month: 'long' })
+        : null
+      const normalizedBirthMonthName = birthMonthName
+        ? birthMonthName.charAt(0).toUpperCase() + birthMonthName.slice(1)
+        : null
 
       const dataToSend: any = {
         externalCode: formData.externalCode.trim() || null,
@@ -197,10 +197,11 @@ export default function ClientForm({ client, onSuccess, onCancel }: ClientFormPr
         landlinePhone: formData.landlinePhone.trim() || null,
         email: formData.email.trim() || null,
         gender: formData.gender || null,
-        birthDate: formData.birthDate ? new Date(formData.birthDate).toISOString() : null,
-        birthDay: formData.birthDay ? Number.parseInt(formData.birthDay, 10) : null,
-        birthMonthName: formData.birthMonthName.trim() || null,
-        birthYear: formData.birthYear ? Number.parseInt(formData.birthYear, 10) : null,
+        birthDate: birthDateValue ? birthDateValue.toISOString() : null,
+        birthDay: birthDateValue ? birthDateValue.getDate() : null,
+        birthMonthNumber: birthDateValue ? birthDateValue.getMonth() + 1 : null,
+        birthMonthName: normalizedBirthMonthName,
+        birthYear: birthDateValue ? birthDateValue.getFullYear() : null,
         registrationDate: formData.registrationDate ? new Date(formData.registrationDate).toISOString() : null,
         lastVisit: formData.lastVisit ? new Date(formData.lastVisit).toISOString() : null,
         address: formData.address.trim() || null,
@@ -392,41 +393,6 @@ export default function ClientForm({ client, onSuccess, onCancel }: ClientFormPr
               value={formData.registrationDate}
               onChange={handleChange}
               className="input"
-            />
-          </div>
-          <div>
-            <label className="label">Día nacimiento</label>
-            <input
-              type="number"
-              name="birthDay"
-              value={formData.birthDay}
-              onChange={handleChange}
-              className="input"
-              min="1"
-              max="31"
-            />
-          </div>
-          <div>
-            <label className="label">Mes nacimiento</label>
-            <input
-              type="text"
-              name="birthMonthName"
-              value={formData.birthMonthName}
-              onChange={handleChange}
-              className="input"
-              placeholder="Enero, febrero..."
-            />
-          </div>
-          <div>
-            <label className="label">Año nacimiento</label>
-            <input
-              type="number"
-              name="birthYear"
-              value={formData.birthYear}
-              onChange={handleChange}
-              className="input"
-              min="1900"
-              max="2100"
             />
           </div>
           <div>

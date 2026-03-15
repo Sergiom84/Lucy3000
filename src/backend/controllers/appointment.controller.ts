@@ -56,13 +56,12 @@ const buildAppointmentUpdatePayload = (payload: Record<string, unknown>): Prisma
 const buildCalendarSyncInput = (appointment: any): AppointmentSyncInput => {
   const clientName = `${appointment.client.firstName} ${appointment.client.lastName}`.trim()
   const phoneLine = appointment.client.phone ? `\nTelefono: ${appointment.client.phone}` : ''
-  const notesLine = appointment.notes ? `\nNotas: ${appointment.notes}` : ''
 
   return {
     appointmentId: appointment.id,
     existingEventId: appointment.googleCalendarEventId || null,
     title: `${appointment.service.name} - ${clientName}`,
-    description: `Cita para ${appointment.service.name}\nCliente: ${clientName}${phoneLine}${notesLine}`,
+    description: `Cita para ${appointment.service.name}\nCliente: ${clientName}${phoneLine}`,
     date: appointment.date,
     startTime: appointment.startTime,
     endTime: appointment.endTime,

@@ -7,6 +7,7 @@ import {
   Plus,
   Receipt,
   RefreshCw,
+  Settings,
   ShoppingBag,
   Unlock,
   Edit
@@ -51,6 +52,12 @@ export default function Cash() {
   const [closeCashModal, setCloseCashModal] = useState(false)
   const [movementModal, setMovementModal] = useState(false)
   const [historyModal, setHistoryModal] = useState(false)
+  const [privatePinModal, setPrivatePinModal] = useState(false)
+  const [privateCashModal, setPrivateCashModal] = useState(false)
+  const [privatePinInput, setPrivatePinInput] = useState('')
+  const [privateCashRows, setPrivateCashRows] = useState<any[]>([])
+  const [privateCashTotal, setPrivateCashTotal] = useState(0)
+  const [privateCashLoading, setPrivateCashLoading] = useState(false)
   const [cashHistory, setCashHistory] = useState<any[]>([])
   const [editOpeningBalanceModal, setEditOpeningBalanceModal] = useState(false)
 
@@ -169,6 +176,26 @@ export default function Cash() {
     }
   }
 
+  const loadPrivateNoTicketCash = async () => {
+    try {
+      setPrivateCashLoading(true)
+      const response = await api.get('/cash/private/no-ticket-cash', {
+        params: {
+          pin: privatePinInput
+        }
+      })
+      setPrivateCashRows(response.data.rows || [])
+      setPrivateCashTotal(Number(response.data.totalAmount || 0))
+      setPrivatePinModal(false)
+      setPrivateCashModal(true)
+      setPrivatePinInput('')
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'No se pudo abrir la sección privada')
+    } finally {
+      setPrivateCashLoading(false)
+    }
+  }
+
   const handleOpenCash = async () => {
     try {
       await api.post('/cash/open', {
@@ -274,6 +301,10 @@ export default function Cash() {
             <Receipt className="w-4 h-4 mr-2" />
             Historial
           </button>
+          <button onClick={() => setPrivatePinModal(true)} className="btn btn-secondary" title="Sección privada">
+            <Settings className="w-4 h-4 mr-2" />
+            Privado
+          </button>
           {!activeCashRegister ? (
             <button onClick={() => setOpenCashModal(true)} className="btn btn-primary">
               <Unlock className="w-4 h-4 mr-2" />
@@ -368,44 +399,94 @@ export default function Cash() {
         </div>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1.1fr_1fr]">
-        <div className="card">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Movimientos de la caja abierta</h2>
-            <button onClick={() => void Promise.all([loadActiveCashRegister(), loadSummary()])} className="btn btn-secondary btn-sm">
-              <RefreshCw className="w-4 h-4 mr-2" />
-              Actualizar
-            </button>
-          </div>
+      <div className="card">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Movimientos unificados</h2>
+          <button
+            onClick={() => void Promise.all([loadAnalytics(), loadRanking(), loadActiveCashRegister(), loadSummary()])}
+            className="btn btn-secondary btn-sm"
+          >
+            <RefreshCw className="w-4 h-4 mr-2" />
+            Actualizar
+          </button>
+        </div>
 
-          {!activeCashRegister ? (
-            <p className="text-sm text-gray-500 dark:text-gray-400">No hay caja abierta actualmente.</p>
-          ) : (
-            <div className="space-y-3 max-h-[26rem] overflow-y-auto">
-              {activeCashRegister.movements.length === 0 ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">Sin movimientos todavía.</p>
-              ) : (
-                activeCashRegister.movements.map((movement) => (
-                  <div key={movement.id} className="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3">
-                    <div className="flex items-center justify-between gap-4">
-                      <div>
-                        <p className="font-medium text-gray-900 dark:text-white">{movement.description}</p>
+        {analyticsLoading ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400">Cargando movimientos...</p>
+        ) : (
+          <div className="overflow-x-auto max-h-[30rem]">
+            <table className="table min-w-full">
+              <thead>
+                <tr>
+                  <th className="px-4 py-3 text-left min-w-[16rem]">Nombre y apellidos</th>
+                  <th className="px-4 py-3 text-left min-w-[14rem]">Concepto</th>
+                  <th className="px-4 py-3 text-left min-w-[7rem]">Pago</th>
+                  <th className="px-4 py-3 text-left min-w-[8rem]">Importe</th>
+                  <th className="px-4 py-3 text-left min-w-[12rem]">Profesional</th>
+                  <th className="px-4 py-3 text-left min-w-[8rem]">Nº venta</th>
+                </tr>
+              </thead>
+              <tbody>
+                {analyticsRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="text-center py-8 text-gray-500 dark:text-gray-400">
+                      No hay resultados para los filtros seleccionados.
+                    </td>
+                  </tr>
+                ) : (
+                  analyticsRows.map((row) => (
+                    <tr key={`${row.saleId}-${row.concept}-${row.amount}-${row.quantity}`} className="align-top">
+                      <td className="px-4 py-3">{row.clientName}</td>
+                      <td className="px-4 py-3">{row.concept}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">{paymentMethodLabel(row.paymentMethod)}</td>
+                      <td className="px-4 py-3 font-semibold whitespace-nowrap">{formatCurrency(Number(row.amount))}</td>
+                      <td className="px-4 py-3">{row.professionalName}</td>
+                      <td className="px-4 py-3 font-mono text-xs whitespace-nowrap">{row.saleNumber}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[1.25fr_1fr]">
+        <div className="card space-y-6">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Ranking</h2>
+          {rankingGroups.map((group) => (
+            <div key={group.key} className="space-y-3">
+              <h3 className="font-medium text-gray-900 dark:text-white">{group.title}</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Top 10</p>
+                  <div className="space-y-2">
+                    {(ranking?.[group.key]?.top || []).map((item: any) => (
+                      <div key={`top-${group.key}-${item.id}`} className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2">
+                        <p className="text-sm font-medium text-gray-900 dark:text-white">{item.name}</p>
                         <p className="text-xs text-gray-500 dark:text-gray-400">
-                          {movement.category}
-                          {movement.paymentMethod ? ` · ${paymentMethodLabel(movement.paymentMethod)}` : ''}
-                          {movement.user?.name ? ` · ${movement.user.name}` : ''}
+                          {item.quantity} uds · {formatCurrency(Number(item.revenue))}
                         </p>
                       </div>
-                      <span className={`font-semibold ${movement.type === 'EXPENSE' || movement.type === 'WITHDRAWAL' ? 'text-red-600' : 'text-green-600'}`}>
-                        {movement.type === 'EXPENSE' || movement.type === 'WITHDRAWAL' ? '-' : '+'}
-                        {formatCurrency(Number(movement.amount))}
-                      </span>
-                    </div>
+                    ))}
                   </div>
-                ))
-              )}
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Bottom 10</p>
+                  <div className="space-y-2">
+                    {(ranking?.[group.key]?.bottom || []).map((item: any) => (
+                      <div key={`bottom-${group.key}-${item.id}`} className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2">
+                        <p className="text-sm font-medium text-gray-900 dark:text-white">{item.name}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          {item.quantity} uds · {formatCurrency(Number(item.revenue))}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
-          )}
+          ))}
         </div>
 
         <div className="card space-y-4">
@@ -500,83 +581,6 @@ export default function Cash() {
               Limpiar filtros
             </button>
           </div>
-        </div>
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-[1.25fr_1fr]">
-        <div className="card">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Analítica filtrada</h2>
-          {analyticsLoading ? (
-            <p className="text-sm text-gray-500 dark:text-gray-400">Cargando analítica...</p>
-          ) : (
-            <div className="overflow-x-auto max-h-[30rem]">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Nombre y apellidos</th>
-                    <th>Concepto</th>
-                    <th>Pago</th>
-                    <th>Importe</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {analyticsRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={4} className="text-center py-8 text-gray-500 dark:text-gray-400">
-                        No hay resultados para los filtros seleccionados.
-                      </td>
-                    </tr>
-                  ) : (
-                    analyticsRows.map((row) => (
-                      <tr key={`${row.saleId}-${row.concept}-${row.amount}`}>
-                        <td>{row.clientName}</td>
-                        <td>{row.concept}</td>
-                        <td>{paymentMethodLabel(row.paymentMethod)}</td>
-                        <td className="font-semibold">{formatCurrency(Number(row.amount))}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        <div className="card space-y-6">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Ranking</h2>
-          {rankingGroups.map((group) => (
-            <div key={group.key} className="space-y-3">
-              <h3 className="font-medium text-gray-900 dark:text-white">{group.title}</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Top 10</p>
-                  <div className="space-y-2">
-                    {(ranking?.[group.key]?.top || []).map((item: any) => (
-                      <div key={`top-${group.key}-${item.id}`} className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2">
-                        <p className="text-sm font-medium text-gray-900 dark:text-white">{item.name}</p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
-                          {item.quantity} uds · {formatCurrency(Number(item.revenue))}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Bottom 10</p>
-                  <div className="space-y-2">
-                    {(ranking?.[group.key]?.bottom || []).map((item: any) => (
-                      <div key={`bottom-${group.key}-${item.id}`} className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2">
-                        <p className="text-sm font-medium text-gray-900 dark:text-white">{item.name}</p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
-                          {item.quantity} uds · {formatCurrency(Number(item.revenue))}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
         </div>
       </div>
 
@@ -726,6 +730,83 @@ export default function Cash() {
           >
             Guardar movimiento
           </button>
+        </div>
+      </Modal>
+
+      <Modal isOpen={privatePinModal} onClose={() => setPrivatePinModal(false)} title="Acceso privado">
+        <div className="space-y-4">
+          <p className="text-sm text-gray-700 dark:text-gray-300">
+            Introduce la contraseña para acceder a movimientos en efectivo sin ticket.
+          </p>
+          <input
+            type="password"
+            inputMode="numeric"
+            maxLength={4}
+            value={privatePinInput}
+            onChange={(event) => setPrivatePinInput(event.target.value.replace(/\D/g, '').slice(0, 4))}
+            className="input"
+            placeholder="Contraseña"
+          />
+          <button
+            onClick={() => void loadPrivateNoTicketCash()}
+            className="btn btn-primary w-full"
+            disabled={privatePinInput.length !== 4 || privateCashLoading}
+          >
+            {privateCashLoading ? 'Validando...' : 'Entrar'}
+          </button>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={privateCashModal}
+        onClose={() => setPrivateCashModal(false)}
+        title="Efectivo sin ticket"
+        maxWidth="2xl"
+      >
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-gray-900 dark:text-white">
+              Total: {formatCurrency(privateCashTotal)}
+            </p>
+          </div>
+          <div className="max-h-[30rem] overflow-y-auto space-y-3 pr-1">
+            {privateCashRows.length === 0 ? (
+              <div className="rounded-lg border border-gray-200 dark:border-gray-700 py-8 text-center text-gray-500 dark:text-gray-400">
+                No hay registros en esta sección.
+              </div>
+            ) : (
+              privateCashRows.map((row) => (
+                <div key={row.id} className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Fecha</p>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white mt-1">
+                        {new Date(row.date).toLocaleString()}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Ticket</p>
+                      <p className="text-sm font-mono text-gray-900 dark:text-white mt-1">{row.saleNumber}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Cliente</p>
+                      <p className="text-sm text-gray-900 dark:text-white mt-1">{row.clientName}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Usuario</p>
+                      <p className="text-sm text-gray-900 dark:text-white mt-1">{row.userName}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Importe</p>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white mt-1">
+                        {formatCurrency(Number(row.amount))}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </Modal>
 

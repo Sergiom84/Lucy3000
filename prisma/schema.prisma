@@ -110,6 +110,7 @@ model Client {
   sales           Sale[]
   clientHistory   ClientHistory[]
   bonoPacks       BonoPack[]
+  accountBalanceMovements AccountBalanceMovement[]
   linkedClient    Client?   @relation("ClientLink", fields: [linkedClientId], references: [id], onDelete: SetNull)
   relatedClients  Client[]  @relation("ClientLink")
 
@@ -280,6 +281,7 @@ model Sale {
   tax             Decimal       @default(0) @db.Decimal(10, 2)
   total           Decimal       @db.Decimal(10, 2)
   paymentMethod   PaymentMethod
+  showInOfficialCash Boolean    @default(true)
   status          SaleStatus    @default(COMPLETED)
   notes           String?
   
@@ -288,6 +290,7 @@ model Sale {
   user            User          @relation(fields: [userId], references: [id])
   items           SaleItem[]
   cashMovement    CashMovement?
+  accountBalanceMovements AccountBalanceMovement[]
   
   @@map("sales")
 }
@@ -369,6 +372,33 @@ enum CashMovementType {
   EXPENSE
   WITHDRAWAL
   DEPOSIT
+}
+
+model AccountBalanceMovement {
+  id            String                     @id @default(uuid())
+  clientId      String
+  saleId        String?
+  type          AccountBalanceMovementType
+  operationDate DateTime                   @default(now())
+  description   String
+  referenceItem String?
+  amount        Decimal                    @db.Decimal(10, 2)
+  balanceAfter  Decimal                    @db.Decimal(10, 2)
+  notes         String?
+  createdAt     DateTime                   @default(now())
+
+  client        Client                     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  sale          Sale?                      @relation(fields: [saleId], references: [id], onDelete: SetNull)
+
+  @@index([clientId, operationDate])
+  @@index([saleId])
+  @@map("account_balance_movements")
+}
+
+enum AccountBalanceMovementType {
+  TOP_UP
+  CONSUMPTION
+  ADJUSTMENT
 }
 
 // ============================================

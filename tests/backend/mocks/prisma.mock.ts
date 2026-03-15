@@ -3,6 +3,7 @@ import { vi } from 'vitest'
 export const prismaMock: any = {
   $transaction: vi.fn(),
   $queryRaw: vi.fn(),
+  $executeRaw: vi.fn(),
   $disconnect: vi.fn(),
 
   user: {
@@ -25,6 +26,23 @@ export const prismaMock: any = {
     count: vi.fn(),
     create: vi.fn(),
     update: vi.fn()
+  },
+
+  bonoPack: {
+    findMany: vi.fn(),
+    findUnique: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn()
+  },
+
+  bonoSession: {
+    update: vi.fn()
+  },
+
+  accountBalanceMovement: {
+    findMany: vi.fn(),
+    create: vi.fn()
   },
 
   appointment: {

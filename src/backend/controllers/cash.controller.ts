@@ -5,6 +5,7 @@ import { AuthRequest } from '../middleware/auth.middleware'
 import { buildInclusiveDateRange } from '../utils/date-range'
 
 const paymentMethods: PaymentMethod[] = ['CASH', 'CARD', 'BIZUM', 'OTHER']
+const PRIVATE_NO_TICKET_CASH_PIN = '0852'
 
 const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat('es-ES', {
@@ -58,6 +59,10 @@ const getPeriodRange = (period: 'DAY' | 'WEEK' | 'MONTH' | 'YEAR', referenceDate
 
 const saleRangeWhere = (start: Date, end: Date): Prisma.SaleWhereInput => ({
   status: 'COMPLETED',
+  NOT: {
+    paymentMethod: 'CASH',
+    showInOfficialCash: false
+  },
   date: {
     gte: start,
     lte: end
@@ -206,6 +211,10 @@ const getAnalyticsRows = async (query: Request['query'] | undefined) => {
   const sales = await prisma.sale.findMany({
     where: {
       status: 'COMPLETED',
+      NOT: {
+        paymentMethod: 'CASH',
+        showInOfficialCash: false
+      },
       date: {
         gte: start,
         lte: end
@@ -215,6 +224,11 @@ const getAnalyticsRows = async (query: Request['query'] | undefined) => {
       ...(serviceId || productId || type !== 'ALL' ? { items: { some: itemFilter } } : {})
     },
     include: {
+      user: {
+        select: {
+          name: true
+        }
+      },
       client: {
         select: {
           id: true,
@@ -245,6 +259,7 @@ const getAnalyticsRows = async (query: Request['query'] | undefined) => {
       clientId: sale.clientId,
       clientName: sale.client ? `${sale.client.firstName} ${sale.client.lastName}`.trim() : 'Cliente general',
       paymentMethod: sale.paymentMethod,
+      professionalName: sale.user?.name || 'Sin usuario',
       itemType: item.serviceId ? 'SERVICE' : 'PRODUCT',
       serviceId: item.serviceId,
       productId: item.productId,
@@ -253,6 +268,55 @@ const getAnalyticsRows = async (query: Request['query'] | undefined) => {
       amount: Number(item.subtotal)
     }))
   )
+}
+
+export const getPrivateNoTicketCashSales = async (req: Request, res: Response) => {
+  try {
+    const pin = String(req.query.pin || '').trim()
+    if (pin !== PRIVATE_NO_TICKET_CASH_PIN) {
+      return res.status(403).json({ error: 'PIN incorrecto' })
+    }
+
+    const sales = await prisma.sale.findMany({
+      where: {
+        status: 'COMPLETED',
+        paymentMethod: 'CASH',
+        showInOfficialCash: false
+      },
+      include: {
+        client: {
+          select: {
+            firstName: true,
+            lastName: true
+          }
+        },
+        user: {
+          select: {
+            name: true
+          }
+        }
+      },
+      orderBy: { date: 'desc' }
+    })
+
+    const rows = sales.map((sale) => ({
+      id: sale.id,
+      saleNumber: sale.saleNumber,
+      date: sale.date,
+      amount: Number(sale.total),
+      description: sale.notes || null,
+      clientName: sale.client ? `${sale.client.firstName} ${sale.client.lastName}`.trim() : 'Cliente general',
+      userName: sale.user?.name || 'Sin usuario'
+    }))
+
+    res.json({
+      rows,
+      totalAmount: rows.reduce((sum, row) => sum + row.amount, 0)
+    })
+  } catch (error) {
+    console.error('Get private no-ticket cash sales error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
 }
 
 export const getCashRegisters = async (req: Request, res: Response) => {

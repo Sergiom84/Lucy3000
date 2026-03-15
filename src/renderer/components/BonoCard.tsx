@@ -33,6 +33,7 @@ const statusBadge: Record<string, { label: string; className: string }> = {
 
 export default function BonoCard({ bonoPack, onConsume, onDelete }: BonoCardProps) {
   const consumed = bonoPack.sessions.filter(s => s.status === 'CONSUMED').length
+  const remainingSessions = Math.max(bonoPack.totalSessions - consumed, 0)
   const badge = statusBadge[bonoPack.status] || statusBadge.ACTIVE
 
   return (
@@ -91,21 +92,33 @@ export default function BonoCard({ bonoPack, onConsume, onDelete }: BonoCardProp
 
       {/* Footer */}
       <div className="flex items-center justify-between pt-2 border-t border-gray-200 dark:border-gray-700">
-        <p className="text-sm text-gray-600 dark:text-gray-400">
-          {consumed}/{bonoPack.totalSessions} sesiones usadas
-        </p>
-        {bonoPack.notes && (
-          <p className="text-xs text-gray-400 dark:text-gray-500 mx-2 truncate max-w-[200px]">
-            {bonoPack.notes}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {consumed}/{bonoPack.totalSessions} sesiones usadas · Restantes: {remainingSessions}
           </p>
-        )}
-        <button
-          onClick={() => onDelete(bonoPack.id)}
-          className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors"
-          title="Eliminar bono"
-        >
-          <Trash2 className="w-4 h-4" />
-        </button>
+          {bonoPack.notes && (
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 truncate">
+              {bonoPack.notes}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 ml-3">
+          <button
+            onClick={() => onConsume(bonoPack.id)}
+            disabled={bonoPack.status !== 'ACTIVE' || remainingSessions === 0}
+            className="btn btn-secondary btn-sm"
+            title="Descontar una sesión"
+          >
+            Descontar sesión
+          </button>
+          <button
+            onClick={() => onDelete(bonoPack.id)}
+            className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors"
+            title="Eliminar bono"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
       </div>
     </div>
   )

@@ -331,7 +331,7 @@ export const getClientById = async (req: Request, res: Response) => {
             }
           },
           orderBy: { date: 'desc' },
-          take: 10
+          take: 50
         },
         sales: {
           include: {

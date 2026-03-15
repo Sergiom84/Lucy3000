@@ -21,6 +21,13 @@ type SaleItemInput = {
   price: number
 }
 
+type AccountBalanceUsageInput = {
+  operationDate: Date
+  referenceItem: string
+  amount: number
+  notes?: string | null
+}
+
 type TxClient = Prisma.TransactionClient
 
 const SALE_STATUSES: SaleStatus[] = ['PENDING', 'COMPLETED', 'CANCELLED', 'REFUNDED']
@@ -89,8 +96,10 @@ const calculateTotals = (items: SaleItemInput[], discount: number, tax: number) 
   return { subtotal, total }
 }
 
+const roundCurrency = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100
+
 const buildSaleNumber = async (tx: TxClient): Promise<string> => {
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(3001001)`
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(3001001)`
 
   const lastSale = await tx.sale.findFirst({
     select: { saleNumber: true },
@@ -119,7 +128,9 @@ const syncAutomaticCashMovement = async (
     clientName: string
     userId: string
     total: number
+    cashAmount?: number
     paymentMethod: PaymentMethod
+    showInOfficialCash?: boolean
     deleteOnly?: boolean
   }
 ) => {
@@ -128,6 +139,28 @@ const syncAutomaticCashMovement = async (
   })
 
   if (payload.deleteOnly) {
+    if (existing) {
+      await tx.cashMovement.delete({
+        where: { saleId: payload.saleId }
+      })
+    }
+    return
+  }
+
+  if (payload.showInOfficialCash === false) {
+    if (existing) {
+      await tx.cashMovement.delete({
+        where: { saleId: payload.saleId }
+      })
+    }
+    return
+  }
+
+  const movementAmount = roundCurrency(
+    Number.isFinite(payload.cashAmount) ? Math.max(0, Number(payload.cashAmount)) : Number(payload.total)
+  )
+
+  if (movementAmount <= 0) {
     if (existing) {
       await tx.cashMovement.delete({
         where: { saleId: payload.saleId }
@@ -146,7 +179,7 @@ const syncAutomaticCashMovement = async (
       data: {
         type: 'INCOME',
         paymentMethod: payload.paymentMethod,
-        amount: payload.total,
+        amount: movementAmount,
         category: 'Ventas',
         description,
         reference: payload.saleNumber
@@ -165,7 +198,7 @@ const syncAutomaticCashMovement = async (
       saleId: payload.saleId,
       type: 'INCOME',
       paymentMethod: payload.paymentMethod,
-      amount: payload.total,
+      amount: movementAmount,
       category: 'Ventas',
       description,
       reference: payload.saleNumber
@@ -183,7 +216,9 @@ const applySaleEffects = async (
     userId: string
     appointmentId: string | null
     total: number
+    cashMovementTotal?: number
     paymentMethod: PaymentMethod
+    showInOfficialCash: boolean
     items: SaleItemInput[]
   }
 ) => {
@@ -250,7 +285,59 @@ const applySaleEffects = async (
     clientName: payload.clientName,
     userId: payload.userId,
     total: payload.total,
-    paymentMethod: payload.paymentMethod
+    cashAmount: payload.cashMovementTotal,
+    paymentMethod: payload.paymentMethod,
+    showInOfficialCash: payload.showInOfficialCash
+  })
+}
+
+const applyAccountBalanceUsage = async (
+  tx: TxClient,
+  payload: {
+    clientId: string
+    saleId: string
+    saleNumber: string
+    usage: AccountBalanceUsageInput
+  }
+) => {
+  const client = await tx.client.findUnique({
+    where: { id: payload.clientId },
+    select: {
+      id: true,
+      accountBalance: true
+    }
+  })
+
+  if (!client) {
+    throw new BusinessError(404, 'Client not found')
+  }
+
+  const currentBalance = Number(client.accountBalance || 0)
+  if (currentBalance < payload.usage.amount) {
+    throw new BusinessError(400, 'Insufficient account balance')
+  }
+
+  const nextBalance = Math.round((currentBalance - payload.usage.amount + Number.EPSILON) * 100) / 100
+
+  await tx.client.update({
+    where: { id: payload.clientId },
+    data: {
+      accountBalance: nextBalance
+    }
+  })
+
+  await tx.accountBalanceMovement.create({
+    data: {
+      clientId: payload.clientId,
+      saleId: payload.saleId,
+      type: 'CONSUMPTION',
+      operationDate: payload.usage.operationDate,
+      description: `Consumo en venta ${payload.saleNumber}`,
+      referenceItem: payload.usage.referenceItem,
+      amount: payload.usage.amount,
+      balanceAfter: nextBalance,
+      notes: payload.usage.notes || null
+    }
   })
 }
 
@@ -379,7 +466,17 @@ export const getSaleById = async (req: Request, res: Response) => {
 
 export const createSale = async (req: AuthRequest, res: Response) => {
   try {
-    const { clientId, appointmentId, items, discount, tax, paymentMethod, notes } = req.body
+    const {
+      clientId,
+      appointmentId,
+      items,
+      discount,
+      tax,
+      paymentMethod,
+      notes,
+      showInOfficialCash,
+      accountBalanceUsage
+    } = req.body
 
     if (!req.user?.id) {
       throw new BusinessError(401, 'Unauthorized')
@@ -393,6 +490,38 @@ export const createSale = async (req: AuthRequest, res: Response) => {
     const discountValue = Number(discount) || 0
     const taxValue = Number(tax) || 0
     const { subtotal, total } = calculateTotals(normalizedItems, discountValue, taxValue)
+    const parsedAccountBalanceUsage: AccountBalanceUsageInput | null = accountBalanceUsage
+      ? {
+          operationDate: new Date(accountBalanceUsage.operationDate),
+          referenceItem: String(accountBalanceUsage.referenceItem).trim(),
+          amount: Number(accountBalanceUsage.amount),
+          notes: accountBalanceUsage.notes || null
+        }
+      : null
+
+    if (
+      parsedAccountBalanceUsage &&
+      (!Number.isFinite(parsedAccountBalanceUsage.amount) || parsedAccountBalanceUsage.amount <= 0)
+    ) {
+      throw new BusinessError(400, 'Account balance usage amount must be greater than zero')
+    }
+
+    if (parsedAccountBalanceUsage && parsedAccountBalanceUsage.amount > total) {
+      throw new BusinessError(400, 'Account balance usage amount cannot be greater than sale total')
+    }
+
+    const officialCashTotal = parsedAccountBalanceUsage
+      ? roundCurrency(total - parsedAccountBalanceUsage.amount)
+      : roundCurrency(total)
+
+    if (parsedAccountBalanceUsage && paymentMethod === 'OTHER' && officialCashTotal > 0) {
+      throw new BusinessError(400, 'Payment method OTHER requires full account balance coverage')
+    }
+
+    let shouldShowInOfficialCash = paymentMethod === 'CASH' ? showInOfficialCash !== false : true
+    if (parsedAccountBalanceUsage && (paymentMethod === 'OTHER' || officialCashTotal <= 0)) {
+      shouldShowInOfficialCash = false
+    }
 
     const sale = await prisma.$transaction(async (tx) => {
       let resolvedClientId = clientId || null
@@ -435,6 +564,10 @@ export const createSale = async (req: AuthRequest, res: Response) => {
         appointmentClientName = `${appointment.client.firstName} ${appointment.client.lastName}`.trim()
       }
 
+      if (parsedAccountBalanceUsage && !resolvedClientId) {
+        throw new BusinessError(400, 'Account balance usage requires a client')
+      }
+
       const saleNumber = await buildSaleNumber(tx)
 
       const createdSale = await tx.sale.create({
@@ -448,6 +581,7 @@ export const createSale = async (req: AuthRequest, res: Response) => {
           tax: taxValue,
           total,
           paymentMethod,
+          showInOfficialCash: shouldShowInOfficialCash,
           status: 'COMPLETED',
           notes: notes || null,
           items: {
@@ -479,9 +613,20 @@ export const createSale = async (req: AuthRequest, res: Response) => {
         userId: req.user!.id,
         appointmentId: createdSale.appointmentId,
         total,
+        cashMovementTotal: officialCashTotal,
         paymentMethod,
+        showInOfficialCash: createdSale.showInOfficialCash,
         items: normalizedItems
       })
+
+      if (parsedAccountBalanceUsage && createdSale.clientId) {
+        await applyAccountBalanceUsage(tx, {
+          clientId: createdSale.clientId,
+          saleId: createdSale.id,
+          saleNumber,
+          usage: parsedAccountBalanceUsage
+        })
+      }
 
       return tx.sale.findUnique({
         where: { id: createdSale.id },
@@ -575,6 +720,7 @@ export const updateSale = async (req: Request, res: Response) => {
           appointmentId: sale.appointmentId,
           total: Number(sale.total),
           paymentMethod: nextPaymentMethod,
+          showInOfficialCash: sale.showInOfficialCash,
           items: normalizedItems
         })
       } else if (sale.status === 'COMPLETED' && nextStatus === 'COMPLETED' && nextPaymentMethod !== sale.paymentMethod) {
@@ -584,7 +730,8 @@ export const updateSale = async (req: Request, res: Response) => {
           clientName: persisted.client ? `${persisted.client.firstName} ${persisted.client.lastName}`.trim() : '',
           userId: sale.userId,
           total: Number(sale.total),
-          paymentMethod: nextPaymentMethod
+          paymentMethod: nextPaymentMethod,
+          showInOfficialCash: sale.showInOfficialCash
         })
       }
 

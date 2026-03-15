@@ -81,14 +81,40 @@ const slugify = (value: string) =>
     .replace(/^-+|-+$/g, '')
 
 const getUserDataDir = () => app.getPath('userData')
+const getLegacyClientsRootDir = () => path.join(getUserDataDir(), 'clients')
+const getDocumentsClientsRootDir = () =>
+  path.join(app.getPath('documents'), 'Lucy3000', 'Documentos', 'Clientes')
 
 const ensureDir = async (targetPath: string) => {
   await fsPromises.mkdir(targetPath, { recursive: true })
 }
 
+const findExistingClientDir = async (rootDir: string, clientId: string) => {
+  try {
+    const entries = await fsPromises.readdir(rootDir, { withFileTypes: true })
+    const match = entries.find((entry) => entry.isDirectory() && entry.name.endsWith(`-${clientId}`))
+    return match ? path.join(rootDir, match.name) : null
+  } catch {
+    return null
+  }
+}
+
 const getClientBaseDir = async (clientId: string, clientName: string) => {
   const folderName = `${slugify(clientName || 'cliente') || 'cliente'}-${clientId}`
-  const baseDir = path.join(getUserDataDir(), 'clients', folderName)
+  const documentsRoot = getDocumentsClientsRootDir()
+  const legacyRoot = getLegacyClientsRootDir()
+
+  await ensureDir(documentsRoot)
+
+  const existingDocumentsDir = await findExistingClientDir(documentsRoot, clientId)
+  const existingLegacyDir = await findExistingClientDir(legacyRoot, clientId)
+  const preferredDir = existingDocumentsDir || path.join(documentsRoot, folderName)
+
+  if (!existingDocumentsDir && existingLegacyDir) {
+    await fsPromises.cp(existingLegacyDir, preferredDir, { recursive: true, force: false })
+  }
+
+  const baseDir = preferredDir
   await ensureDir(baseDir)
   await ensureDir(path.join(baseDir, CLIENT_ASSET_FOLDERS.photos))
   await ensureDir(path.join(baseDir, CLIENT_ASSET_FOLDERS.consents))
@@ -434,13 +460,11 @@ ipcMain.handle('clientAssets:list', async (_, payload: { clientId: string; clien
 ipcMain.handle(
   'clientAssets:import',
   async (_, payload: { clientId: string; clientName: string; kind: ClientAssetKind }) => {
+    const imageExtensions = ['png', 'jpg', 'jpeg', 'webp']
     const dialogResult = await dialog.showOpenDialog(mainWindow!, {
       title: payload.kind === 'photos' ? 'Seleccionar fotos del cliente' : 'Seleccionar consentimientos',
       properties: ['openFile', 'multiSelections'],
-      filters:
-        payload.kind === 'photos'
-          ? [{ name: 'Imágenes', extensions: ['png', 'jpg', 'jpeg', 'webp'] }]
-          : [{ name: 'Documentos', extensions: ['pdf', 'png', 'jpg', 'jpeg', 'doc', 'docx'] }]
+      filters: [{ name: 'Imágenes', extensions: imageExtensions }]
     })
 
     if (dialogResult.canceled || dialogResult.filePaths.length === 0) {

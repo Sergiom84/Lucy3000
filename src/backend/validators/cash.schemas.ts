@@ -70,6 +70,13 @@ export const cashSummaryQuerySchema = z.object({
   referenceDate: dateQuerySchema.optional()
 })
 
+export const privateNoTicketCashQuerySchema = z.object({
+  pin: z
+    .string()
+    .trim()
+    .regex(/^\d{4}$/, 'PIN inválido')
+})
+
 export const updateOpeningBalanceBodySchema = z
   .object({
     openingBalance: nonNegativeMoneySchema,

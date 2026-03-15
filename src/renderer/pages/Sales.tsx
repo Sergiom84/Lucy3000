@@ -18,6 +18,7 @@ import toast from 'react-hot-toast'
 import Modal from '../components/Modal'
 import api from '../utils/api'
 import { printTicket } from '../utils/desktop'
+import { formatCurrency } from '../utils/format'
 import { buildSaleTicketPayload, paymentMethodLabel } from '../utils/tickets'
 
 interface CartItem {
@@ -38,6 +39,7 @@ interface Client {
   phone: string
   email?: string
   loyaltyPoints: number
+  accountBalance?: number | null
 }
 
 interface Product {
@@ -70,6 +72,22 @@ interface Sale {
   items: any[]
 }
 
+type CatalogItem = (Product & { type: 'product' }) | (Service & { type: 'service' })
+type SalePaymentMethod = 'CASH' | 'CARD' | 'BIZUM' | 'OTHER'
+type PendingSaleExecutionOptions = {
+  paymentMethodOverride?: SalePaymentMethod
+  accountBalanceUsageAmount?: number
+}
+
+const formatFamilyLabel = (value: string): string =>
+  value
+    .toLowerCase()
+    .split(' ')
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(' ')
+
+const roundCurrency = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100
+
 export default function Sales() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -78,7 +96,7 @@ export default function Sales() {
   const [cart, setCart] = useState<CartItem[]>([])
   const [selectedClient, setSelectedClient] = useState<Client | null>(null)
   const [discount, setDiscount] = useState(0)
-  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'CARD' | 'BIZUM' | 'OTHER'>('CASH')
+  const [paymentMethod, setPaymentMethod] = useState<SalePaymentMethod>('CASH')
   const [notes, setNotes] = useState('')
   const [linkedAppointmentId, setLinkedAppointmentId] = useState<string | null>(searchParams.get('appointmentId'))
   const [lastCompletedSale, setLastCompletedSale] = useState<Sale | null>(null)
@@ -86,7 +104,11 @@ export default function Sales() {
   const [products, setProducts] = useState<Product[]>([])
   const [services, setServices] = useState<Service[]>([])
   const [catalogSearch, setCatalogSearch] = useState('')
-  const [catalogType, setCatalogType] = useState<'all' | 'products' | 'services'>('all')
+  const [catalogType, setCatalogType] = useState<'all' | 'products' | 'services'>('services')
+  const [selectedServiceFamily, setSelectedServiceFamily] = useState<string | null>(null)
+  const [selectedProductFamily, setSelectedProductFamily] = useState<string | null>(null)
+  const [servicesExpanded, setServicesExpanded] = useState(false)
+  const [productsExpanded, setProductsExpanded] = useState(false)
 
   const [clientModalOpen, setClientModalOpen] = useState(false)
   const [clients, setClients] = useState<Client[]>([])
@@ -97,6 +119,11 @@ export default function Sales() {
   const [saleDetailOpen, setSaleDetailOpen] = useState(false)
   const [historySearch, setHistorySearch] = useState('')
   const [dateFilter, setDateFilter] = useState({ startDate: '', endDate: '' })
+  const [cashTicketDecisionModalOpen, setCashTicketDecisionModalOpen] = useState(false)
+  const [accountBalanceRemainderModalOpen, setAccountBalanceRemainderModalOpen] = useState(false)
+  const [pendingSaleExecution, setPendingSaleExecution] = useState<PendingSaleExecutionOptions | null>(null)
+  const [pendingAccountBalanceUsage, setPendingAccountBalanceUsage] = useState(0)
+  const [pendingRemainderAmount, setPendingRemainderAmount] = useState(0)
 
   const [loading, setLoading] = useState(false)
   const prefillApplied = useRef({ client: false, service: false, sale: false })
@@ -244,10 +271,49 @@ export default function Sales() {
     }
   }
 
-  const handleCompleteSale = async () => {
+  const completeSaleRequest = async (options: {
+    printTicketAfterSale: boolean
+    showInOfficialCash: boolean
+    paymentMethodOverride?: SalePaymentMethod
+    accountBalanceUsageAmount?: number
+  }) => {
     if (cart.length === 0) {
       toast.error('El carrito está vacío')
       return
+    }
+
+    let accountBalanceUsagePayload: {
+      operationDate: string
+      referenceItem: string
+      amount: number
+      notes?: string | null
+    } | undefined
+
+    const effectivePaymentMethod = options.paymentMethodOverride || paymentMethod
+
+    if (paymentMethod === 'OTHER') {
+      if (!selectedClient?.id) {
+        toast.error('Selecciona un cliente para usar abono')
+        return
+      }
+
+      const automaticAmount = roundCurrency(options.accountBalanceUsageAmount ?? automaticOtherPaymentAmount)
+      if (automaticAmount <= 0) {
+        toast.error('El importe de la venta debe ser mayor a 0 para usar abono')
+        return
+      }
+
+      if (automaticAmount > availableAccountBalance) {
+        toast.error('El cliente no tiene saldo suficiente en su abono')
+        return
+      }
+
+      accountBalanceUsagePayload = {
+        operationDate: new Date().toISOString(),
+        referenceItem: automaticOtherPaymentReference.slice(0, 250) || 'Venta en caja',
+        amount: automaticAmount,
+        notes: null
+      }
     }
 
     try {
@@ -266,17 +332,42 @@ export default function Sales() {
         subtotal,
         discount: discountAmount,
         tax: 0,
-        paymentMethod,
+        paymentMethod: effectivePaymentMethod,
+        accountBalanceUsage: accountBalanceUsagePayload,
+        showInOfficialCash: options.showInOfficialCash,
         notes
       })
 
       const createdSale = response.data
+      if (options.printTicketAfterSale) {
+        try {
+          await printTicket(buildSaleTicketPayload(createdSale))
+        } catch (error: any) {
+          toast.error(error.message || 'La venta se guardó, pero no se pudo imprimir el ticket')
+        }
+      }
+
       setLastCompletedSale(createdSale)
       setCart([])
       setDiscount(0)
       setNotes('')
       setPaymentMethod('CASH')
       setLinkedAppointmentId(null)
+      setPendingSaleExecution(null)
+      setPendingAccountBalanceUsage(0)
+      setPendingRemainderAmount(0)
+      setAccountBalanceRemainderModalOpen(false)
+      if (accountBalanceUsagePayload && selectedClient?.id) {
+        const usedAmount = accountBalanceUsagePayload.amount
+        setSelectedClient((current) =>
+          current && current.id === selectedClient.id
+            ? {
+                ...current,
+                accountBalance: roundCurrency(Math.max(0, Number(current.accountBalance || 0) - usedAmount))
+              }
+            : current
+        )
+      }
       if (!prefilledClientId) setSelectedClient(null)
       setSearchParams((current) => {
         const next = new URLSearchParams(current)
@@ -292,6 +383,78 @@ export default function Sales() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleCompleteSale = async () => {
+    if (cart.length === 0) {
+      toast.error('El carrito está vacío')
+      return
+    }
+
+    if (paymentMethod === 'OTHER') {
+      if (!selectedClient?.id) {
+        toast.error('Selecciona un cliente para usar abono')
+        return
+      }
+
+      if (automaticOtherPaymentAmount <= 0) {
+        toast.error('El importe de la venta debe ser mayor a 0 para usar abono')
+        return
+      }
+
+      const usableAccountBalance = roundCurrency(Math.min(availableAccountBalance, automaticOtherPaymentAmount))
+      if (usableAccountBalance <= 0) {
+        toast.error('El cliente no tiene saldo disponible en su abono')
+        return
+      }
+
+      const remainder = roundCurrency(automaticOtherPaymentAmount - usableAccountBalance)
+      if (remainder > 0) {
+        setPendingAccountBalanceUsage(usableAccountBalance)
+        setPendingRemainderAmount(remainder)
+        setAccountBalanceRemainderModalOpen(true)
+        return
+      }
+
+      await completeSaleRequest({
+        printTicketAfterSale: false,
+        showInOfficialCash: false,
+        paymentMethodOverride: 'OTHER',
+        accountBalanceUsageAmount: usableAccountBalance
+      })
+      return
+    }
+
+    if (paymentMethod === 'CASH') {
+      setPendingSaleExecution(null)
+      setCashTicketDecisionModalOpen(true)
+      return
+    }
+
+    await completeSaleRequest({
+      printTicketAfterSale: paymentMethod === 'CARD',
+      showInOfficialCash: true
+    })
+  }
+
+  const handleRemainderPaymentSelection = async (method: 'CASH' | 'CARD' | 'BIZUM') => {
+    setAccountBalanceRemainderModalOpen(false)
+
+    if (method === 'CASH') {
+      setPendingSaleExecution({
+        paymentMethodOverride: method,
+        accountBalanceUsageAmount: pendingAccountBalanceUsage
+      })
+      setCashTicketDecisionModalOpen(true)
+      return
+    }
+
+    await completeSaleRequest({
+      printTicketAfterSale: method === 'CARD',
+      showInOfficialCash: true,
+      paymentMethodOverride: method,
+      accountBalanceUsageAmount: pendingAccountBalanceUsage
+    })
   }
 
   const viewSaleDetail = async (saleId: string) => {
@@ -314,22 +477,74 @@ export default function Sales() {
     }
   }
 
+  const serviceFamilyCards = useMemo(
+    () =>
+      Object.entries(
+        services.reduce<Record<string, number>>((acc, service) => {
+          const family = String(service.category || '').trim() || 'Sin categoría'
+          acc[family] = (acc[family] || 0) + 1
+          return acc
+        }, {})
+      )
+        .map(([family, total]) => ({ family, label: formatFamilyLabel(family), total }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' })),
+    [services]
+  )
+
+  const productFamilyCards = useMemo(
+    () =>
+      Object.entries(
+        products.reduce<Record<string, number>>((acc, product) => {
+          const family = String(product.category || '').trim() || 'Sin categoría'
+          acc[family] = (acc[family] || 0) + 1
+          return acc
+        }, {})
+      )
+        .map(([family, total]) => ({ family, label: formatFamilyLabel(family), total }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' })),
+    [products]
+  )
+
   const filteredCatalog = useMemo(() => {
-    let items: any[] = []
+    let items: CatalogItem[] = []
+
     if (catalogType === 'all' || catalogType === 'products') {
-      items = [...items, ...products.map((product) => ({ ...product, type: 'product' }))]
+      items = [...items, ...products.map((product) => ({ ...product, type: 'product' as const }))]
     }
     if (catalogType === 'all' || catalogType === 'services') {
-      items = [...items, ...services.map((service) => ({ ...service, type: 'service' }))]
+      items = [...items, ...services.map((service) => ({ ...service, type: 'service' as const }))]
     }
-    if (catalogSearch) {
-      const term = catalogSearch.toLowerCase()
+
+    if (catalogType === 'products' && selectedProductFamily) {
+      items = items.filter((item) => item.type === 'product' && item.category === selectedProductFamily)
+    }
+
+    if (catalogType === 'services' && selectedServiceFamily) {
+      items = items.filter((item) => item.type === 'service' && item.category === selectedServiceFamily)
+    }
+
+    if (catalogSearch.trim()) {
+      const term = catalogSearch.toLowerCase().trim()
       items = items.filter(
-        (item) => item.name.toLowerCase().includes(term) || item.category.toLowerCase().includes(term)
+        (item) =>
+          item.name.toLowerCase().includes(term) || String(item.category || '').toLowerCase().includes(term)
       )
     }
-    return items
-  }, [catalogSearch, catalogType, products, services])
+
+    return items.sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }))
+  }, [
+    catalogSearch,
+    catalogType,
+    products,
+    selectedProductFamily,
+    selectedServiceFamily,
+    services
+  ])
+
+  const activeFamilyCards = catalogType === 'services' ? serviceFamilyCards : productFamilyCards
+  const activeFamily = catalogType === 'services' ? selectedServiceFamily : selectedProductFamily
+  const catalogItemsExpanded =
+    catalogType === 'all' ? true : catalogType === 'services' ? servicesExpanded : productsExpanded
 
   const filteredClients = useMemo(
     () =>
@@ -352,7 +567,51 @@ export default function Sales() {
     [historySearch, sales]
   )
 
+  const handleCatalogTypeChange = (nextType: typeof catalogType) => {
+    setCatalogType(nextType)
+  }
+
+  const handleToggleFamily = (family: string) => {
+    if (catalogType === 'services') {
+      setSelectedServiceFamily((current) => {
+        const next = current === family ? null : family
+        if (next) setServicesExpanded(true)
+        return next
+      })
+      return
+    }
+
+    if (catalogType === 'products') {
+      setSelectedProductFamily((current) => {
+        const next = current === family ? null : family
+        if (next) setProductsExpanded(true)
+        return next
+      })
+    }
+  }
+
+  const toggleCatalogItems = () => {
+    if (catalogType === 'services') {
+      setServicesExpanded((current) => !current)
+      return
+    }
+
+    if (catalogType === 'products') {
+      setProductsExpanded((current) => !current)
+    }
+  }
+
+  const availableAccountBalance = Number(selectedClient?.accountBalance || 0)
   const { subtotal, discountAmount, total } = calculateTotals()
+  const automaticOtherPaymentAmount = Math.round((total + Number.EPSILON) * 100) / 100
+  const automaticOtherPaymentReference = useMemo(
+    () =>
+      cart
+        .map((item) => `${item.name}${item.quantity > 1 ? ` x${item.quantity}` : ''}`)
+        .join(', ')
+        .trim(),
+    [cart]
+  )
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -422,51 +681,132 @@ export default function Sales() {
 
                 <div className="flex gap-2">
                   {[
-                    { value: 'all', label: 'Todos' },
-                    { value: 'products', label: 'Productos' },
-                    { value: 'services', label: 'Servicios' }
+                    { value: 'services', label: 'Servicios', icon: Scissors },
+                    { value: 'products', label: 'Productos', icon: Package },
+                    { value: 'all', label: 'Todos', icon: null }
                   ].map((option) => (
                     <button
                       key={option.value}
-                      onClick={() => setCatalogType(option.value as typeof catalogType)}
+                      onClick={() => handleCatalogTypeChange(option.value as typeof catalogType)}
                       className={`btn ${catalogType === option.value ? 'btn-primary' : 'btn-secondary'}`}
                     >
-                      {option.value === 'products' && <Package className="w-4 h-4 mr-2" />}
-                      {option.value === 'services' && <Scissors className="w-4 h-4 mr-2" />}
+                      {option.icon && <option.icon className="w-4 h-4 mr-2" />}
                       {option.label}
                     </button>
                   ))}
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto">
-                {filteredCatalog.map((item) => (
-                  <button
-                    key={`${item.type}-${item.id}`}
-                    type="button"
-                    onClick={() => addToCart(item, item.type)}
-                    className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-blue-500 text-left transition-colors"
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      {item.type === 'product' ? (
-                        <Package className="w-5 h-5 text-blue-600" />
-                      ) : (
-                        <Scissors className="w-5 h-5 text-purple-600" />
-                      )}
-                      <span className="font-semibold text-gray-900 dark:text-white">{item.name}</span>
+              {catalogType !== 'all' && (
+                <div className="mb-6">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Familias de {catalogType === 'services' ? 'servicios' : 'productos'}
+                    </p>
+                    {activeFamily && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          catalogType === 'services'
+                            ? setSelectedServiceFamily(null)
+                            : setSelectedProductFamily(null)
+                        }
+                        className="text-xs text-primary-600 hover:underline"
+                      >
+                        Quitar filtro de familia
+                      </button>
+                    )}
+                  </div>
+
+                  {activeFamilyCards.length === 0 ? (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      No hay familias disponibles en este catálogo.
+                    </p>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                      {activeFamilyCards.map((card) => (
+                        <button
+                          key={card.family}
+                          type="button"
+                          onClick={() => handleToggleFamily(card.family)}
+                          className={`rounded-lg border p-3 text-left transition-colors ${
+                            activeFamily === card.family
+                              ? 'border-primary-600 bg-primary-50 dark:bg-primary-900/20'
+                              : 'border-gray-200 dark:border-gray-700 hover:border-primary-500'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                              {card.label}
+                            </p>
+                            {catalogType === 'services' ? (
+                              <Scissors className="w-4 h-4 text-primary-600" />
+                            ) : (
+                              <Package className="w-4 h-4 text-primary-600" />
+                            )}
+                          </div>
+                          <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                            {card.total} {catalogType === 'services' ? 'tratamientos' : 'productos'}
+                          </p>
+                        </button>
+                      ))}
                     </div>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">{item.category}</p>
-                    <div className="mt-3 flex items-center justify-between">
-                      <span className="text-lg font-bold text-blue-600 dark:text-blue-400">
-                        €{Number(item.price).toFixed(2)}
-                      </span>
-                      {item.type === 'product' && (
-                        <span className="text-xs text-gray-500 dark:text-gray-400">Stock: {item.stock}</span>
-                      )}
-                    </div>
+                  )}
+                </div>
+              )}
+
+              {catalogType !== 'all' && (
+                <div className="mb-4 flex justify-end">
+                  <button type="button" onClick={toggleCatalogItems} className="btn btn-secondary btn-sm">
+                    {catalogItemsExpanded
+                      ? `Ocultar ${catalogType === 'services' ? 'servicios' : 'productos'}`
+                      : `Mostrar ${catalogType === 'services' ? 'servicios' : 'productos'}`}
                   </button>
-                ))}
-              </div>
+                </div>
+              )}
+
+              {catalogItemsExpanded ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto">
+                  {filteredCatalog.length === 0 ? (
+                    <div className="sm:col-span-2 xl:col-span-3 rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                      No hay elementos para este filtro.
+                    </div>
+                  ) : (
+                    filteredCatalog.map((item) => (
+                      <button
+                        key={`${item.type}-${item.id}`}
+                        type="button"
+                        onClick={() => addToCart(item, item.type)}
+                        className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-blue-500 text-left transition-colors"
+                      >
+                        <div className="flex items-center gap-2 mb-2">
+                          {item.type === 'product' ? (
+                            <Package className="w-5 h-5 text-blue-600" />
+                          ) : (
+                            <Scissors className="w-5 h-5 text-purple-600" />
+                          )}
+                          <span className="font-semibold text-gray-900 dark:text-white">{item.name}</span>
+                        </div>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">{item.category}</p>
+                        <div className="mt-3 flex items-center justify-between">
+                          <span className="text-lg font-bold text-blue-600 dark:text-blue-400">
+                            €{Number(item.price).toFixed(2)}
+                          </span>
+                          {item.type === 'product' && (
+                            <span className="text-xs text-gray-500 dark:text-gray-400">Stock: {item.stock}</span>
+                          )}
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-gray-300 p-4 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                  {catalogType === 'services'
+                    ? 'Pulsa "Mostrar servicios" para desplegar el listado.'
+                    : 'Pulsa "Mostrar productos" para desplegar el listado.'}
+                </div>
+              )}
             </div>
           </div>
 
@@ -482,6 +822,9 @@ export default function Sales() {
                     <p className="text-sm text-gray-600 dark:text-gray-400">{selectedClient.phone}</p>
                     <p className="text-xs text-blue-600 dark:text-blue-400">
                       {selectedClient.loyaltyPoints} puntos
+                    </p>
+                    <p className="text-xs text-amber-700 dark:text-amber-300">
+                      Abono: {formatCurrency(Number(selectedClient.accountBalance || 0))}
                     </p>
                   </div>
                   <button onClick={() => setSelectedClient(null)} className="text-red-600">
@@ -711,6 +1054,100 @@ export default function Sales() {
           </div>
         </div>
       )}
+
+      <Modal
+        isOpen={accountBalanceRemainderModalOpen}
+        onClose={() => {
+          if (loading) return
+          setAccountBalanceRemainderModalOpen(false)
+          setPendingAccountBalanceUsage(0)
+          setPendingRemainderAmount(0)
+        }}
+        title="Abono insuficiente"
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-700 dark:text-gray-300">
+            El abono cubre {formatCurrency(pendingAccountBalanceUsage)} y quedan {formatCurrency(pendingRemainderAmount)} por cobrar.
+          </p>
+          <p className="text-sm font-medium text-gray-900 dark:text-white">¿Cómo se va a realizar el pago del restante?</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <button
+              onClick={() => void handleRemainderPaymentSelection('CASH')}
+              className="btn btn-secondary"
+              disabled={loading}
+            >
+              Efectivo
+            </button>
+            <button
+              onClick={() => void handleRemainderPaymentSelection('CARD')}
+              className="btn btn-secondary"
+              disabled={loading}
+            >
+              Tarjeta
+            </button>
+            <button
+              onClick={() => void handleRemainderPaymentSelection('BIZUM')}
+              className="btn btn-secondary"
+              disabled={loading}
+            >
+              Bizum
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={cashTicketDecisionModalOpen}
+        onClose={() => {
+          if (loading) return
+          setCashTicketDecisionModalOpen(false)
+          setPendingSaleExecution(null)
+        }}
+        title="Venta en efectivo"
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-700 dark:text-gray-300">
+            ¿Quieres imprimir ticket para esta venta en efectivo?
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Si seleccionas <strong>No imprimir ticket</strong>, la operación se guardará en la sección privada de caja y no afectará a los movimientos oficiales.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button
+              onClick={() => {
+                setCashTicketDecisionModalOpen(false)
+                void completeSaleRequest({
+                  printTicketAfterSale: true,
+                  showInOfficialCash: true,
+                  paymentMethodOverride: pendingSaleExecution?.paymentMethodOverride,
+                  accountBalanceUsageAmount: pendingSaleExecution?.accountBalanceUsageAmount
+                })
+              }}
+              className="btn btn-primary"
+              disabled={loading}
+            >
+              Imprimir ticket
+            </button>
+            <button
+              onClick={() => {
+                setCashTicketDecisionModalOpen(false)
+                void completeSaleRequest({
+                  printTicketAfterSale: false,
+                  showInOfficialCash: false,
+                  paymentMethodOverride: pendingSaleExecution?.paymentMethodOverride,
+                  accountBalanceUsageAmount: pendingSaleExecution?.accountBalanceUsageAmount
+                })
+              }}
+              className="btn btn-secondary"
+              disabled={loading}
+            >
+              No imprimir ticket
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal isOpen={clientModalOpen} onClose={() => setClientModalOpen(false)} title="Seleccionar Cliente">
         <div className="space-y-4">
