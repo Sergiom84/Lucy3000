@@ -4,7 +4,9 @@ import {
 import { buildTicketHtml } from '../../shared/ticketHtml'
 import type { TicketPrintPayload, TicketPrinterConfig } from '../../shared/ticketPrinter'
 
-export type ClientAssetKind = 'photos' | 'consents'
+export type PhotoCategoryId = 'before' | 'after' | 'treatments' | 'unclassified'
+export type ClientAssetKind = 'photos' | 'consents' | 'documents'
+export type ClientAssetPreviewType = 'image' | 'pdf' | 'file'
 
 export type ClientAsset = {
   id: string
@@ -12,16 +14,28 @@ export type ClientAsset = {
   fileName: string
   originalName: string
   addedAt: string
+  takenAt?: string | null
+  photoCategory?: PhotoCategoryId | null
   absolutePath: string
   previewUrl: string
+  previewType: ClientAssetPreviewType
   isPrimaryPhoto: boolean
+}
+
+export type ClientPhotoCategorySummary = {
+  id: PhotoCategoryId
+  label: string
+  photoCount: number
+  coverUrl: string | null
 }
 
 export type ClientAssetsResponse = {
   baseDir: string
   primaryPhotoUrl: string | null
+  photoCategories: ClientPhotoCategorySummary[]
   photos: ClientAsset[]
   consents: ClientAsset[]
+  documents: ClientAsset[]
 }
 
 export type TicketPrinter = {
@@ -37,7 +51,47 @@ export type TicketPrintResult = {
 }
 
 const desktopUnavailableError = 'Disponible solo en la app de escritorio'
+const CLIENT_ASSET_PROTOCOL = 'lucyasset://asset/'
 let browserPrintFrame: HTMLIFrameElement | null = null
+
+const encodeBase64Url = (value: string) => {
+  const bytes = new TextEncoder().encode(value)
+  let binary = ''
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte)
+  })
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+
+export const normalizeDesktopAssetUrl = (value: string | null | undefined): string | null => {
+  if (!value) return null
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  if (trimmed.startsWith(CLIENT_ASSET_PROTOCOL)) return trimmed
+  if (/^https?:\/\//i.test(trimmed) || /^data:/i.test(trimmed)) return trimmed
+  if (!window.electronAPI) return trimmed
+
+  let absolutePath = trimmed
+  if (/^file:\/\//i.test(trimmed)) {
+    try {
+      const parsed = new URL(trimmed)
+      absolutePath = decodeURIComponent(parsed.pathname)
+    } catch {
+      return trimmed
+    }
+  }
+
+  if (/^\/[a-zA-Z]:\//.test(absolutePath)) {
+    absolutePath = absolutePath.slice(1)
+  }
+
+  if (/^[a-zA-Z]:[\\/]/.test(absolutePath)) {
+    const normalizedPath = absolutePath.replace(/\//g, '\\')
+    return `${CLIENT_ASSET_PROTOCOL}${encodeBase64Url(normalizedPath)}`
+  }
+
+  return trimmed
+}
 
 const removeBrowserPrintFrame = () => {
   if (!browserPrintFrame) {
@@ -130,13 +184,19 @@ export const listClientAssets = async (clientId: string, clientName: string): Pr
 export const importClientAssets = async (
   clientId: string,
   clientName: string,
-  kind: ClientAssetKind
+  kind: ClientAssetKind,
+  options?: { photoCategory?: PhotoCategoryId | null }
 ): Promise<ClientAssetsResponse> => {
   if (!window.electronAPI) {
     throw new Error(desktopUnavailableError)
   }
 
-  return window.electronAPI.clientAssets.import({ clientId, clientName, kind })
+  return window.electronAPI.clientAssets.import({
+    clientId,
+    clientName,
+    kind,
+    photoCategory: options?.photoCategory ?? null
+  })
 }
 
 export const deleteClientAsset = async (
@@ -163,12 +223,38 @@ export const setPrimaryClientPhoto = async (
   return window.electronAPI.clientAssets.setPrimaryPhoto({ clientId, clientName, assetId })
 }
 
+export const setClientPhotoCategory = async (
+  clientId: string,
+  clientName: string,
+  assetId: string,
+  photoCategory: PhotoCategoryId | null
+): Promise<ClientAssetsResponse> => {
+  if (!window.electronAPI) {
+    throw new Error(desktopUnavailableError)
+  }
+
+  return window.electronAPI.clientAssets.setPhotoCategory({ clientId, clientName, assetId, photoCategory })
+}
+
 export const openClientFolder = async (clientId: string, clientName: string) => {
   if (!window.electronAPI) {
     throw new Error(desktopUnavailableError)
   }
 
   return window.electronAPI.clientAssets.openFolder({ clientId, clientName })
+}
+
+export const openClientAsset = async (clientId: string, clientName: string, assetId: string) => {
+  if (!window.electronAPI) {
+    throw new Error(desktopUnavailableError)
+  }
+
+  const response = await window.electronAPI.clientAssets.openAsset({ clientId, clientName, assetId })
+  if (!response.success) {
+    throw new Error(response.error || 'No se pudo abrir el archivo')
+  }
+
+  return response
 }
 
 export const listTicketPrinters = async (): Promise<TicketPrinter[]> => {

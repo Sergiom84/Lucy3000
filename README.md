@@ -142,7 +142,27 @@ JWT_SECRET="your-super-secret-jwt-key-change-this"
 # App Configuration
 APP_NAME="Lucy3000 Accounting"
 APP_VERSION="1.0.0"
+
+# WhatsApp reminders (Meta WhatsApp Cloud API)
+WHATSAPP_REMINDERS_ENABLED=false
+WHATSAPP_ACCESS_TOKEN="your-whatsapp-access-token"
+WHATSAPP_PHONE_NUMBER_ID="your-whatsapp-phone-number-id"
+WHATSAPP_TEMPLATE_NAME="appointment_reminder"
+WHATSAPP_TEMPLATE_LANGUAGE="es"
+WHATSAPP_DEFAULT_COUNTRY_CODE="34"
+WHATSAPP_GRAPH_API_VERSION="v23.0"
+WHATSAPP_REMINDER_INTERVAL_MINUTES=30
 ```
+
+### Recordatorios por WhatsApp (día anterior)
+
+- La app revisa automáticamente las citas de mañana y envía recordatorio si `appointment.reminder = true`.
+- Se envía una sola vez por cita y se marca internamente como enviado.
+- Requiere plantilla de WhatsApp aprobada en Meta con este orden de variables:
+  1. Nombre de clienta
+  2. Servicio/tratamiento
+  3. Fecha de la cita
+  4. Hora de inicio
 
 5. **Configurar la base de datos**
 

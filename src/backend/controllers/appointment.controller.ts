@@ -70,6 +70,18 @@ const buildCalendarSyncInput = (appointment: any): AppointmentSyncInput => {
   }
 }
 
+const releaseReservedBonoSessions = async (appointmentId: string) => {
+  await prisma.bonoSession.updateMany({
+    where: {
+      appointmentId,
+      status: 'AVAILABLE'
+    },
+    data: {
+      appointmentId: null
+    }
+  })
+}
+
 const persistCalendarSyncResult = async (appointmentId: string, syncResult: Awaited<ReturnType<typeof googleCalendarService.upsertAppointmentEvent>>) => {
   return prisma.appointment.update({
     where: { id: appointmentId },
@@ -209,6 +221,13 @@ export const updateAppointment = async (req: Request, res: Response) => {
       data: buildAppointmentUpdatePayload(req.body),
       include: appointmentInclude
     })
+
+    const movedToCancelled =
+      updatedAppointment.status === 'CANCELLED' || updatedAppointment.status === 'NO_SHOW'
+
+    if (movedToCancelled) {
+      await releaseReservedBonoSessions(updatedAppointment.id)
+    }
 
     const syncResult = await googleCalendarService.upsertAppointmentEvent(buildCalendarSyncInput(updatedAppointment))
     const appointment = await persistCalendarSyncResult(updatedAppointment.id, syncResult)

@@ -1,5 +1,6 @@
 import { formatCurrency, formatDateTime } from './format'
 import { TicketPayload } from './desktop'
+import { TICKET_BUSINESS_NAME, TICKET_DEFAULT_FOOTER } from '../../shared/ticketIdentity'
 
 export const paymentMethodLabel = (paymentMethod?: string | null) => {
   switch (paymentMethod) {
@@ -16,15 +17,25 @@ export const paymentMethodLabel = (paymentMethod?: string | null) => {
   }
 }
 
+const resolveCustomerName = (sale: any) => {
+  const firstName = String(sale?.client?.firstName || '').trim()
+  const lastName = String(sale?.client?.lastName || '').trim()
+  const fullName = `${firstName} ${lastName}`.trim()
+  return fullName || 'Cliente general'
+}
+
+const resolveItemLabel = (item: any) =>
+  String(item?.service?.name || item?.product?.name || item?.description || 'Item').trim()
+
 export const buildSaleTicketPayload = (sale: any): TicketPayload => ({
-  title: 'Lucy3000',
-  subtitle: 'Ticket de venta',
+  title: TICKET_BUSINESS_NAME,
+  subtitle: 'Ticket',
   saleNumber: sale.saleNumber,
-  customer: sale.client ? `${sale.client.firstName} ${sale.client.lastName}`.trim() : 'Cliente general',
+  customer: resolveCustomerName(sale),
   createdAt: formatDateTime(sale.date),
   paymentMethod: paymentMethodLabel(sale.paymentMethod),
   items: (sale.items || []).map((item: any) => ({
-    description: item.description,
+    description: resolveItemLabel(item),
     quantity: Number(item.quantity),
     unitPrice: Number(item.price),
     total: Number(item.subtotal ?? Number(item.price) * Number(item.quantity))
@@ -34,26 +45,30 @@ export const buildSaleTicketPayload = (sale: any): TicketPayload => ({
     ...(Number(sale.discount || 0) > 0
       ? [{ label: 'Descuento', value: `-${formatCurrency(Number(sale.discount))}` }]
       : []),
-    { label: 'Total', value: formatCurrency(Number(sale.total)) }
+    { label: 'Total', value: formatCurrency(Number(sale.total)) },
+    { label: 'Pagado', value: formatCurrency(Number(sale.total)) }
   ],
-  footer: 'Gracias por confiar en Lucy3000'
+  footer: TICKET_DEFAULT_FOOTER
 })
 
 export const buildTestTicketPayload = (): TicketPayload => ({
-  title: 'Lucy3000',
-  subtitle: 'Prueba de impresion',
+  title: TICKET_BUSINESS_NAME,
+  subtitle: 'Ticket de prueba',
   saleNumber: 'TEST-0001',
   customer: 'Cliente de prueba',
   createdAt: formatDateTime(new Date().toISOString()),
   paymentMethod: 'Efectivo',
   items: [
     {
-      description: 'Conexion impresora ticket',
+      description: 'Prueba de impresion',
       quantity: 1,
       unitPrice: 0,
       total: 0
     }
   ],
-  totals: [{ label: 'Total', value: formatCurrency(0) }],
-  footer: 'Si ves este ticket, la conexion funciona'
+  totals: [
+    { label: 'Total', value: formatCurrency(0) },
+    { label: 'Pagado', value: formatCurrency(0) }
+  ],
+  footer: TICKET_DEFAULT_FOOTER
 })

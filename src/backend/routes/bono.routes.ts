@@ -2,6 +2,7 @@ import { Router } from 'express'
 import {
   getClientBonos,
   createBonoPack,
+  createBonoAppointment,
   consumeSession,
   deleteBonoPack,
   updateAccountBalance,
@@ -16,7 +17,8 @@ import {
   accountBalanceHistoryQuerySchema,
   accountBalanceTopUpBodySchema,
   bonoPackIdParamSchema,
-  clientIdParamSchema
+  clientIdParamSchema,
+  createBonoAppointmentBodySchema
 } from '../validators/bono.schemas'
 
 const router = Router()
@@ -25,6 +27,11 @@ router.use(authMiddleware)
 
 router.get('/client/:clientId', validateRequest({ params: clientIdParamSchema }), getClientBonos)
 router.post('/', createBonoPack)
+router.post(
+  '/:bonoPackId/appointments',
+  validateRequest({ params: bonoPackIdParamSchema, body: createBonoAppointmentBodySchema }),
+  createBonoAppointment
+)
 router.put('/:bonoPackId/consume', validateRequest({ params: bonoPackIdParamSchema }), consumeSession)
 router.delete('/:bonoPackId', validateRequest({ params: bonoPackIdParamSchema }), deleteBonoPack)
 router.get(

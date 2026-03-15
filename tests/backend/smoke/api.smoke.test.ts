@@ -142,6 +142,80 @@ describe('API smoke tests', () => {
     expect(response.body).toEqual(expect.objectContaining({ id: 'appointment-1', cabin: 'TAMARA' }))
   })
 
+  it('POST /api/bonos/:bonoPackId/appointments reserves a bono session and creates appointment', async () => {
+    prismaMock.googleCalendarConfig.findFirst.mockResolvedValue(null)
+    prismaMock.bonoPack.findUnique.mockResolvedValue({
+      id: '3adf3ca8-c749-4f40-9f2e-54a8ff0f8f57',
+      clientId: '3adf3ca8-c749-4f40-9f2e-54a8ff0f8f56',
+      serviceId: '3adf3ca8-c749-4f40-9f2e-54a8ff0f8f59',
+      status: 'ACTIVE',
+      client: { id: '3adf3ca8-c749-4f40-9f2e-54a8ff0f8f56', firstName: 'Ana', lastName: 'Lopez', phone: '600000000', email: 'ana@example.com' },
+      service: { id: '3adf3ca8-c749-4f40-9f2e-54a8ff0f8f59', name: 'Limpieza facial' },
+      sessions: [
+        { id: 'session-1', status: 'AVAILABLE', appointmentId: null, sessionNumber: 1 }
+      ]
+    })
+
+    const tx: any = {
+      appointment: {
+        create: vi.fn().mockResolvedValue({
+          id: 'appointment-from-bono-1',
+          cabin: 'LUCY',
+          reminder: true,
+          date: new Date('2026-03-20T10:00:00.000Z'),
+          startTime: '10:00',
+          endTime: '10:30',
+          status: 'SCHEDULED',
+          notes: null,
+          client: { firstName: 'Ana', lastName: 'Lopez', phone: '600000000', email: 'ana@example.com' },
+          user: { id: '4adf3ca8-c749-4f40-9f2e-54a8ff0f8f58', name: 'Lucy', email: 'admin@lucy3000.com' },
+          service: { id: '3adf3ca8-c749-4f40-9f2e-54a8ff0f8f59', name: 'Limpieza facial' },
+          sale: null,
+          googleCalendarEventId: null
+        })
+      },
+      bonoSession: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 })
+      }
+    }
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx))
+
+    prismaMock.appointment.update.mockResolvedValue({
+      id: 'appointment-from-bono-1',
+      cabin: 'LUCY',
+      reminder: true,
+      date: new Date('2026-03-20T10:00:00.000Z'),
+      startTime: '10:00',
+      endTime: '10:30',
+      status: 'SCHEDULED',
+      notes: null,
+      client: { firstName: 'Ana', lastName: 'Lopez', phone: '600000000', email: 'ana@example.com' },
+      user: { id: '4adf3ca8-c749-4f40-9f2e-54a8ff0f8f58', name: 'Lucy', email: 'admin@lucy3000.com' },
+      service: { id: '3adf3ca8-c749-4f40-9f2e-54a8ff0f8f59', name: 'Limpieza facial' },
+      sale: null,
+      googleCalendarEventId: null,
+      googleCalendarSyncStatus: 'DISABLED',
+      googleCalendarSyncError: null
+    })
+    prismaMock.notification.create.mockResolvedValue(undefined)
+
+    const response = await request(app)
+      .post('/api/bonos/3adf3ca8-c749-4f40-9f2e-54a8ff0f8f57/appointments')
+      .set('Authorization', createAuthHeader())
+      .send({
+        userId: '4adf3ca8-c749-4f40-9f2e-54a8ff0f8f58',
+        cabin: 'LUCY',
+        date: '2026-03-20T10:00:00.000Z',
+        startTime: '10:00',
+        endTime: '10:30',
+        status: 'SCHEDULED',
+        reminder: true
+      })
+
+    expect(response.status).toBe(201)
+    expect(response.body).toEqual(expect.objectContaining({ id: 'appointment-from-bono-1' }))
+  })
+
   it('GET /api/calendar/config rejects non-admin users', async () => {
     const response = await request(app)
       .get('/api/calendar/config')

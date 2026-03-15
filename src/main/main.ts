@@ -1,11 +1,16 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
-import { randomUUID } from 'crypto'
+import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { promises as fsPromises } from 'fs'
-import { pathToFileURL } from 'url'
 import { ChildProcess, spawn } from 'child_process'
 import { printNetworkTicket } from './escpos'
+import {
+  CLIENT_ASSET_PROTOCOL,
+  createClientAssetManager,
+  getContentTypeFromPath,
+  type ClientAssetKind,
+  type PhotoCategoryId
+} from './clientAssets'
 import { buildTicketHtml } from '../shared/ticketHtml'
 import {
   DEFAULT_TICKET_PRINTER_CONFIG,
@@ -19,26 +24,6 @@ let backendProcess: ChildProcess | null = null
 
 const isDevelopment = process.env.NODE_ENV === 'development'
 const backendPort = process.env.PORT || '3001'
-const CLIENT_ASSET_FOLDERS = {
-  photos: 'photos',
-  consents: 'consents'
-} as const
-
-type ClientAssetKind = keyof typeof CLIENT_ASSET_FOLDERS
-
-type StoredClientAsset = {
-  id: string
-  kind: ClientAssetKind
-  fileName: string
-  originalName: string
-  addedAt: string
-}
-
-type ClientAssetManifest = {
-  version: 1
-  primaryPhotoId: string | null
-  assets: StoredClientAsset[]
-}
 
 type AppPathName =
   | 'home'
@@ -58,58 +43,86 @@ type AppPathName =
   | 'logs'
   | 'crashDumps'
 
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: CLIENT_ASSET_PROTOCOL,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true
+    }
+  }
+])
 
-const slugify = (value: string) =>
-  value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const getUserDataDir = () => app.getPath('userData')
 const getLegacyClientsRootDir = () => path.join(getUserDataDir(), 'clients')
 const getDocumentsClientsRootDir = () =>
   path.join(app.getPath('documents'), 'Lucy3000', 'Documentos', 'Clientes')
 
-const ensureDir = async (targetPath: string) => {
-  await fsPromises.mkdir(targetPath, { recursive: true })
+const buildClientAssetPreviewUrl = (absolutePath: string) => {
+  const encodedPath = Buffer.from(path.resolve(absolutePath), 'utf-8').toString('base64url')
+  return `${CLIENT_ASSET_PROTOCOL}://asset/${encodedPath}`
 }
 
-const findExistingClientDir = async (rootDir: string, clientId: string) => {
+const clientAssetManager = createClientAssetManager({
+  getDocumentsClientsRootDir,
+  getLegacyClientsRootDir,
+  buildPreviewUrl: buildClientAssetPreviewUrl
+})
+
+const decodeClientAssetPathFromRequest = (requestUrl: string) => {
   try {
-    const entries = await fsPromises.readdir(rootDir, { withFileTypes: true })
-    const match = entries.find((entry) => entry.isDirectory() && entry.name.endsWith(`-${clientId}`))
-    return match ? path.join(rootDir, match.name) : null
+    const parsedUrl = new URL(requestUrl)
+    if (parsedUrl.protocol !== `${CLIENT_ASSET_PROTOCOL}:` || parsedUrl.hostname !== 'asset') {
+      return null
+    }
+
+    const encodedPath = parsedUrl.pathname.replace(/^\/+/, '')
+    if (!encodedPath) return null
+
+    const decodedPath = Buffer.from(encodedPath, 'base64url').toString('utf-8')
+    return path.resolve(decodedPath)
   } catch {
     return null
   }
 }
 
-const getClientBaseDir = async (clientId: string, clientName: string) => {
-  const folderName = `${slugify(clientName || 'cliente') || 'cliente'}-${clientId}`
-  const documentsRoot = getDocumentsClientsRootDir()
-  const legacyRoot = getLegacyClientsRootDir()
-
-  await ensureDir(documentsRoot)
-
-  const existingDocumentsDir = await findExistingClientDir(documentsRoot, clientId)
-  const existingLegacyDir = await findExistingClientDir(legacyRoot, clientId)
-  const preferredDir = existingDocumentsDir || path.join(documentsRoot, folderName)
-
-  if (!existingDocumentsDir && existingLegacyDir) {
-    await fsPromises.cp(existingLegacyDir, preferredDir, { recursive: true, force: false })
+const handleClientAssetProtocol = async (request: { url: string }) => {
+  const absolutePath = decodeClientAssetPathFromRequest(request.url)
+  if (!absolutePath) {
+    return new Response('Bad request', { status: 400 })
   }
 
-  const baseDir = preferredDir
-  await ensureDir(baseDir)
-  await ensureDir(path.join(baseDir, CLIENT_ASSET_FOLDERS.photos))
-  await ensureDir(path.join(baseDir, CLIENT_ASSET_FOLDERS.consents))
-  return baseDir
+  if (!clientAssetManager.isAllowedClientAssetPath(absolutePath)) {
+    return new Response('Forbidden', { status: 403 })
+  }
+
+  try {
+    const stats = await fsPromises.stat(absolutePath)
+    if (!stats.isFile()) {
+      return new Response('Not found', { status: 404 })
+    }
+
+    const fileBuffer = await fsPromises.readFile(absolutePath)
+    const responseBody = new Uint8Array(fileBuffer)
+    return new Response(responseBody, {
+      status: 200,
+      headers: {
+        'content-type': getContentTypeFromPath(absolutePath),
+        'cache-control': 'private, max-age=31536000, immutable'
+      }
+    })
+  } catch {
+    return new Response('Not found', { status: 404 })
+  }
 }
 
-const getClientManifestPath = (baseDir: string) => path.join(baseDir, 'manifest.json')
+const ensureDir = async (targetPath: string) => {
+  await fsPromises.mkdir(targetPath, { recursive: true })
+}
 const getPrinterConfigPath = () => path.join(getUserDataDir(), 'device-config.json')
 
 const readJsonFile = async <T>(filePath: string, fallback: T): Promise<T> => {
@@ -124,51 +137,6 @@ const readJsonFile = async <T>(filePath: string, fallback: T): Promise<T> => {
 const writeJsonFile = async (filePath: string, data: unknown) => {
   await ensureDir(path.dirname(filePath))
   await fsPromises.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8')
-}
-
-const loadClientManifest = async (baseDir: string): Promise<ClientAssetManifest> => {
-  const manifestPath = getClientManifestPath(baseDir)
-  const manifest = await readJsonFile<ClientAssetManifest>(manifestPath, {
-    version: 1,
-    primaryPhotoId: null,
-    assets: []
-  })
-
-  if (!Array.isArray(manifest.assets)) {
-    return {
-      version: 1,
-      primaryPhotoId: null,
-      assets: []
-    }
-  }
-
-  return manifest
-}
-
-const saveClientManifest = async (baseDir: string, manifest: ClientAssetManifest) => {
-  await writeJsonFile(getClientManifestPath(baseDir), manifest)
-}
-
-const buildAssetResponse = async (clientId: string, clientName: string) => {
-  const baseDir = await getClientBaseDir(clientId, clientName)
-  const manifest = await loadClientManifest(baseDir)
-
-  const assets = manifest.assets.map((asset) => {
-    const absolutePath = path.join(baseDir, CLIENT_ASSET_FOLDERS[asset.kind], asset.fileName)
-    return {
-      ...asset,
-      absolutePath,
-      previewUrl: pathToFileURL(absolutePath).toString(),
-      isPrimaryPhoto: asset.id === manifest.primaryPhotoId
-    }
-  })
-
-  return {
-    baseDir,
-    primaryPhotoUrl: assets.find((asset) => asset.isPrimaryPhoto)?.previewUrl || null,
-    photos: assets.filter((asset) => asset.kind === 'photos'),
-    consents: assets.filter((asset) => asset.kind === 'consents')
-  }
 }
 
 const getTicketPrinterConfig = async (): Promise<TicketPrinterConfig> => {
@@ -293,6 +261,8 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  protocol.handle(CLIENT_ASSET_PROTOCOL, handleClientAssetProtocol)
+
   try {
     await ensureBackendReady()
   } catch (error) {
@@ -337,95 +307,91 @@ ipcMain.handle('backup:create', async () => {
 })
 
 ipcMain.handle('clientAssets:list', async (_, payload: { clientId: string; clientName: string }) => {
-  return buildAssetResponse(payload.clientId, payload.clientName)
+  return clientAssetManager.buildAssetResponse(payload.clientId, payload.clientName)
 })
 
 ipcMain.handle(
   'clientAssets:import',
-  async (_, payload: { clientId: string; clientName: string; kind: ClientAssetKind }) => {
-    const imageExtensions = ['png', 'jpg', 'jpeg', 'webp']
+  async (
+    _,
+    payload: { clientId: string; clientName: string; kind: ClientAssetKind; photoCategory?: PhotoCategoryId | null }
+  ) => {
+    const imageExtensions = ['png', 'jpg', 'jpeg', 'webp', 'gif']
+    const consentExtensions = [...imageExtensions, 'pdf']
+    const dialogTitleByKind: Record<ClientAssetKind, string> = {
+      photos: 'Seleccionar fotos del cliente',
+      consents: 'Seleccionar consentimientos',
+      documents: 'Seleccionar documentos del cliente'
+    }
+    const dialogFilters =
+      payload.kind === 'photos'
+        ? [{ name: 'Imágenes', extensions: imageExtensions }]
+        : payload.kind === 'consents'
+          ? [{ name: 'Consentimientos', extensions: consentExtensions }]
+          : undefined
     const dialogResult = await dialog.showOpenDialog(mainWindow!, {
-      title: payload.kind === 'photos' ? 'Seleccionar fotos del cliente' : 'Seleccionar consentimientos',
+      title: dialogTitleByKind[payload.kind],
       properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'Imágenes', extensions: imageExtensions }]
+      filters: dialogFilters
     })
 
     if (dialogResult.canceled || dialogResult.filePaths.length === 0) {
-      return buildAssetResponse(payload.clientId, payload.clientName)
+      return clientAssetManager.buildAssetResponse(payload.clientId, payload.clientName)
     }
 
-    const baseDir = await getClientBaseDir(payload.clientId, payload.clientName)
-    const manifest = await loadClientManifest(baseDir)
-    const targetDir = path.join(baseDir, CLIENT_ASSET_FOLDERS[payload.kind])
-
-    for (const sourcePath of dialogResult.filePaths) {
-      const parsed = path.parse(sourcePath)
-      const storedName = `${Date.now()}-${randomUUID()}${parsed.ext.toLowerCase()}`
-      const targetPath = path.join(targetDir, storedName)
-
-      await fsPromises.copyFile(sourcePath, targetPath)
-      manifest.assets.push({
-        id: randomUUID(),
-        kind: payload.kind,
-        fileName: storedName,
-        originalName: parsed.base,
-        addedAt: new Date().toISOString()
-      })
-    }
-
-    if (!manifest.primaryPhotoId && payload.kind === 'photos') {
-      manifest.primaryPhotoId = manifest.assets.find((asset) => asset.kind === 'photos')?.id || null
-    }
-
-    await saveClientManifest(baseDir, manifest)
-    return buildAssetResponse(payload.clientId, payload.clientName)
+    return clientAssetManager.importClientAssets({
+      clientId: payload.clientId,
+      clientName: payload.clientName,
+      sourcePaths: dialogResult.filePaths,
+      kind: payload.kind,
+      photoCategory: payload.photoCategory ?? null
+    })
   }
 )
 
 ipcMain.handle(
   'clientAssets:delete',
   async (_, payload: { clientId: string; clientName: string; assetId: string }) => {
-    const baseDir = await getClientBaseDir(payload.clientId, payload.clientName)
-    const manifest = await loadClientManifest(baseDir)
-    const asset = manifest.assets.find((item) => item.id === payload.assetId)
-
-    if (!asset) {
-      return buildAssetResponse(payload.clientId, payload.clientName)
-    }
-
-    const absolutePath = path.join(baseDir, CLIENT_ASSET_FOLDERS[asset.kind], asset.fileName)
-    await fsPromises.rm(absolutePath, { force: true })
-    manifest.assets = manifest.assets.filter((item) => item.id !== payload.assetId)
-
-    if (manifest.primaryPhotoId === payload.assetId) {
-      manifest.primaryPhotoId = manifest.assets.find((item) => item.kind === 'photos')?.id || null
-    }
-
-    await saveClientManifest(baseDir, manifest)
-    return buildAssetResponse(payload.clientId, payload.clientName)
+    return clientAssetManager.deleteClientAsset(payload.clientId, payload.clientName, payload.assetId)
   }
 )
 
 ipcMain.handle(
   'clientAssets:setPrimaryPhoto',
   async (_, payload: { clientId: string; clientName: string; assetId: string }) => {
-    const baseDir = await getClientBaseDir(payload.clientId, payload.clientName)
-    const manifest = await loadClientManifest(baseDir)
-    const photo = manifest.assets.find((item) => item.id === payload.assetId && item.kind === 'photos')
+    return clientAssetManager.setPrimaryClientPhoto(payload.clientId, payload.clientName, payload.assetId)
+  }
+)
 
-    if (photo) {
-      manifest.primaryPhotoId = photo.id
-      await saveClientManifest(baseDir, manifest)
-    }
-
-    return buildAssetResponse(payload.clientId, payload.clientName)
+ipcMain.handle(
+  'clientAssets:setPhotoCategory',
+  async (
+    _,
+    payload: { clientId: string; clientName: string; assetId: string; photoCategory: PhotoCategoryId | null }
+  ) => {
+    return clientAssetManager.setClientPhotoCategory(payload)
   }
 )
 
 ipcMain.handle('clientAssets:openFolder', async (_, payload: { clientId: string; clientName: string }) => {
-  const baseDir = await getClientBaseDir(payload.clientId, payload.clientName)
+  const baseDir = await clientAssetManager.getClientBaseDir(payload.clientId, payload.clientName)
   await shell.openPath(baseDir)
   return { success: true, baseDir }
+})
+
+ipcMain.handle('clientAssets:openAsset', async (_, payload: { clientId: string; clientName: string; assetId: string }) => {
+  const absolutePath = await clientAssetManager.getAssetAbsolutePath(payload.clientId, payload.clientName, payload.assetId)
+
+  if (!absolutePath) {
+    return { success: false, error: 'Archivo no encontrado' }
+  }
+
+  const result = await shell.openPath(absolutePath)
+  if (result) {
+    return { success: false, error: result }
+  }
+
+  return { success: true }
 })
 
 ipcMain.handle('ticket:listPrinters', async () => {

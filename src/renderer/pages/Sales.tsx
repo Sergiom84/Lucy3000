@@ -292,7 +292,9 @@ export default function Sales() {
 
     const effectivePaymentMethod = options.paymentMethodOverride || paymentMethod
 
-    if (paymentMethod === 'OTHER') {
+    const shouldUseAccountBalance = options.accountBalanceUsageAmount !== undefined || effectivePaymentMethod === 'OTHER'
+
+    if (shouldUseAccountBalance) {
       if (!selectedClient?.id) {
         toast.error('Selecciona un cliente para usar abono')
         return

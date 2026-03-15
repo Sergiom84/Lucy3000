@@ -107,6 +107,145 @@ describe('sale.controller', () => {
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ saleNumber: 'V-000100' }))
   })
 
+  it('auto-consumes account balance when payment method is OTHER and usage payload is omitted', async () => {
+    const tx: any = {
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      sale: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({
+          id: 'sale-2',
+          saleNumber: 'V-000001',
+          clientId: 'client-1',
+          appointmentId: null,
+          total: 50,
+          showInOfficialCash: false,
+          client: { firstName: 'Ana', lastName: 'Lopez' },
+          items: []
+        }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'sale-2',
+          saleNumber: 'V-000001',
+          total: 50,
+          paymentMethod: 'OTHER',
+          client: { firstName: 'Ana', lastName: 'Lopez' },
+          items: [],
+          cashMovement: null
+        })
+      },
+      product: {
+        findUnique: vi.fn().mockResolvedValue(undefined),
+        update: vi.fn().mockResolvedValue(undefined)
+      },
+      stockMovement: {
+        create: vi.fn().mockResolvedValue(undefined)
+      },
+      client: {
+        findUnique: vi.fn().mockResolvedValue({ id: 'client-1', accountBalance: 50 }),
+        update: vi.fn().mockResolvedValue(undefined)
+      },
+      cashRegister: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'cash-1' })
+      },
+      cashMovement: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue(undefined),
+        delete: vi.fn().mockResolvedValue(undefined)
+      },
+      accountBalanceMovement: {
+        create: vi.fn().mockResolvedValue(undefined)
+      }
+    }
+
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx))
+
+    const req = createMockRequest<AuthRequest>({
+      user: { id: 'user-1', email: 'admin@lucy3000.com', role: 'ADMIN' },
+      body: {
+        clientId: 'client-1',
+        appointmentId: null,
+        items: [
+          {
+            productId: null,
+            serviceId: null,
+            description: 'Limpieza facial',
+            quantity: 1,
+            price: 50
+          }
+        ],
+        discount: 0,
+        tax: 0,
+        paymentMethod: 'OTHER',
+        notes: null
+      }
+    })
+
+    const res = createMockResponse()
+
+    await createSale(req, res)
+
+    expect(res.status).toHaveBeenCalledWith(201)
+    expect(tx.sale.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          paymentMethod: 'OTHER',
+          showInOfficialCash: false
+        })
+      })
+    )
+    expect(tx.accountBalanceMovement.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          clientId: 'client-1',
+          saleId: 'sale-2',
+          type: 'CONSUMPTION',
+          amount: 50,
+          balanceAfter: 0
+        })
+      })
+    )
+    expect(tx.client.update).toHaveBeenCalledWith({
+      where: { id: 'client-1' },
+      data: { accountBalance: 0 }
+    })
+    expect(tx.cashMovement.create).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 when payment method is OTHER without a client', async () => {
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback({}))
+
+    const req = createMockRequest<AuthRequest>({
+      user: { id: 'user-1', email: 'admin@lucy3000.com', role: 'ADMIN' },
+      body: {
+        clientId: null,
+        appointmentId: null,
+        items: [
+          {
+            productId: null,
+            serviceId: null,
+            description: 'Limpieza facial',
+            quantity: 1,
+            price: 45
+          }
+        ],
+        discount: 0,
+        tax: 0,
+        paymentMethod: 'OTHER',
+        notes: null
+      }
+    })
+
+    const res = createMockResponse()
+
+    await createSale(req, res)
+
+    expect(res.status).toHaveBeenCalledWith(400)
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: 'Account balance usage requires a client'
+      })
+    )
+  })
+
   it('returns 400 when stock is insufficient', async () => {
     const tx: any = {
       $executeRaw: vi.fn().mockResolvedValue(undefined),

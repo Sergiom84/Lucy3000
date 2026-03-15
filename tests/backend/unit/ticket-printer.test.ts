@@ -6,6 +6,7 @@ import {
   normalizeTicketPrinterConfig,
   validateTicketPrinterConfig
 } from '../../../src/shared/ticketPrinter'
+import { TICKET_BUSINESS_NAME } from '../../../src/shared/ticketIdentity'
 
 describe('ticket printer config', () => {
   it('normalizes legacy system printer config', () => {
@@ -50,7 +51,7 @@ describe('ticket printer config', () => {
 describe('ESC/POS ticket buffer', () => {
   it('builds an ASCII-safe receipt with cut command', () => {
     const buffer = buildEscPosTicketBuffer({
-      title: 'Lucy3000',
+      title: TICKET_BUSINESS_NAME,
       subtitle: 'Prueba de impresión',
       saleNumber: 'TEST-1',
       customer: 'María López',
@@ -63,16 +64,22 @@ describe('ESC/POS ticket buffer', () => {
           total: 12.5
         }
       ],
-      totals: [{ label: 'Total', value: '12,50 EUR' }],
+      totals: [
+        { label: 'Total', value: '12,50 EUR' },
+        { label: 'Pagado', value: '12,50 EUR' }
+      ],
       footer: 'Gracias por tu visita'
     })
 
     const ascii = buffer.toString('ascii')
 
     expect(buffer.at(0)).toBe(0x1b)
+    expect(ascii).toContain(TICKET_BUSINESS_NAME)
+    expect(ascii).toContain('NIF 02196008Z')
     expect(ascii).toContain('Prueba de impresion')
     expect(ascii).toContain('Maria Lopez')
     expect(ascii).toContain('Champu reparacion')
+    expect(ascii).toContain('Pagado')
     expect(buffer.includes(Buffer.from([0x1d, 0x56, 0x00]))).toBe(true)
   })
 })
@@ -80,7 +87,7 @@ describe('ESC/POS ticket buffer', () => {
 describe('ticket html', () => {
   it('builds a printable document for browser and Electron', () => {
     const html = buildTicketHtml({
-      title: 'Lucy3000',
+      title: TICKET_BUSINESS_NAME,
       subtitle: 'Ticket web',
       saleNumber: 'WEB-1',
       customer: 'Cliente Web',
@@ -92,12 +99,19 @@ describe('ticket html', () => {
           total: 10
         }
       ],
-      totals: [{ label: 'Total', value: '10,00 EUR' }]
+      totals: [
+        { label: 'Total', value: '10,00 EUR' },
+        { label: 'Pagado', value: '10,00 EUR' }
+      ]
     })
 
     expect(html).toContain('<!DOCTYPE html>')
     expect(html).toContain('@page')
+    expect(html).toContain(TICKET_BUSINESS_NAME)
+    expect(html).toContain('NIF 02196008Z')
     expect(html).toContain('Ticket web')
     expect(html).toContain('Producto prueba')
+    expect(html).toContain('Precio')
+    expect(html).toContain('Pagado')
   })
 })

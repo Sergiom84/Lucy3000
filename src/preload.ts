@@ -9,14 +9,31 @@ const electronAPI = {
   printPDF: (data: any) => ipcRenderer.invoke('print:pdf', data),
   clientAssets: {
     list: (payload: { clientId: string; clientName: string }) => ipcRenderer.invoke('clientAssets:list', payload),
-    import: (payload: { clientId: string; clientName: string; kind: 'photos' | 'consents' }) =>
+    import: (
+      payload: {
+        clientId: string
+        clientName: string
+        kind: 'photos' | 'consents' | 'documents'
+        photoCategory?: 'before' | 'after' | 'treatments' | 'unclassified' | null
+      }
+    ) =>
       ipcRenderer.invoke('clientAssets:import', payload),
     delete: (payload: { clientId: string; clientName: string; assetId: string }) =>
       ipcRenderer.invoke('clientAssets:delete', payload),
     setPrimaryPhoto: (payload: { clientId: string; clientName: string; assetId: string }) =>
       ipcRenderer.invoke('clientAssets:setPrimaryPhoto', payload),
+    setPhotoCategory: (
+      payload: {
+        clientId: string
+        clientName: string
+        assetId: string
+        photoCategory: 'before' | 'after' | 'treatments' | 'unclassified' | null
+      }
+    ) => ipcRenderer.invoke('clientAssets:setPhotoCategory', payload),
     openFolder: (payload: { clientId: string; clientName: string }) =>
-      ipcRenderer.invoke('clientAssets:openFolder', payload)
+      ipcRenderer.invoke('clientAssets:openFolder', payload),
+    openAsset: (payload: { clientId: string; clientName: string; assetId: string }) =>
+      ipcRenderer.invoke('clientAssets:openAsset', payload)
   },
   ticket: {
     listPrinters: () => ipcRenderer.invoke('ticket:listPrinters'),
@@ -40,10 +57,26 @@ declare global {
       printPDF: (data: any) => Promise<{ success: boolean; error?: any }>
       clientAssets: {
         list: (payload: { clientId: string; clientName: string }) => Promise<any>
-        import: (payload: { clientId: string; clientName: string; kind: 'photos' | 'consents' }) => Promise<any>
+        import: (
+          payload: {
+            clientId: string
+            clientName: string
+            kind: 'photos' | 'consents' | 'documents'
+            photoCategory?: 'before' | 'after' | 'treatments' | 'unclassified' | null
+          }
+        ) => Promise<any>
         delete: (payload: { clientId: string; clientName: string; assetId: string }) => Promise<any>
         setPrimaryPhoto: (payload: { clientId: string; clientName: string; assetId: string }) => Promise<any>
+        setPhotoCategory: (
+          payload: {
+            clientId: string
+            clientName: string
+            assetId: string
+            photoCategory: 'before' | 'after' | 'treatments' | 'unclassified' | null
+          }
+        ) => Promise<any>
         openFolder: (payload: { clientId: string; clientName: string }) => Promise<{ success: boolean; baseDir: string }>
+        openAsset: (payload: { clientId: string; clientName: string; assetId: string }) => Promise<{ success: boolean; error?: string }>
       }
       ticket: {
         listPrinters: () => Promise<Array<{ name: string; displayName: string; isDefault: boolean }>>

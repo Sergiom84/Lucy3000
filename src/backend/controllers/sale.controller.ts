@@ -98,6 +98,15 @@ const calculateTotals = (items: SaleItemInput[], discount: number, tax: number) 
 
 const roundCurrency = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100
 
+const buildAccountBalanceReference = (items: SaleItemInput[]): string => {
+  const reference = items
+    .map((item) => `${item.description}${item.quantity > 1 ? ` x${item.quantity}` : ''}`)
+    .join(', ')
+    .trim()
+
+  return reference.slice(0, 250) || 'Venta en caja'
+}
+
 const buildSaleNumber = async (tx: TxClient): Promise<string> => {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(3001001)`
 
@@ -490,14 +499,37 @@ export const createSale = async (req: AuthRequest, res: Response) => {
     const discountValue = Number(discount) || 0
     const taxValue = Number(tax) || 0
     const { subtotal, total } = calculateTotals(normalizedItems, discountValue, taxValue)
-    const parsedAccountBalanceUsage: AccountBalanceUsageInput | null = accountBalanceUsage
+    let parsedAccountBalanceUsage: AccountBalanceUsageInput | null = accountBalanceUsage
       ? {
           operationDate: new Date(accountBalanceUsage.operationDate),
-          referenceItem: String(accountBalanceUsage.referenceItem).trim(),
-          amount: Number(accountBalanceUsage.amount),
+          referenceItem:
+            typeof accountBalanceUsage.referenceItem === 'string'
+              ? accountBalanceUsage.referenceItem.trim()
+              : '',
+          amount: roundCurrency(Number(accountBalanceUsage.amount)),
           notes: accountBalanceUsage.notes || null
         }
       : null
+
+    if (paymentMethod === 'OTHER' && !parsedAccountBalanceUsage) {
+      parsedAccountBalanceUsage = {
+        operationDate: new Date(),
+        referenceItem: buildAccountBalanceReference(normalizedItems),
+        amount: roundCurrency(total),
+        notes: null
+      }
+    }
+
+    if (
+      parsedAccountBalanceUsage &&
+      Number.isNaN(parsedAccountBalanceUsage.operationDate.getTime())
+    ) {
+      throw new BusinessError(400, 'Account balance usage operation date is invalid')
+    }
+
+    if (parsedAccountBalanceUsage && !parsedAccountBalanceUsage.referenceItem) {
+      throw new BusinessError(400, 'Account balance usage reference item is required')
+    }
 
     if (
       parsedAccountBalanceUsage &&

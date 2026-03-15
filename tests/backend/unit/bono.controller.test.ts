@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  createBonoAppointment,
+  consumeSession,
   consumeAccountBalance,
   createAccountBalanceTopUp,
   getAccountBalanceHistory
@@ -180,5 +182,173 @@ describe('bono.controller account balance', () => {
         movements: expect.any(Array)
       })
     )
+  })
+})
+
+describe('bono.controller bono appointments and sessions', () => {
+  beforeEach(() => {
+    resetPrismaMock()
+  })
+
+  it('creates appointment from bono and reserves next available session', async () => {
+    prismaMock.googleCalendarConfig.findFirst.mockResolvedValue(null)
+    prismaMock.bonoPack.findUnique.mockResolvedValue({
+      id: 'bono-1',
+      clientId: 'client-1',
+      serviceId: 'service-1',
+      status: 'ACTIVE',
+      client: { id: 'client-1', firstName: 'Ana', lastName: 'Lopez', phone: '600000000', email: 'ana@example.com' },
+      service: { id: 'service-1', name: 'Limpieza facial' },
+      sessions: [
+        { id: 'session-1', status: 'AVAILABLE', appointmentId: null, sessionNumber: 1 },
+        { id: 'session-2', status: 'CONSUMED', appointmentId: null, sessionNumber: 2 }
+      ]
+    })
+
+    const tx: any = {
+      appointment: {
+        create: vi.fn().mockResolvedValue({
+          id: 'appointment-1',
+          cabin: 'LUCY',
+          reminder: true,
+          date: new Date('2026-03-15T10:00:00.000Z'),
+          startTime: '10:00',
+          endTime: '10:30',
+          status: 'SCHEDULED',
+          notes: null,
+          client: { firstName: 'Ana', lastName: 'Lopez', phone: '600000000', email: 'ana@example.com' },
+          user: { id: 'user-1', name: 'Lucy', email: 'admin@lucy3000.com' },
+          service: { id: 'service-1', name: 'Limpieza facial' },
+          sale: null,
+          googleCalendarEventId: null
+        })
+      },
+      bonoSession: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 })
+      }
+    }
+
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx))
+    prismaMock.appointment.update.mockResolvedValue({
+      id: 'appointment-1',
+      cabin: 'LUCY',
+      reminder: true,
+      date: new Date('2026-03-15T10:00:00.000Z'),
+      startTime: '10:00',
+      endTime: '10:30',
+      status: 'SCHEDULED',
+      notes: null,
+      client: { firstName: 'Ana', lastName: 'Lopez', phone: '600000000', email: 'ana@example.com' },
+      user: { id: 'user-1', name: 'Lucy', email: 'admin@lucy3000.com' },
+      service: { id: 'service-1', name: 'Limpieza facial' },
+      sale: null,
+      googleCalendarEventId: null,
+      googleCalendarSyncStatus: 'DISABLED',
+      googleCalendarSyncError: null
+    })
+    prismaMock.notification.create.mockResolvedValue(undefined)
+
+    const req = createMockRequest({
+      params: { bonoPackId: 'bono-1' },
+      body: {
+        userId: 'user-1',
+        cabin: 'LUCY',
+        date: '2026-03-15T10:00:00.000Z',
+        startTime: '10:00',
+        endTime: '10:30',
+        status: 'SCHEDULED',
+        reminder: true
+      }
+    })
+    const res = createMockResponse()
+
+    await createBonoAppointment(req as any, res)
+
+    expect(tx.bonoSession.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'session-1',
+        status: 'AVAILABLE',
+        appointmentId: null
+      },
+      data: {
+        appointmentId: 'appointment-1'
+      }
+    })
+    expect(res.status).toHaveBeenCalledWith(201)
+  })
+
+  it('returns 400 when creating appointment from bono without available sessions', async () => {
+    prismaMock.bonoPack.findUnique.mockResolvedValue({
+      id: 'bono-1',
+      clientId: 'client-1',
+      serviceId: 'service-1',
+      status: 'ACTIVE',
+      client: { id: 'client-1', firstName: 'Ana', lastName: 'Lopez', phone: '600000000', email: 'ana@example.com' },
+      service: { id: 'service-1', name: 'Limpieza facial' },
+      sessions: [
+        { id: 'session-1', status: 'CONSUMED', appointmentId: null, sessionNumber: 1 }
+      ]
+    })
+
+    const req = createMockRequest({
+      params: { bonoPackId: 'bono-1' },
+      body: {
+        userId: 'user-1',
+        serviceId: 'service-1',
+        cabin: 'LUCY',
+        date: '2026-03-15T10:00:00.000Z',
+        startTime: '10:00',
+        endTime: '10:30',
+        status: 'SCHEDULED',
+        reminder: false
+      }
+    })
+    const res = createMockResponse()
+
+    await createBonoAppointment(req as any, res)
+
+    expect(res.status).toHaveBeenCalledWith(400)
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: 'No available sessions to reserve'
+      })
+    )
+  })
+
+  it('consumeSession marks consumedAt timestamp for the consumed session', async () => {
+    prismaMock.bonoPack.findUnique
+      .mockResolvedValueOnce({
+        id: 'bono-1',
+        name: 'Bono de 5 sesiones',
+        status: 'ACTIVE',
+        sessions: [
+          { id: 'session-1', sessionNumber: 1, status: 'AVAILABLE', consumedAt: null, appointmentId: null, appointment: null },
+          { id: 'session-2', sessionNumber: 2, status: 'AVAILABLE', consumedAt: null, appointmentId: null, appointment: null },
+          { id: 'session-3', sessionNumber: 3, status: 'CONSUMED', consumedAt: new Date('2026-03-01T10:00:00.000Z'), appointmentId: null, appointment: null }
+        ],
+        client: { id: 'client-1', firstName: 'Ana', lastName: 'Lopez' }
+      })
+      .mockResolvedValueOnce({
+        id: 'bono-1',
+        sessions: [],
+        service: { id: 'service-1', name: 'Limpieza facial' }
+      })
+
+    prismaMock.bonoSession.update.mockResolvedValue({
+      id: 'session-1',
+      status: 'CONSUMED'
+    })
+
+    const req = createMockRequest({
+      params: { bonoPackId: 'bono-1' }
+    })
+    const res = createMockResponse()
+
+    await consumeSession(req as any, res)
+
+    expect(prismaMock.bonoSession.update).toHaveBeenCalledWith({
+      where: { id: 'session-1' },
+      data: { status: 'CONSUMED', consumedAt: expect.any(Date) }
+    })
   })
 })

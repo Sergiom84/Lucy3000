@@ -2,6 +2,18 @@ import { z } from 'zod'
 import { optionalNullableTextSchema } from './common.schemas'
 
 const positiveMoneySchema = z.coerce.number().finite().positive('Amount must be greater than zero')
+const appointmentStatusSchema = z.enum([
+  'SCHEDULED',
+  'CONFIRMED',
+  'IN_PROGRESS',
+  'COMPLETED',
+  'CANCELLED',
+  'NO_SHOW'
+])
+const cabinSchema = z.enum(['LUCY', 'TAMARA', 'CABINA_1', 'CABINA_2'])
+const timeSchema = z
+  .string()
+  .regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Invalid time format')
 
 export const clientIdParamSchema = z.object({
   clientId: z.string().uuid('Invalid clientId')
@@ -32,5 +44,19 @@ export const accountBalanceConsumeBodySchema = z
     notes: optionalNullableTextSchema(500),
     saleId: z.string().uuid('Invalid saleId').optional(),
     description: optionalNullableTextSchema(250)
+  })
+  .strict()
+
+export const createBonoAppointmentBodySchema = z
+  .object({
+    serviceId: z.string().uuid('Invalid serviceId').optional(),
+    userId: z.string().uuid('Invalid userId'),
+    cabin: cabinSchema,
+    date: z.coerce.date(),
+    startTime: timeSchema,
+    endTime: timeSchema,
+    status: appointmentStatusSchema.default('SCHEDULED'),
+    notes: optionalNullableTextSchema(1000),
+    reminder: z.boolean().optional().default(true)
   })
   .strict()
