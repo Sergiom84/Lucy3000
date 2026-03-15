@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { TicketPrinterConfig } from './shared/ticketPrinter'
 
 const electronAPI = {
   getVersion: () => ipcRenderer.invoke('app:getVersion'),
@@ -19,6 +20,8 @@ const electronAPI = {
   },
   ticket: {
     listPrinters: () => ipcRenderer.invoke('ticket:listPrinters'),
+    getConfig: () => ipcRenderer.invoke('ticket:getConfig'),
+    setConfig: (config: TicketPrinterConfig) => ipcRenderer.invoke('ticket:setConfig', config),
     getPrinter: () => ipcRenderer.invoke('ticket:getPrinter'),
     setPrinter: (printerName: string | null) => ipcRenderer.invoke('ticket:setPrinter', printerName),
     print: (payload: any) => ipcRenderer.invoke('ticket:print', payload)
@@ -44,8 +47,10 @@ declare global {
       }
       ticket: {
         listPrinters: () => Promise<Array<{ name: string; displayName: string; isDefault: boolean }>>
+        getConfig: () => Promise<TicketPrinterConfig>
+        setConfig: (config: TicketPrinterConfig) => Promise<TicketPrinterConfig>
         getPrinter: () => Promise<{ ticketPrinterName: string | null }>
-        setPrinter: (printerName: string | null) => Promise<{ ticketPrinterName: string | null }>
+        setPrinter: (printerName: string | null) => Promise<TicketPrinterConfig>
         print: (payload: any) => Promise<{ success: boolean; error?: any }>
       }
     }

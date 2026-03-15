@@ -2,14 +2,19 @@ import { useEffect, useMemo, useState } from 'react'
 import { AlertCircle, Calendar, CheckCircle2, Link2, Printer, RefreshCw, Save, Unlink } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
-  getConfiguredTicketPrinter,
+  getPrintTicketSuccessMessage,
   isDesktop,
+  getTicketPrinterConfig,
   listTicketPrinters,
-  setConfiguredTicketPrinter,
+  printTicket,
+  saveTicketPrinterConfig,
   TicketPrinter
 } from '../utils/desktop'
+import type { TicketPrinterConfig } from '../utils/desktop'
 import api from '../utils/api'
 import { useAuthStore } from '../stores/authStore'
+import { buildTestTicketPayload } from '../utils/tickets'
+import { DEFAULT_NETWORK_TICKET_PORT } from '../../shared/ticketPrinter'
 
 type GoogleCalendarConfig = {
   connected: boolean
@@ -31,8 +36,12 @@ export default function Settings() {
   const { user } = useAuthStore()
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [testingPrinter, setTestingPrinter] = useState(false)
   const [printers, setPrinters] = useState<TicketPrinter[]>([])
+  const [printerMode, setPrinterMode] = useState<TicketPrinterConfig['mode']>('system')
   const [selectedPrinter, setSelectedPrinter] = useState('')
+  const [networkHost, setNetworkHost] = useState('')
+  const [networkPort, setNetworkPort] = useState(String(DEFAULT_NETWORK_TICKET_PORT))
 
   const [calendarConfig, setCalendarConfig] = useState<GoogleCalendarConfig>(DEFAULT_CALENDAR_CONFIG)
   const [loadingCalendar, setLoadingCalendar] = useState(false)
@@ -58,11 +67,14 @@ export default function Settings() {
       setLoading(true)
       const [availablePrinters, configuredPrinter] = await Promise.all([
         listTicketPrinters(),
-        getConfiguredTicketPrinter()
+        getTicketPrinterConfig()
       ])
 
       setPrinters(availablePrinters)
-      setSelectedPrinter(configuredPrinter || availablePrinters.find((printer) => printer.isDefault)?.name || '')
+      setPrinterMode(configuredPrinter.mode)
+      setSelectedPrinter(configuredPrinter.ticketPrinterName || availablePrinters.find((printer) => printer.isDefault)?.name || '')
+      setNetworkHost(configuredPrinter.networkHost)
+      setNetworkPort(String(configuredPrinter.networkPort || DEFAULT_NETWORK_TICKET_PORT))
     } catch {
       toast.error('No se pudieron cargar las impresoras')
     } finally {
@@ -150,15 +162,70 @@ export default function Settings() {
     }
   }
 
+  const buildPrinterConfig = (): TicketPrinterConfig => ({
+    mode: printerMode,
+    ticketPrinterName: selectedPrinter || null,
+    networkHost: networkHost.trim(),
+    networkPort: Number(networkPort)
+  })
+
+  const validatePrinterConfig = (config: TicketPrinterConfig) => {
+    if (config.mode === 'system' && !config.ticketPrinterName) {
+      toast.error('Selecciona una impresora de Windows para el modo sistema')
+      return false
+    }
+
+    if (config.mode === 'network' && !config.networkHost) {
+      toast.error('Introduce la IP o el host de la impresora ESC/POS')
+      return false
+    }
+
+    if (!Number.isInteger(config.networkPort) || config.networkPort <= 0 || config.networkPort > 65535) {
+      toast.error('Introduce un puerto válido entre 1 y 65535')
+      return false
+    }
+
+    return true
+  }
+
   const handleSavePrinter = async () => {
+    const config = buildPrinterConfig()
+    if (!validatePrinterConfig(config)) {
+      return
+    }
+
     try {
       setSaving(true)
-      await setConfiguredTicketPrinter(selectedPrinter || null)
+      await saveTicketPrinterConfig(config)
       toast.success('Impresora de tickets configurada')
     } catch {
       toast.error('No se pudo guardar la impresora')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleTestPrinter = async () => {
+    try {
+      setTestingPrinter(true)
+      if (!desktopMode) {
+        const result = await printTicket(buildTestTicketPayload())
+        toast.success(getPrintTicketSuccessMessage(result))
+        return
+      }
+
+      const config = buildPrinterConfig()
+      if (!validatePrinterConfig(config)) {
+        return
+      }
+
+      await saveTicketPrinterConfig(config)
+      const result = await printTicket(buildTestTicketPayload())
+      toast.success(getPrintTicketSuccessMessage(result))
+    } catch (error: any) {
+      toast.error(error.message || 'No se pudo imprimir el ticket de prueba')
+    } finally {
+      setTestingPrinter(false)
     }
   }
 
@@ -214,37 +281,118 @@ export default function Settings() {
           </div>
 
           {!desktopMode ? (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-              La configuración de impresora solo está disponible al abrir Lucy3000 como app de escritorio Electron.
+            <div className="space-y-4">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                En navegador no hay acceso a Electron ni configuración silenciosa de impresora. Lucy3000 usará el diálogo de impresión del navegador y podrás elegir `POS-80c` manualmente.
+              </div>
+
+              <button
+                onClick={handleTestPrinter}
+                className="btn btn-primary"
+                disabled={testingPrinter}
+              >
+                <Printer className="mr-2 h-4 w-4" />
+                {testingPrinter ? 'Abriendo impresión...' : 'Imprimir prueba en navegador'}
+              </button>
             </div>
           ) : (
             <>
               <div>
-                <label className="label">Impresora configurada</label>
+                <label className="label">Modo de conexión</label>
                 <select
-                  value={selectedPrinter}
-                  onChange={(event) => setSelectedPrinter(event.target.value)}
+                  value={printerMode}
+                  onChange={(event) => setPrinterMode(event.target.value as TicketPrinterConfig['mode'])}
                   className="input"
-                  disabled={loading}
+                  disabled={loading || saving || testingPrinter}
                 >
-                  <option value="">Sin seleccionar</option>
-                  {printers.map((printer) => (
-                    <option key={printer.name} value={printer.name}>
-                      {printer.displayName || printer.name}
-                      {printer.isDefault ? ' (predeterminada)' : ''}
-                    </option>
-                  ))}
+                  <option value="system">Impresora instalada en Windows</option>
+                  <option value="network">ESC/POS por red (LAN)</option>
                 </select>
+                <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                  Usa modo Windows si la impresora aparece en el sistema. Usa LAN si quieres enviar ESC/POS directo a la IP de la impresora.
+                </p>
               </div>
 
-              <button
-                onClick={handleSavePrinter}
-                className="btn btn-primary"
-                disabled={saving || loading || !selectedPrinter}
-              >
-                <Save className="mr-2 h-4 w-4" />
-                {saving ? 'Guardando...' : 'Guardar impresora'}
-              </button>
+              {printerMode === 'system' ? (
+                <div>
+                  <label className="label">Impresora configurada</label>
+                  <select
+                    value={selectedPrinter}
+                    onChange={(event) => setSelectedPrinter(event.target.value)}
+                    className="input"
+                    disabled={loading || saving || testingPrinter}
+                  >
+                    <option value="">Sin seleccionar</option>
+                    {printers.map((printer) => (
+                      <option key={printer.name} value={printer.name}>
+                        {printer.displayName || printer.name}
+                        {printer.isDefault ? ' (predeterminada)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="label">IP o host de la impresora</label>
+                    <input
+                      type="text"
+                      value={networkHost}
+                      onChange={(event) => setNetworkHost(event.target.value)}
+                      placeholder="192.168.1.50"
+                      className="input"
+                      disabled={loading || saving || testingPrinter}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="label">Puerto TCP</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="65535"
+                      value={networkPort}
+                      onChange={(event) => setNetworkPort(event.target.value)}
+                      placeholder={String(DEFAULT_NETWORK_TICKET_PORT)}
+                      className="input"
+                      disabled={loading || saving || testingPrinter}
+                    />
+                    <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                      La mayoría de impresoras ESC/POS por red escuchan en el puerto `9100`.
+                    </p>
+                  </div>
+
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200">
+                    Recomendación: para pruebas rápidas en portátil, la conexión LAN directa suele ser más estable que USB en Electron porque evita drivers y módulos nativos.
+                  </div>
+                </>
+              )}
+
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={handleSavePrinter}
+                  className="btn btn-primary"
+                  disabled={saving || loading || testingPrinter}
+                >
+                  <Save className="mr-2 h-4 w-4" />
+                  {saving ? 'Guardando...' : 'Guardar impresora'}
+                </button>
+
+                <button
+                  onClick={handleTestPrinter}
+                  className="btn btn-secondary"
+                  disabled={saving || loading || testingPrinter}
+                >
+                  <Printer className="mr-2 h-4 w-4" />
+                  {testingPrinter ? 'Imprimiendo...' : 'Imprimir prueba'}
+                </button>
+              </div>
+
+              {printerMode === 'system' && printers.length === 0 ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                  No hay impresoras detectadas por Electron. Si la impresora no aparece en Windows, usa el modo LAN con IP fija o DHCP reservada.
+                </div>
+              ) : null}
             </>
           )}
         </div>
@@ -369,6 +517,14 @@ export default function Settings() {
             <p className="flex gap-2">
               <CheckCircle2 className="mt-0.5 h-4 w-4 text-green-600" />
               La impresora de tickets se configura por equipo; Google Calendar se configura una sola vez para toda la app.
+            </p>
+            <p className="flex gap-2">
+              <CheckCircle2 className="mt-0.5 h-4 w-4 text-green-600" />
+              Si Lucy3000 se abre en navegador, el fallback usa el diálogo de impresión del sistema y aprovecha los drivers instalados en ese equipo.
+            </p>
+            <p className="flex gap-2">
+              <AlertCircle className="mt-0.5 h-4 w-4 text-amber-600" />
+              Para impresoras ESC/POS, prioriza LAN con IP conocida o impresora instalada en Windows; USB directo desde Electron suele requerir más mantenimiento.
             </p>
             <p className="flex gap-2">
               <AlertCircle className="mt-0.5 h-4 w-4 text-amber-600" />
