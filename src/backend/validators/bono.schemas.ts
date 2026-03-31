@@ -11,6 +11,7 @@ const appointmentStatusSchema = z.enum([
   'NO_SHOW'
 ])
 const cabinSchema = z.enum(['LUCY', 'TAMARA', 'CABINA_1', 'CABINA_2'])
+const userIdSchema = z.string().trim().min(1, 'Invalid userId')
 const timeSchema = z
   .string()
   .regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Invalid time format')
@@ -47,11 +48,14 @@ export const accountBalanceConsumeBodySchema = z
   })
   .strict()
 
+const professionalSchema = z.enum(['LUCY', 'TAMARA', 'CHEMA', 'OTROS'])
+
 export const createBonoAppointmentBodySchema = z
   .object({
     serviceId: z.string().uuid('Invalid serviceId').optional(),
-    userId: z.string().uuid('Invalid userId'),
+    userId: userIdSchema,
     cabin: cabinSchema,
+    professional: professionalSchema.default('LUCY'),
     date: z.coerce.date(),
     startTime: timeSchema,
     endTime: timeSchema,

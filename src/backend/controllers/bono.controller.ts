@@ -1,7 +1,10 @@
-import { AppointmentStatus, Cabin, Prisma } from '@prisma/client'
+import { randomUUID } from 'crypto'
+import { Prisma } from '@prisma/client'
 import { Request, Response } from 'express'
+import * as XLSX from 'xlsx'
 import { prisma } from '../db'
 import { AppointmentSyncInput, googleCalendarService } from '../services/googleCalendar.service'
+import { validateAppointmentSlot } from '../utils/appointment-validation'
 
 class AccountBalanceError extends Error {
   statusCode: number
@@ -23,6 +26,147 @@ class BonoOperationError extends Error {
 
 const toNumber = (value: unknown) => Number(value || 0)
 const normalizeMoney = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100
+const BONO_TEMPLATES_SETTING_KEY = 'bono_templates_catalog'
+
+type BonoTemplate = {
+  id: string
+  category: string
+  description: string
+  serviceId: string
+  serviceName: string
+  serviceLookup: string
+  totalSessions: number
+  price: number
+  isActive: boolean
+  createdAt: string
+}
+
+const normalizeTemplateKey = (value: string) =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+
+const buildNormalizedTemplateRow = (row: Record<string, unknown>) => {
+  const normalized: Record<string, unknown> = {}
+
+  for (const [key, value] of Object.entries(row)) {
+    const normalizedKey = normalizeTemplateKey(key)
+    if (!normalizedKey || Object.prototype.hasOwnProperty.call(normalized, normalizedKey)) continue
+    normalized[normalizedKey] = value
+  }
+
+  return normalized
+}
+
+const getTemplateRowValue = (row: Record<string, unknown>, aliases: string[]) => {
+  for (const alias of aliases) {
+    const normalizedAlias = normalizeTemplateKey(alias)
+    if (!normalizedAlias || !Object.prototype.hasOwnProperty.call(row, normalizedAlias)) continue
+    const value = row[normalizedAlias]
+    if (value === null || value === undefined) continue
+    if (typeof value === 'string' && value.trim() === '') continue
+    return value
+  }
+
+  return null
+}
+
+const normalizeSearchText = (value: unknown) =>
+  String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+
+const parseTemplatePrice = (value: unknown) => {
+  if (value === null || value === undefined || String(value).trim() === '') return 0
+  const normalized = String(value).trim().replace(/\s*€\s*/g, '').replace(',', '.')
+  const parsed = Number.parseFloat(normalized)
+  return Number.isFinite(parsed) ? normalizeMoney(parsed) : 0
+}
+
+const parseTemplateSessions = (value: unknown) => {
+  if (value === null || value === undefined) return null
+  const match = String(value).match(/(\d+)/)
+  if (!match) return null
+  const parsed = Number.parseInt(match[1], 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+const readBonoTemplates = async () => {
+  const setting = await prisma.setting.findUnique({
+    where: { key: BONO_TEMPLATES_SETTING_KEY }
+  })
+
+  if (!setting) return [] as BonoTemplate[]
+
+  try {
+    const parsed = JSON.parse(setting.value)
+    return Array.isArray(parsed) ? (parsed as BonoTemplate[]) : []
+  } catch {
+    return []
+  }
+}
+
+const writeBonoTemplates = async (templates: BonoTemplate[]) => {
+  await prisma.setting.upsert({
+    where: { key: BONO_TEMPLATES_SETTING_KEY },
+    update: {
+      value: JSON.stringify(templates),
+      description: 'Catalogo importado de bonos'
+    },
+    create: {
+      key: BONO_TEMPLATES_SETTING_KEY,
+      value: JSON.stringify(templates),
+      description: 'Catalogo importado de bonos'
+    }
+  })
+}
+
+const selectBonoTemplateSheet = (workbook: XLSX.WorkBook) => {
+  let bestMatch: {
+    sheetName: string
+    rawRows: Record<string, unknown>[]
+    score: number
+  } | null = null
+
+  for (const sheetName of workbook.SheetNames) {
+    const worksheet = workbook.Sheets[sheetName]
+    const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '' })
+    const normalizedRows = rawRows.slice(0, 25).map((row) => buildNormalizedTemplateRow(row || {}))
+
+    const hasDescriptionColumn = normalizedRows.some((row) =>
+      getTemplateRowValue(row, ['Descripcion', 'Descripción', 'Nombre', 'Bono']) !== null
+    )
+    const hasServiceLookupColumn = normalizedRows.some((row) =>
+      getTemplateRowValue(row, ['Codigo', 'Código', 'Servicio', 'Tratamiento', 'service']) !== null
+    )
+    const hasPriceColumn = normalizedRows.some((row) =>
+      getTemplateRowValue(row, ['Tarifa 1', 'Tarifa', 'Precio', 'PVP']) !== null
+    )
+    const bonusHintCount = normalizedRows.filter((row) => {
+      return ['Descripcion', 'Descripción', 'Nombre', 'Bono'].some((alias) => {
+        const value = getTemplateRowValue(row, [alias])
+        return typeof value === 'string' && normalizeSearchText(value).includes('bono')
+      })
+    }).length
+
+    const score =
+      (rawRows.length > 0 ? 1 : 0) +
+      (hasDescriptionColumn ? 3 : 0) +
+      (hasServiceLookupColumn ? 3 : 0) +
+      (hasPriceColumn ? 2 : 0) +
+      bonusHintCount * 5
+
+    if (!bestMatch || score > bestMatch.score) {
+      bestMatch = { sheetName, rawRows, score }
+    }
+  }
+
+  return bestMatch
+}
 
 const serializeMovement = (movement: {
   id: string
@@ -150,6 +294,144 @@ export const getClientBonos = async (req: Request, res: Response) => {
   }
 }
 
+export const getBonoTemplates = async (_req: Request, res: Response) => {
+  try {
+    const templates = await readBonoTemplates()
+    res.json(templates.filter((template) => template.isActive !== false))
+  } catch (error) {
+    console.error('Get bono templates error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const importBonoTemplatesFromExcel = async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' })
+    }
+
+    const workbook = XLSX.read(req.file.buffer, { type: 'buffer' })
+    const selectedSheet = selectBonoTemplateSheet(workbook)
+
+    if (!selectedSheet || selectedSheet.rawRows.length === 0) {
+      return res.status(400).json({ error: 'No se encontró una hoja válida para importar bonos' })
+    }
+
+    const { sheetName, rawRows } = selectedSheet
+
+    const services = await prisma.service.findMany({
+      where: { isActive: true },
+      select: {
+        id: true,
+        name: true,
+        serviceCode: true,
+        category: true
+      }
+    })
+
+    const resolveService = (lookupValue: string) => {
+      const normalizedLookup = normalizeSearchText(lookupValue)
+      if (!normalizedLookup) return null
+
+      return (
+        services.find((service) => normalizeSearchText(service.serviceCode) === normalizedLookup) ||
+        services.find((service) => normalizeSearchText(service.name) === normalizedLookup) ||
+        services.find((service) => normalizeSearchText(`${service.name} ${service.category}`) === normalizedLookup) ||
+        services.find((service) => normalizeSearchText(service.name).includes(normalizedLookup))
+      )
+    }
+
+    const results = {
+      success: 0,
+      errors: [] as { row: number; error: string }[],
+      skipped: 0
+    }
+
+    const importedTemplates: BonoTemplate[] = []
+
+    for (let i = 0; i < rawRows.length; i += 1) {
+      const row = buildNormalizedTemplateRow(rawRows[i] || {})
+
+      try {
+        const category = String(
+          getTemplateRowValue(row, ['Categoria', 'Categoría', 'Familia', 'family']) || ''
+        ).trim()
+        const serviceLookup = String(
+          getTemplateRowValue(row, ['Codigo', 'Código', 'Servicio', 'Tratamiento', 'service']) || ''
+        ).trim()
+        const description = String(
+          getTemplateRowValue(row, ['Descripcion', 'Descripción', 'Nombre', 'Bono']) || ''
+        ).trim()
+        const price = parseTemplatePrice(
+          getTemplateRowValue(row, ['Tarifa 1', 'Tarifa', 'Precio', 'PVP'])
+        )
+        const totalSessions =
+          parseTemplateSessions(getTemplateRowValue(row, ['Sesiones', 'Total sesiones', 'Numero sesiones'])) ||
+          parseTemplateSessions(description)
+
+        if (!serviceLookup || !description) {
+          results.skipped += 1
+          continue
+        }
+
+        if (!totalSessions) {
+          throw new Error('No se pudo deducir el número de sesiones')
+        }
+
+        const resolvedService = resolveService(serviceLookup)
+        if (!resolvedService) {
+          throw new Error(`No se encontró el tratamiento base: ${serviceLookup}`)
+        }
+
+        importedTemplates.push({
+          id: randomUUID(),
+          category: category || resolvedService.category || 'Bonos',
+          description,
+          serviceId: resolvedService.id,
+          serviceName: resolvedService.name,
+          serviceLookup,
+          totalSessions,
+          price,
+          isActive: true,
+          createdAt: new Date().toISOString()
+        })
+
+        results.success += 1
+      } catch (error: any) {
+        results.errors.push({
+          row: i + 2,
+          error: error.message
+        })
+        results.skipped += 1
+      }
+    }
+
+    const dedupedTemplates = importedTemplates.filter((template, index, source) => {
+      return source.findIndex((candidate) =>
+        candidate.serviceId === template.serviceId &&
+        candidate.description === template.description &&
+        candidate.totalSessions === template.totalSessions
+      ) === index
+    })
+
+    if (dedupedTemplates.length > 0) {
+      await writeBonoTemplates(dedupedTemplates)
+    }
+
+    res.json({
+      message: `Bonus catalog imported from ${sheetName}`,
+      results: {
+        ...results,
+        success: dedupedTemplates.length,
+        skipped: results.skipped + (importedTemplates.length - dedupedTemplates.length)
+      }
+    })
+  } catch (error) {
+    console.error('Import bono templates error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
 export const createBonoPack = async (req: Request, res: Response) => {
   try {
     const { clientId, name, serviceId, totalSessions, price, expiryDate, notes } = req.body
@@ -240,17 +522,38 @@ export const createBonoAppointment = async (req: Request, res: Response) => {
       throw new BonoOperationError(400, 'No available sessions to reserve')
     }
 
+    const professional = (req.body.professional as string) || 'LUCY'
+
     const appointmentPayload: Prisma.AppointmentUncheckedCreateInput = {
       clientId: bonoPack.clientId,
       userId: String(userId),
       serviceId: resolvedServiceId,
-      cabin: cabin as Cabin,
+      cabin: cabin as string,
+      professional,
       date: toDate(String(date)),
       startTime: String(startTime),
       endTime: String(endTime),
-      status: (status as AppointmentStatus) || 'SCHEDULED',
+      status: (status as string) || 'SCHEDULED',
       notes: notes ? String(notes) : null,
       reminder: reminder === undefined ? true : Boolean(reminder)
+    }
+
+    const validation = await validateAppointmentSlot({
+      date: appointmentPayload.date as Date,
+      startTime: appointmentPayload.startTime as string,
+      endTime: appointmentPayload.endTime as string,
+      professional,
+      cabin: appointmentPayload.cabin as string,
+    }, prisma)
+
+    if (validation.errors.length > 0) {
+      const statusCode = validation.errors[0].code.includes('CONFLICT') ? 409 : 400
+      return res.status(statusCode).json({
+        error: validation.errors[0].message,
+        code: validation.errors[0].code,
+        allErrors: validation.errors,
+        warnings: validation.warnings
+      })
     }
 
     const createdAppointment = await prisma.$transaction(async (tx) => {

@@ -16,11 +16,13 @@ describe('appointment.controller', () => {
 
   it('creates appointment with cabin and reminder notification', async () => {
     prismaMock.googleCalendarConfig.findFirst.mockResolvedValue(null)
+    // Mock for appointment slot validation (no conflicts)
+    prismaMock.appointment.findMany.mockResolvedValue([])
     prismaMock.appointment.create.mockResolvedValue({
       id: 'appointment-1',
       cabin: 'LUCY',
       reminder: true,
-      date: new Date('2026-03-07T10:00:00.000Z'),
+      date: new Date('2099-06-15T10:00:00.000Z'),
       client: { firstName: 'Ana', lastName: 'Lopez', phone: '600000000', email: 'ana@example.com' },
       service: { name: 'Limpieza facial' },
       googleCalendarEventId: null
@@ -29,7 +31,7 @@ describe('appointment.controller', () => {
       id: 'appointment-1',
       cabin: 'LUCY',
       reminder: true,
-      date: new Date('2026-03-07T10:00:00.000Z'),
+      date: new Date('2099-06-15T10:00:00.000Z'),
       client: { firstName: 'Ana', lastName: 'Lopez', phone: '600000000', email: 'ana@example.com' },
       service: { name: 'Limpieza facial' },
       googleCalendarEventId: null,
@@ -46,7 +48,7 @@ describe('appointment.controller', () => {
         userId: 'user-1',
         serviceId: 'service-1',
         cabin: 'LUCY',
-        date: '2026-03-07T10:00:00.000Z',
+        date: '2099-06-15T10:00:00.000Z',
         startTime: '10:00',
         endTime: '10:30',
         status: 'SCHEDULED',

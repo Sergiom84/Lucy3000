@@ -1,7 +1,10 @@
-import { AppointmentStatus, Cabin, Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 import { Request, Response } from 'express'
 import { prisma } from '../db'
+import { AuthRequest } from '../middleware/auth.middleware'
 import { AppointmentSyncInput, googleCalendarService } from '../services/googleCalendar.service'
+import { logError, logWarn } from '../utils/logger'
+import { validateAppointmentSlot } from '../utils/appointment-validation'
 
 const appointmentInclude = {
   client: true,
@@ -27,11 +30,12 @@ const buildAppointmentPayload = (payload: Record<string, unknown>): Prisma.Appoi
   clientId: String(payload.clientId),
   userId: String(payload.userId),
   serviceId: String(payload.serviceId),
-  cabin: payload.cabin as Cabin,
+  cabin: payload.cabin as string,
+  professional: (payload.professional as string) || 'LUCY',
   date: toDate(String(payload.date)),
   startTime: String(payload.startTime),
   endTime: String(payload.endTime),
-  status: payload.status as AppointmentStatus,
+  status: payload.status as string,
   notes: payload.notes ? String(payload.notes) : null,
   reminder: payload.reminder === undefined ? true : Boolean(payload.reminder)
 })
@@ -42,11 +46,12 @@ const buildAppointmentUpdatePayload = (payload: Record<string, unknown>): Prisma
   if (payload.clientId !== undefined) data.clientId = String(payload.clientId)
   if (payload.userId !== undefined) data.userId = String(payload.userId)
   if (payload.serviceId !== undefined) data.serviceId = String(payload.serviceId)
-  if (payload.cabin !== undefined) data.cabin = payload.cabin as Cabin
+  if (payload.cabin !== undefined) data.cabin = payload.cabin as string
+  if (payload.professional !== undefined) data.professional = payload.professional as string
   if (payload.date !== undefined) data.date = toDate(String(payload.date))
   if (payload.startTime !== undefined) data.startTime = String(payload.startTime)
   if (payload.endTime !== undefined) data.endTime = String(payload.endTime)
-  if (payload.status !== undefined) data.status = payload.status as AppointmentStatus
+  if (payload.status !== undefined) data.status = payload.status as string
   if (payload.notes !== undefined) data.notes = payload.notes ? String(payload.notes) : null
   if (payload.reminder !== undefined) data.reminder = Boolean(payload.reminder)
 
@@ -108,9 +113,9 @@ export const getAppointments = async (req: Request, res: Response) => {
       }
     }
 
-    if (status) where.status = status as AppointmentStatus
+    if (status) where.status = status as string
     if (clientId) where.clientId = clientId as string
-    if (cabin) where.cabin = cabin as Cabin
+    if (cabin) where.cabin = cabin as string
 
     const appointments = await prisma.appointment.findMany({
       where,
@@ -120,7 +125,7 @@ export const getAppointments = async (req: Request, res: Response) => {
 
     res.json(appointments)
   } catch (error) {
-    console.error('Get appointments error:', error)
+    logError('Get appointments error', error, { query: req.query })
     res.status(500).json({ error: 'Internal server error' })
   }
 }
@@ -149,7 +154,7 @@ export const getAppointmentsByDate = async (req: Request, res: Response) => {
 
     res.json(appointments)
   } catch (error) {
-    console.error('Get appointments by date error:', error)
+    logError('Get appointments by date error', error, { params: req.params })
     res.status(500).json({ error: 'Internal server error' })
   }
 }
@@ -169,14 +174,32 @@ export const getAppointmentById = async (req: Request, res: Response) => {
 
     res.json(appointment)
   } catch (error) {
-    console.error('Get appointment error:', error)
+    logError('Get appointment error', error, { params: req.params })
     res.status(500).json({ error: 'Internal server error' })
   }
 }
 
-export const createAppointment = async (req: Request, res: Response) => {
+export const createAppointment = async (req: AuthRequest, res: Response) => {
   try {
     const data = buildAppointmentPayload(req.body)
+
+    const validation = await validateAppointmentSlot({
+      date: data.date as Date,
+      startTime: data.startTime as string,
+      endTime: data.endTime as string,
+      professional: (data.professional as string) || 'LUCY',
+      cabin: data.cabin as string,
+    }, prisma)
+
+    if (validation.errors.length > 0) {
+      const statusCode = validation.errors[0].code.includes('CONFLICT') ? 409 : 400
+      return res.status(statusCode).json({
+        error: validation.errors[0].message,
+        code: validation.errors[0].code,
+        allErrors: validation.errors,
+        warnings: validation.warnings
+      })
+    }
 
     const createdAppointment = await prisma.appointment.create({
       data,
@@ -185,6 +208,18 @@ export const createAppointment = async (req: Request, res: Response) => {
 
     const syncResult = await googleCalendarService.upsertAppointmentEvent(buildCalendarSyncInput(createdAppointment))
     const appointment = await persistCalendarSyncResult(createdAppointment.id, syncResult)
+
+    if (syncResult.status === 'ERROR') {
+      logWarn('Appointment created but Google Calendar sync failed', {
+        appointmentId: createdAppointment.id,
+        syncError: syncResult.error,
+        clientId: createdAppointment.clientId,
+        serviceId: createdAppointment.serviceId,
+        date: createdAppointment.date,
+        startTime: createdAppointment.startTime,
+        endTime: createdAppointment.endTime
+      })
+    }
 
     if (data.reminder) {
       await prisma.notification.create({
@@ -199,12 +234,15 @@ export const createAppointment = async (req: Request, res: Response) => {
 
     res.status(201).json(appointment)
   } catch (error) {
-    console.error('Create appointment error:', error)
+    logError('Create appointment error', error, {
+      userId: req.user?.id || null,
+      body: req.body
+    })
     res.status(500).json({ error: 'Internal server error' })
   }
 }
 
-export const updateAppointment = async (req: Request, res: Response) => {
+export const updateAppointment = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params
     const existing = await prisma.appointment.findUnique({ 
@@ -216,9 +254,36 @@ export const updateAppointment = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Appointment not found' })
     }
 
+    const updateData = buildAppointmentUpdatePayload(req.body)
+
+    // Validate only if scheduling-relevant fields are changing
+    const schedulingFieldChanged = updateData.date !== undefined || updateData.startTime !== undefined ||
+      updateData.endTime !== undefined || updateData.professional !== undefined || updateData.cabin !== undefined
+
+    if (schedulingFieldChanged) {
+      const validation = await validateAppointmentSlot({
+        date: (updateData.date as Date) || existing.date,
+        startTime: (updateData.startTime as string) || existing.startTime,
+        endTime: (updateData.endTime as string) || existing.endTime,
+        professional: (updateData.professional as string) || existing.professional,
+        cabin: (updateData.cabin as string) || existing.cabin,
+        excludeAppointmentId: id,
+      }, prisma)
+
+      if (validation.errors.length > 0) {
+        const statusCode = validation.errors[0].code.includes('CONFLICT') ? 409 : 400
+        return res.status(statusCode).json({
+          error: validation.errors[0].message,
+          code: validation.errors[0].code,
+          allErrors: validation.errors,
+          warnings: validation.warnings
+        })
+      }
+    }
+
     const updatedAppointment = await prisma.appointment.update({
       where: { id },
-      data: buildAppointmentUpdatePayload(req.body),
+      data: updateData,
       include: appointmentInclude
     })
 
@@ -232,9 +297,25 @@ export const updateAppointment = async (req: Request, res: Response) => {
     const syncResult = await googleCalendarService.upsertAppointmentEvent(buildCalendarSyncInput(updatedAppointment))
     const appointment = await persistCalendarSyncResult(updatedAppointment.id, syncResult)
 
+    if (syncResult.status === 'ERROR') {
+      logWarn('Appointment updated but Google Calendar sync failed', {
+        appointmentId: updatedAppointment.id,
+        syncError: syncResult.error,
+        clientId: updatedAppointment.clientId,
+        serviceId: updatedAppointment.serviceId,
+        date: updatedAppointment.date,
+        startTime: updatedAppointment.startTime,
+        endTime: updatedAppointment.endTime
+      })
+    }
+
     res.json(appointment)
   } catch (error) {
-    console.error('Update appointment error:', error)
+    logError('Update appointment error', error, {
+      userId: req.user?.id || null,
+      params: req.params,
+      body: req.body
+    })
     res.status(500).json({ error: 'Internal server error' })
   }
 }
@@ -265,7 +346,10 @@ export const deleteAppointment = async (req: Request, res: Response) => {
     )
 
     if (deleteSyncResult.error) {
-      console.error('Error eliminando evento de Google Calendar:', deleteSyncResult.error)
+      logWarn('Google Calendar event deletion failed while deleting appointment', {
+        appointmentId: appointment.id,
+        syncError: deleteSyncResult.error
+      })
     }
 
     await prisma.appointment.delete({
@@ -274,7 +358,7 @@ export const deleteAppointment = async (req: Request, res: Response) => {
 
     res.json({ message: 'Appointment deleted successfully' })
   } catch (error) {
-    console.error('Delete appointment error:', error)
+    logError('Delete appointment error', error, { params: req.params })
     res.status(500).json({ error: 'Internal server error' })
   }
 }

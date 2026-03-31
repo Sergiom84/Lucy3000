@@ -37,13 +37,11 @@ type ClientBonoSummary = {
   sessions: Array<{ status: 'AVAILABLE' | 'CONSUMED' }>
 }
 
-const statusOptions = [
-  { value: 'SCHEDULED', label: 'Programada', color: 'secondary' },
-  { value: 'CONFIRMED', label: 'Confirmada', color: 'primary' },
-  { value: 'IN_PROGRESS', label: 'En Progreso', color: 'warning' },
-  { value: 'COMPLETED', label: 'Completada', color: 'success' },
-  { value: 'CANCELLED', label: 'Cancelada', color: 'danger' },
-  { value: 'NO_SHOW', label: 'No Asistio', color: 'danger' }
+const professionalOptions = [
+  { value: 'LUCY', label: 'Lucy' },
+  { value: 'TAMARA', label: 'Tamara' },
+  { value: 'CHEMA', label: 'Chema' },
+  { value: 'OTROS', label: 'Otros' }
 ]
 
 const normalizeText = (value: unknown) =>
@@ -206,6 +204,7 @@ export default function AppointmentForm({
     serviceId: fromBono?.serviceId || '',
     userId: user?.id || '',
     cabin: initialCabin,
+    professional: 'LUCY',
     date: '',
     startTime: '',
     endTime: '',
@@ -227,6 +226,7 @@ export default function AppointmentForm({
         serviceId: appointment.serviceId || '',
         userId: appointment.userId || user?.id || '',
         cabin: appointment.cabin || initialCabin,
+        professional: appointment.professional || 'LUCY',
         date: appointmentDate.toISOString().split('T')[0],
         startTime: appointment.startTime || '',
         endTime: appointment.endTime || '',
@@ -246,6 +246,7 @@ export default function AppointmentForm({
       serviceId: fromBono?.serviceId || prev.serviceId,
       userId: user?.id || prev.userId || '',
       cabin: initialCabin,
+      professional: prev.professional || 'LUCY',
       date: preselectedDate ? preselectedDate.toISOString().split('T')[0] : prev.date
     }))
   }, [appointment, preselectedDate, user, initialCabin, fromBono])
@@ -406,6 +407,7 @@ export default function AppointmentForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
+    let requestPayload: Record<string, unknown> | null = null
 
     try {
       if (!formData.clientId) {
@@ -432,11 +434,37 @@ export default function AppointmentForm({
         return
       }
 
+      // Validate start < end
+      if (formData.startTime >= formData.endTime) {
+        toast.error('La hora de inicio debe ser anterior a la hora de fin')
+        setLoading(false)
+        return
+      }
+
+      // Validate not in the past
+      const todayStr = new Date().toISOString().split('T')[0]
+      if (formData.date < todayStr) {
+        toast.error('No se puede crear una cita en el pasado')
+        setLoading(false)
+        return
+      }
+      if (formData.date === todayStr) {
+        const now = new Date()
+        const nowMinutes = now.getHours() * 60 + now.getMinutes()
+        const [sh, sm] = formData.startTime.split(':').map(Number)
+        if (sh * 60 + sm < nowMinutes) {
+          toast.error('No se puede crear una cita en una hora que ya ha pasado')
+          setLoading(false)
+          return
+        }
+      }
+
       const dataToSend: Record<string, unknown> = {
         clientId: formData.clientId,
         serviceId: formData.serviceId,
         userId: formData.userId || user?.id,
         cabin: formData.cabin,
+        professional: formData.professional,
         date: new Date(formData.date).toISOString(),
         startTime: formData.startTime,
         endTime: formData.endTime,
@@ -444,6 +472,7 @@ export default function AppointmentForm({
         notes: formData.notes.trim() || null,
         reminder: formData.reminder
       }
+      requestPayload = dataToSend
 
       if (appointment) {
         await api.put(`/appointments/${appointment.id}`, dataToSend)
@@ -453,6 +482,7 @@ export default function AppointmentForm({
           userId: dataToSend.userId,
           serviceId: dataToSend.serviceId,
           cabin: dataToSend.cabin,
+          professional: dataToSend.professional,
           date: dataToSend.date,
           startTime: dataToSend.startTime,
           endTime: dataToSend.endTime,
@@ -469,7 +499,12 @@ export default function AppointmentForm({
 
       onSuccess()
     } catch (error: any) {
-      console.error('Error saving appointment:', error)
+      console.error('Error saving appointment:', {
+        error,
+        appointmentId: appointment?.id || null,
+        fromBonoPackId: fromBono?.bonoPackId || null,
+        requestPayload
+      })
       toast.error(error.response?.data?.error || 'Error al guardar la cita')
     } finally {
       setLoading(false)
@@ -575,6 +610,7 @@ export default function AppointmentForm({
               value={formData.date}
               onChange={handleChange}
               className="input"
+              min={new Date().toISOString().split('T')[0]}
               required
             />
           </div>
@@ -589,6 +625,9 @@ export default function AppointmentForm({
               value={formData.startTime}
               onChange={handleChange}
               className="input"
+              min="09:00"
+              max="20:30"
+              step="900"
               required
             />
           </div>
@@ -603,6 +642,9 @@ export default function AppointmentForm({
               value={formData.endTime}
               onChange={handleChange}
               className="input"
+              min="09:00"
+              max="21:00"
+              step="900"
               required
             />
           </div>
@@ -625,17 +667,30 @@ export default function AppointmentForm({
             </select>
           </div>
         </div>
+        {formData.startTime && (() => {
+          const [h, m] = formData.startTime.split(':').map(Number)
+          const mins = h * 60 + m
+          if (mins >= 840 && mins < 960) {
+            return (
+              <p className="text-sm text-amber-600 dark:text-amber-400 mt-2">
+                Aviso: Esta hora esta fuera del horario habitual (descanso 14:00-16:00)
+              </p>
+            )
+          }
+          return null
+        })()}
       </div>
 
       <div>
-        <label className="label">Estado</label>
+        <label className="label">Profesional <span className="text-red-500">*</span></label>
         <select
-          name="status"
-          value={formData.status}
+          name="professional"
+          value={formData.professional}
           onChange={handleChange}
           className="input"
+          required
         >
-          {statusOptions.map((option) => (
+          {professionalOptions.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>
