@@ -4,6 +4,7 @@ import {
   Clock,
   CreditCard,
   DollarSign,
+  FileText,
   Package,
   Plus,
   Receipt,
@@ -20,17 +21,26 @@ import api from '../utils/api'
 import { printTicket } from '../utils/desktop'
 import { getPrintTicketSuccessMessage } from '../utils/desktop'
 import { formatCurrency } from '../utils/format'
-import { buildSaleTicketPayload, paymentMethodLabel } from '../utils/tickets'
+import {
+  buildSaleTicketPayload,
+  buildQuoteHtml,
+  getSaleAccountBalanceMovement,
+  salePaymentMethodLabel
+} from '../utils/tickets'
+import { getSaleDisplayName } from '../../shared/customerDisplay'
 
 interface CartItem {
   id: string
-  type: 'product' | 'service'
+  type: 'product' | 'service' | 'bono'
   name: string
+  detail?: string
+  category?: string
   price: number
   quantity: number
   stock?: number
   productId?: string
   serviceId?: string
+  bonoTemplateId?: string
 }
 
 interface Client {
@@ -59,11 +69,27 @@ interface Service {
   category: string
 }
 
+interface BonoTemplate {
+  id: string
+  category: string
+  description: string
+  serviceId: string
+  serviceName: string
+  serviceLookup: string
+  totalSessions: number
+  price: number
+  isActive: boolean
+  createdAt: string
+}
+
 interface Sale {
   id: string
   saleNumber: string
   date: string
   client?: Client
+  appointment?: {
+    guestName?: string | null
+  } | null
   subtotal: number
   discount: number
   tax: number
@@ -71,10 +97,46 @@ interface Sale {
   paymentMethod: string
   status: string
   items: any[]
+  accountBalanceMovements?: Array<{
+    id: string
+    type: string
+    amount: number | string
+    balanceAfter: number | string
+    operationDate: string
+    referenceItem?: string | null
+    notes?: string | null
+  }>
 }
 
-type CatalogItem = (Product & { type: 'product' }) | (Service & { type: 'service' })
-type SalePaymentMethod = 'CASH' | 'CARD' | 'BIZUM' | 'OTHER'
+interface AccountBalanceHistoryRow {
+  id: string
+  type: 'TOP_UP' | 'CONSUMPTION' | 'ADJUSTMENT'
+  operationDate: string
+  description: string
+  referenceItem?: string | null
+  amount: number
+  balanceAfter: number
+  notes?: string | null
+  client: {
+    id: string
+    firstName: string
+    lastName: string
+  }
+  sale?: {
+    id: string
+    saleNumber: string
+    paymentMethod: string
+  } | null
+}
+
+type CatalogItem =
+  | (Product & { type: 'product' })
+  | (Service & { type: 'service' })
+  | (BonoTemplate & { type: 'bono'; name: string })
+type CatalogType = 'all' | 'products' | 'services' | 'bonos'
+type SalesView = 'pos' | 'history' | 'account-balance'
+type SalePaymentMethod = 'CASH' | 'CARD' | 'BIZUM' | 'ABONO'
+type SaleMode = 'NORMAL' | 'PENDING' | 'ON_HOLD' | 'QUOTE'
 type PendingSaleExecutionOptions = {
   paymentMethodOverride?: SalePaymentMethod
   accountBalanceUsageAmount?: number
@@ -87,39 +149,59 @@ const formatFamilyLabel = (value: string): string =>
     .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
     .join(' ')
 
+const catalogTypeLabels: Record<Exclude<CatalogType, 'all'>, string> = {
+  services: 'servicios',
+  products: 'productos',
+  bonos: 'bonos'
+}
+
 const roundCurrency = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100
 
 export default function Sales() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const [view, setView] = useState<'pos' | 'history'>(searchParams.get('view') === 'history' ? 'history' : 'pos')
+  const resolvedView = (() => {
+    const queryView = searchParams.get('view')
+    if (queryView === 'history') return 'history'
+    if (queryView === 'account-balance') return 'account-balance'
+    return 'pos'
+  })()
+  const [view, setView] = useState<SalesView>(resolvedView)
 
   const [cart, setCart] = useState<CartItem[]>([])
   const [selectedClient, setSelectedClient] = useState<Client | null>(null)
   const [discount, setDiscount] = useState(0)
   const [paymentMethod, setPaymentMethod] = useState<SalePaymentMethod>('CASH')
+  const [professional, setProfessional] = useState<'LUCY' | 'TAMARA' | 'CHEMA' | 'OTROS'>('LUCY')
+  const [saleMode, setSaleMode] = useState<SaleMode>('NORMAL')
   const [notes, setNotes] = useState('')
+  const [lastCompletedQuote, setLastCompletedQuote] = useState<any>(null)
   const [linkedAppointmentId, setLinkedAppointmentId] = useState<string | null>(searchParams.get('appointmentId'))
   const [lastCompletedSale, setLastCompletedSale] = useState<Sale | null>(null)
 
   const [products, setProducts] = useState<Product[]>([])
   const [services, setServices] = useState<Service[]>([])
+  const [bonoTemplates, setBonoTemplates] = useState<BonoTemplate[]>([])
   const [catalogSearch, setCatalogSearch] = useState('')
-  const [catalogType, setCatalogType] = useState<'all' | 'products' | 'services'>('services')
+  const [catalogType, setCatalogType] = useState<CatalogType>('services')
   const [selectedServiceFamily, setSelectedServiceFamily] = useState<string | null>(null)
   const [selectedProductFamily, setSelectedProductFamily] = useState<string | null>(null)
+  const [selectedBonoFamily, setSelectedBonoFamily] = useState<string | null>(null)
   const [servicesExpanded, setServicesExpanded] = useState(false)
   const [productsExpanded, setProductsExpanded] = useState(false)
+  const [bonosExpanded, setBonosExpanded] = useState(false)
 
   const [clientModalOpen, setClientModalOpen] = useState(false)
   const [clients, setClients] = useState<Client[]>([])
   const [clientSearch, setClientSearch] = useState('')
 
   const [sales, setSales] = useState<Sale[]>([])
+  const [accountBalanceHistory, setAccountBalanceHistory] = useState<AccountBalanceHistoryRow[]>([])
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null)
   const [saleDetailOpen, setSaleDetailOpen] = useState(false)
   const [historySearch, setHistorySearch] = useState('')
   const [dateFilter, setDateFilter] = useState({ startDate: '', endDate: '' })
+  const [accountBalanceConfirmModalOpen, setAccountBalanceConfirmModalOpen] = useState(false)
   const [cashTicketDecisionModalOpen, setCashTicketDecisionModalOpen] = useState(false)
   const [accountBalanceRemainderModalOpen, setAccountBalanceRemainderModalOpen] = useState(false)
   const [pendingSaleExecution, setPendingSaleExecution] = useState<PendingSaleExecutionOptions | null>(null)
@@ -142,7 +224,12 @@ export default function Sales() {
       return
     }
 
-    void loadSales()
+    if (view === 'history') {
+      void loadSales()
+      return
+    }
+
+    void loadAccountBalanceHistory()
   }, [view])
 
   useEffect(() => {
@@ -175,6 +262,14 @@ export default function Sales() {
       ])
       setProducts(productsRes.data)
       setServices(servicesRes.data)
+
+      try {
+        const bonosRes = await api.get('/bonos/templates')
+        setBonoTemplates(bonosRes.data)
+      } catch (bonusError) {
+        console.error('Error loading bono templates:', bonusError)
+        setBonoTemplates([])
+      }
     } catch (error) {
       console.error('Error loading catalog:', error)
       toast.error('Error al cargar el catálogo')
@@ -207,11 +302,15 @@ export default function Sales() {
     }
   }
 
-  const addToCart = (item: Product | Service, type: 'product' | 'service') => {
+  const addToCart = (item: Product | Service | BonoTemplate, type: 'product' | 'service' | 'bono') => {
     const existing = cart.find(
       (cartItem) =>
         cartItem.type === type &&
-        (type === 'product' ? cartItem.productId === item.id : cartItem.serviceId === item.id)
+        (type === 'product'
+          ? cartItem.productId === item.id
+          : type === 'service'
+            ? cartItem.serviceId === item.id
+            : cartItem.bonoTemplateId === item.id)
     )
 
     if (existing) {
@@ -233,10 +332,14 @@ export default function Sales() {
       {
         id: `${type}-${item.id}-${Date.now()}`,
         type,
-        name: item.name,
+        name: type === 'bono' ? (item as BonoTemplate).description : (item as Product | Service).name,
         price: Number(item.price),
         quantity: 1,
-        ...(type === 'product' ? { stock: (item as Product).stock, productId: item.id } : { serviceId: item.id })
+        ...(type === 'product'
+          ? { stock: (item as Product).stock, productId: item.id }
+          : type === 'service'
+            ? { serviceId: item.id }
+            : { serviceId: (item as BonoTemplate).serviceId, bonoTemplateId: item.id })
       }
     ])
   }
@@ -292,7 +395,8 @@ export default function Sales() {
 
     const effectivePaymentMethod = options.paymentMethodOverride || paymentMethod
 
-    const shouldUseAccountBalance = options.accountBalanceUsageAmount !== undefined || effectivePaymentMethod === 'OTHER'
+    const shouldUseAccountBalance =
+      options.accountBalanceUsageAmount !== undefined || effectivePaymentMethod === 'ABONO'
 
     if (shouldUseAccountBalance) {
       if (!selectedClient?.id) {
@@ -300,7 +404,7 @@ export default function Sales() {
         return
       }
 
-      const automaticAmount = roundCurrency(options.accountBalanceUsageAmount ?? automaticOtherPaymentAmount)
+      const automaticAmount = roundCurrency(options.accountBalanceUsageAmount ?? accountBalanceSaleAmount)
       if (automaticAmount <= 0) {
         toast.error('El importe de la venta debe ser mayor a 0 para usar abono')
         return
@@ -313,7 +417,7 @@ export default function Sales() {
 
       accountBalanceUsagePayload = {
         operationDate: new Date().toISOString(),
-        referenceItem: automaticOtherPaymentReference.slice(0, 250) || 'Venta en caja',
+        referenceItem: accountBalanceReference.slice(0, 250) || 'Venta en caja',
         amount: automaticAmount,
         notes: null
       }
@@ -322,12 +426,14 @@ export default function Sales() {
     try {
       setLoading(true)
       const { subtotal, discountAmount } = calculateTotals()
+      const saleStatus = saleMode === 'PENDING' ? 'PENDING' : 'COMPLETED'
       const response = await api.post('/sales', {
         clientId: selectedClient?.id || null,
         appointmentId: linkedAppointmentId,
         items: cart.map((item) => ({
           productId: item.productId || null,
           serviceId: item.serviceId || null,
+          bonoTemplateId: item.bonoTemplateId || null,
           description: item.name,
           quantity: item.quantity,
           price: item.price
@@ -336,9 +442,11 @@ export default function Sales() {
         discount: discountAmount,
         tax: 0,
         paymentMethod: effectivePaymentMethod,
+        professional,
+        status: saleStatus,
         accountBalanceUsage: accountBalanceUsagePayload,
         showInOfficialCash: options.showInOfficialCash,
-        notes
+        notes: saleMode === 'ON_HOLD' ? `[EN ESPERA] ${notes}`.trim() : notes
       })
 
       const createdSale = response.data
@@ -356,6 +464,9 @@ export default function Sales() {
       setDiscount(0)
       setNotes('')
       setPaymentMethod('CASH')
+      setProfessional('LUCY')
+      setSaleMode('NORMAL')
+      setLastCompletedQuote(null)
       setLinkedAppointmentId(null)
       setPendingSaleExecution(null)
       setPendingAccountBalanceUsage(0)
@@ -379,7 +490,11 @@ export default function Sales() {
         next.delete('serviceId')
         return next
       })
-      toast.success(`Venta completada: ${createdSale.saleNumber}`)
+      toast.success(
+        saleStatus === 'PENDING'
+          ? `Venta pendiente guardada: ${createdSale.saleNumber}`
+          : `Venta completada: ${createdSale.saleNumber}`
+      )
       await loadCatalog()
     } catch (error: any) {
       console.error('Error completing sale:', error)
@@ -395,37 +510,46 @@ export default function Sales() {
       return
     }
 
-    if (paymentMethod === 'OTHER') {
-      if (!selectedClient?.id) {
-        toast.error('Selecciona un cliente para usar abono')
-        return
-      }
+    if (hasBonoItems && !selectedClient?.id) {
+      toast.error('Selecciona un cliente para vender bonos')
+      return
+    }
 
-      if (automaticOtherPaymentAmount <= 0) {
-        toast.error('El importe de la venta debe ser mayor a 0 para usar abono')
-        return
-      }
+    if (saleMode === 'QUOTE') {
+      await handleCompleteQuote()
+      return
+    }
 
-      const usableAccountBalance = roundCurrency(Math.min(availableAccountBalance, automaticOtherPaymentAmount))
-      if (usableAccountBalance <= 0) {
-        toast.error('El cliente no tiene saldo disponible en su abono')
-        return
-      }
-
-      const remainder = roundCurrency(automaticOtherPaymentAmount - usableAccountBalance)
-      if (remainder > 0) {
-        setPendingAccountBalanceUsage(usableAccountBalance)
-        setPendingRemainderAmount(remainder)
-        setAccountBalanceRemainderModalOpen(true)
+    if (saleMode === 'PENDING') {
+      if (paymentMethod === 'ABONO') {
+        toast.error('No puedes guardar una venta pendiente con abono')
         return
       }
 
       await completeSaleRequest({
         printTicketAfterSale: false,
-        showInOfficialCash: false,
-        paymentMethodOverride: 'OTHER',
-        accountBalanceUsageAmount: usableAccountBalance
+        showInOfficialCash: false
       })
+      return
+    }
+
+    if (paymentMethod === 'ABONO') {
+      if (!selectedClient?.id) {
+        toast.error('Selecciona un cliente para usar abono')
+        return
+      }
+
+      if (accountBalanceSaleAmount <= 0) {
+        toast.error('El importe de la venta debe ser mayor a 0 para usar abono')
+        return
+      }
+
+      if (accountBalanceUsableAmount <= 0) {
+        toast.error('El cliente no tiene saldo disponible en su abono')
+        return
+      }
+
+      setAccountBalanceConfirmModalOpen(true)
       return
     }
 
@@ -472,6 +596,73 @@ export default function Sales() {
     }
   }
 
+  const handleCompleteQuote = async () => {
+    if (cart.length === 0) {
+      toast.error('El carrito está vacío')
+      return
+    }
+
+    if (!selectedClient?.id) {
+      toast.error('Selecciona un cliente para generar un presupuesto')
+      return
+    }
+
+    try {
+      setLoading(true)
+      const { discountAmount } = calculateTotals()
+      const response = await api.post('/quotes', {
+        clientId: selectedClient.id,
+        professional,
+        items: cart.map((item) => ({
+          productId: item.productId || null,
+          serviceId: item.serviceId || null,
+          bonoTemplateId: item.bonoTemplateId || null,
+          description: item.name,
+          quantity: item.quantity,
+          price: item.price
+        })),
+        discount: discountAmount,
+        notes
+      })
+
+      const createdQuote = response.data
+      setLastCompletedQuote(createdQuote)
+
+      const quoteHtml = buildQuoteHtml(createdQuote)
+      const printWindow = window.open('', '_blank', 'width=800,height=600')
+      if (printWindow) {
+        printWindow.document.write(quoteHtml)
+        printWindow.document.close()
+        printWindow.focus()
+        printWindow.print()
+      }
+
+      setCart([])
+      setDiscount(0)
+      setNotes('')
+      setSaleMode('NORMAL')
+      setProfessional('LUCY')
+      if (!prefilledClientId) setSelectedClient(null)
+      toast.success(`Presupuesto ${createdQuote.quoteNumber} generado`)
+    } catch (error: any) {
+      console.error('Error creating quote:', error)
+      toast.error(error.response?.data?.error || 'Error al generar el presupuesto')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handlePrintQuote = async (quote: any) => {
+    const quoteHtml = buildQuoteHtml(quote)
+    const printWindow = window.open('', '_blank', 'width=800,height=600')
+    if (printWindow) {
+      printWindow.document.write(quoteHtml)
+      printWindow.document.close()
+      printWindow.focus()
+      printWindow.print()
+    }
+  }
+
   const handlePrintSale = async (sale: any) => {
     try {
       const printResult = await printTicket(buildSaleTicketPayload(sale))
@@ -509,6 +700,20 @@ export default function Sales() {
     [products]
   )
 
+  const bonoFamilyCards = useMemo(
+    () =>
+      Object.entries(
+        bonoTemplates.reduce<Record<string, number>>((acc, template) => {
+          const family = String(template.category || '').trim() || 'Sin categoría'
+          acc[family] = (acc[family] || 0) + 1
+          return acc
+        }, {})
+      )
+        .map(([family, total]) => ({ family, label: formatFamilyLabel(family), total }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' })),
+    [bonoTemplates]
+  )
+
   const filteredCatalog = useMemo(() => {
     let items: CatalogItem[] = []
 
@@ -519,6 +724,17 @@ export default function Sales() {
       items = [...items, ...services.map((service) => ({ ...service, type: 'service' as const }))]
     }
 
+    if (catalogType === 'all' || catalogType === 'bonos') {
+      items = [
+        ...items,
+        ...bonoTemplates.map((template) => ({
+          ...template,
+          type: 'bono' as const,
+          name: template.description
+        }))
+      ]
+    }
+
     if (catalogType === 'products' && selectedProductFamily) {
       items = items.filter((item) => item.type === 'product' && item.category === selectedProductFamily)
     }
@@ -527,11 +743,17 @@ export default function Sales() {
       items = items.filter((item) => item.type === 'service' && item.category === selectedServiceFamily)
     }
 
+    if (catalogType === 'bonos' && selectedBonoFamily) {
+      items = items.filter((item) => item.type === 'bono' && item.category === selectedBonoFamily)
+    }
+
     if (catalogSearch.trim()) {
       const term = catalogSearch.toLowerCase().trim()
       items = items.filter(
         (item) =>
-          item.name.toLowerCase().includes(term) || String(item.category || '').toLowerCase().includes(term)
+          item.name.toLowerCase().includes(term) ||
+          String(item.category || '').toLowerCase().includes(term) ||
+          (item.type === 'bono' && String(item.serviceName || '').toLowerCase().includes(term))
       )
     }
 
@@ -539,16 +761,30 @@ export default function Sales() {
   }, [
     catalogSearch,
     catalogType,
+    bonoTemplates,
     products,
     selectedProductFamily,
     selectedServiceFamily,
+    selectedBonoFamily,
     services
   ])
 
-  const activeFamilyCards = catalogType === 'services' ? serviceFamilyCards : productFamilyCards
-  const activeFamily = catalogType === 'services' ? selectedServiceFamily : selectedProductFamily
+  const activeFamilyCards =
+    catalogType === 'services' ? serviceFamilyCards : catalogType === 'products' ? productFamilyCards : bonoFamilyCards
+  const activeFamily =
+    catalogType === 'services'
+      ? selectedServiceFamily
+      : catalogType === 'products'
+        ? selectedProductFamily
+        : selectedBonoFamily
   const catalogItemsExpanded =
-    catalogType === 'all' ? true : catalogType === 'services' ? servicesExpanded : productsExpanded
+    catalogType === 'all'
+      ? true
+      : catalogType === 'services'
+        ? servicesExpanded
+        : catalogType === 'products'
+          ? productsExpanded
+          : bonosExpanded
 
   const filteredClients = useMemo(
     () =>
@@ -565,11 +801,38 @@ export default function Sales() {
       sales.filter(
         (sale) =>
           sale.saleNumber.toLowerCase().includes(historySearch.toLowerCase()) ||
-          (sale.client &&
-            `${sale.client.firstName} ${sale.client.lastName}`.toLowerCase().includes(historySearch.toLowerCase()))
+          getSaleDisplayName(sale).toLowerCase().includes(historySearch.toLowerCase())
       ),
     [historySearch, sales]
   )
+
+  const filteredAccountBalanceHistory = useMemo(() => {
+    const normalizedSearch = historySearch.trim().toLowerCase()
+    const startTimestamp = dateFilter.startDate ? new Date(`${dateFilter.startDate}T00:00:00`).getTime() : null
+    const endTimestamp = dateFilter.endDate ? new Date(`${dateFilter.endDate}T23:59:59`).getTime() : null
+
+    return accountBalanceHistory.filter((movement) => {
+      const movementTimestamp = new Date(movement.operationDate).getTime()
+      if (startTimestamp !== null && movementTimestamp < startTimestamp) return false
+      if (endTimestamp !== null && movementTimestamp > endTimestamp) return false
+
+      if (!normalizedSearch) return true
+
+      const searchableText = [
+        movement.client?.firstName,
+        movement.client?.lastName,
+        movement.description,
+        movement.referenceItem,
+        movement.sale?.saleNumber,
+        salePaymentMethodLabel(movement.sale ? { ...movement.sale, accountBalanceMovements: [movement] } : null)
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+
+      return searchableText.includes(normalizedSearch)
+    })
+  }, [accountBalanceHistory, dateFilter.endDate, dateFilter.startDate, historySearch])
 
   const handleCatalogTypeChange = (nextType: typeof catalogType) => {
     setCatalogType(nextType)
@@ -591,6 +854,48 @@ export default function Sales() {
         if (next) setProductsExpanded(true)
         return next
       })
+      return
+    }
+
+    if (catalogType === 'bonos') {
+      setSelectedBonoFamily((current) => {
+        const next = current === family ? null : family
+        if (next) setBonosExpanded(true)
+        return next
+      })
+    }
+  }
+
+  const handleConfirmAccountBalanceSale = async () => {
+    setAccountBalanceConfirmModalOpen(false)
+
+    if (accountBalanceRemainderToPay > 0) {
+      setPendingAccountBalanceUsage(accountBalanceUsableAmount)
+      setPendingRemainderAmount(accountBalanceRemainderToPay)
+      setAccountBalanceRemainderModalOpen(true)
+      return
+    }
+
+    await completeSaleRequest({
+      printTicketAfterSale: false,
+      showInOfficialCash: false,
+      paymentMethodOverride: 'ABONO',
+      accountBalanceUsageAmount: accountBalanceUsableAmount
+    })
+  }
+
+  const loadAccountBalanceHistory = async () => {
+    try {
+      setLoading(true)
+      const response = await api.get('/bonos/account-balance/history')
+      const movements = Array.isArray(response.data?.movements) ? response.data.movements : []
+      setAccountBalanceHistory(movements)
+    } catch (error) {
+      console.error('Error loading account balance history:', error)
+      toast.error('Error al cargar el historial de abonos')
+      setAccountBalanceHistory([])
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -602,13 +907,19 @@ export default function Sales() {
 
     if (catalogType === 'products') {
       setProductsExpanded((current) => !current)
+      return
+    }
+
+    if (catalogType === 'bonos') {
+      setBonosExpanded((current) => !current)
     }
   }
 
   const availableAccountBalance = Number(selectedClient?.accountBalance || 0)
+  const hasBonoItems = cart.some((item) => item.type === 'bono')
   const { subtotal, discountAmount, total } = calculateTotals()
-  const automaticOtherPaymentAmount = Math.round((total + Number.EPSILON) * 100) / 100
-  const automaticOtherPaymentReference = useMemo(
+  const accountBalanceSaleAmount = Math.round((total + Number.EPSILON) * 100) / 100
+  const accountBalanceReference = useMemo(
     () =>
       cart
         .map((item) => `${item.name}${item.quantity > 1 ? ` x${item.quantity}` : ''}`)
@@ -616,6 +927,10 @@ export default function Sales() {
         .trim(),
     [cart]
   )
+  const accountBalanceUsableAmount = roundCurrency(Math.min(availableAccountBalance, accountBalanceSaleAmount))
+  const accountBalanceRemainingAfterSale = roundCurrency(Math.max(0, availableAccountBalance - accountBalanceUsableAmount))
+  const accountBalanceRemainderToPay = roundCurrency(Math.max(0, accountBalanceSaleAmount - accountBalanceUsableAmount))
+  const selectedSaleAccountBalanceMovement = getSaleAccountBalanceMovement(selectedSale)
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -656,6 +971,20 @@ export default function Sales() {
             <Clock className="w-5 h-5 inline-block mr-2" />
             Historial
           </button>
+          <button
+            onClick={() => {
+              setView('account-balance')
+              navigate('/sales?view=account-balance', { replace: true })
+            }}
+            className={`px-4 py-2 rounded-md transition-colors ${
+              view === 'account-balance'
+                ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                : 'text-gray-600 dark:text-gray-400'
+            }`}
+          >
+            <CreditCard className="w-5 h-5 inline-block mr-2" />
+            Historial Abono
+          </button>
         </div>
       </div>
 
@@ -676,7 +1005,7 @@ export default function Sales() {
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                   <input
                     type="text"
-                    placeholder="Buscar productos o servicios..."
+                    placeholder="Buscar productos, servicios o bonos..."
                     value={catalogSearch}
                     onChange={(event) => setCatalogSearch(event.target.value)}
                     className="input pl-10 w-full"
@@ -687,6 +1016,7 @@ export default function Sales() {
                   {[
                     { value: 'services', label: 'Servicios', icon: Scissors },
                     { value: 'products', label: 'Productos', icon: Package },
+                    { value: 'bonos', label: 'Bonos', icon: Receipt },
                     { value: 'all', label: 'Todos', icon: null }
                   ].map((option) => (
                     <button
@@ -705,7 +1035,7 @@ export default function Sales() {
                 <div className="mb-6">
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Familias de {catalogType === 'services' ? 'servicios' : 'productos'}
+                      Familias de {catalogTypeLabels[catalogType as Exclude<CatalogType, 'all'>]}
                     </p>
                     {activeFamily && (
                       <button
@@ -713,7 +1043,9 @@ export default function Sales() {
                         onClick={() =>
                           catalogType === 'services'
                             ? setSelectedServiceFamily(null)
-                            : setSelectedProductFamily(null)
+                            : catalogType === 'products'
+                              ? setSelectedProductFamily(null)
+                              : setSelectedBonoFamily(null)
                         }
                         className="text-xs text-primary-600 hover:underline"
                       >
@@ -745,12 +1077,14 @@ export default function Sales() {
                             </p>
                             {catalogType === 'services' ? (
                               <Scissors className="w-4 h-4 text-primary-600" />
+                            ) : catalogType === 'bonos' ? (
+                              <Receipt className="w-4 h-4 text-primary-600" />
                             ) : (
                               <Package className="w-4 h-4 text-primary-600" />
                             )}
                           </div>
                           <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                            {card.total} {catalogType === 'services' ? 'tratamientos' : 'productos'}
+                            {card.total} {catalogTypeLabels[catalogType as Exclude<CatalogType, 'all'>]}
                           </p>
                         </button>
                       ))}
@@ -763,8 +1097,8 @@ export default function Sales() {
                 <div className="mb-4 flex justify-end">
                   <button type="button" onClick={toggleCatalogItems} className="btn btn-secondary btn-sm">
                     {catalogItemsExpanded
-                      ? `Ocultar ${catalogType === 'services' ? 'servicios' : 'productos'}`
-                      : `Mostrar ${catalogType === 'services' ? 'servicios' : 'productos'}`}
+                      ? `Ocultar ${catalogTypeLabels[catalogType as Exclude<CatalogType, 'all'>]}`
+                      : `Mostrar ${catalogTypeLabels[catalogType as Exclude<CatalogType, 'all'>]}`}
                   </button>
                 </div>
               )}
@@ -786,19 +1120,27 @@ export default function Sales() {
                         <div className="flex items-center gap-2 mb-2">
                           {item.type === 'product' ? (
                             <Package className="w-5 h-5 text-blue-600" />
-                          ) : (
+                          ) : item.type === 'service' ? (
                             <Scissors className="w-5 h-5 text-purple-600" />
+                          ) : (
+                            <Receipt className="w-5 h-5 text-amber-600" />
                           )}
                           <span className="font-semibold text-gray-900 dark:text-white">{item.name}</span>
                         </div>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">{item.category}</p>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                          {item.type === 'bono' ? item.serviceName : item.category}
+                        </p>
                         <div className="mt-3 flex items-center justify-between">
                           <span className="text-lg font-bold text-blue-600 dark:text-blue-400">
                             €{Number(item.price).toFixed(2)}
                           </span>
-                          {item.type === 'product' && (
+                          {item.type === 'product' ? (
                             <span className="text-xs text-gray-500 dark:text-gray-400">Stock: {item.stock}</span>
-                          )}
+                          ) : item.type === 'bono' ? (
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                              {item.totalSessions} sesiones
+                            </span>
+                          ) : null}
                         </div>
                       </button>
                     ))
@@ -806,9 +1148,9 @@ export default function Sales() {
                 </div>
               ) : (
                 <div className="rounded-lg border border-dashed border-gray-300 p-4 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
-                  {catalogType === 'services'
-                    ? 'Pulsa "Mostrar servicios" para desplegar el listado.'
-                    : 'Pulsa "Mostrar productos" para desplegar el listado.'}
+                  {catalogType === 'all'
+                    ? 'Pulsa un filtro para desplegar el listado.'
+                    : `Pulsa "Mostrar ${catalogTypeLabels[catalogType as Exclude<CatalogType, 'all'>]}" para desplegar el listado.`}
                 </div>
               )}
             </div>
@@ -836,15 +1178,23 @@ export default function Sales() {
                   </button>
                 </div>
               ) : (
-                <button
-                  onClick={() => {
-                    void loadClients()
-                    setClientModalOpen(true)
-                  }}
-                  className="btn btn-secondary w-full"
-                >
-                  Seleccionar Cliente
-                </button>
+                <div className="space-y-3">
+                  <button
+                    onClick={() => {
+                      void loadClients()
+                      setClientModalOpen(true)
+                    }}
+                    className="btn btn-secondary w-full"
+                  >
+                    Seleccionar Cliente
+                  </button>
+
+                  {hasBonoItems ? (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                      Los bonos necesitan un cliente seleccionado para asignar el pack al cerrar la venta.
+                    </div>
+                  ) : null}
+                </div>
               )}
             </div>
 
@@ -865,6 +1215,9 @@ export default function Sales() {
                     <div key={item.id} className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
                       <div className="flex-1">
                         <p className="font-medium text-gray-900 dark:text-white text-sm">{item.name}</p>
+                        {item.detail ? (
+                          <p className="text-xs text-gray-500 dark:text-gray-400">{item.detail}</p>
+                        ) : null}
                         <p className="text-sm text-gray-600 dark:text-gray-400">
                           €{item.price.toFixed(2)} × {item.quantity}
                         </p>
@@ -906,7 +1259,7 @@ export default function Sales() {
                       { value: 'CASH', label: 'Efectivo', icon: DollarSign },
                       { value: 'CARD', label: 'Tarjeta', icon: CreditCard },
                       { value: 'BIZUM', label: 'Bizum', icon: Receipt },
-                      { value: 'OTHER', label: 'Otros', icon: Receipt }
+                      { value: 'ABONO', label: 'Abono', icon: CreditCard }
                     ].map((option) => {
                       const Icon = option.icon
                       return (
@@ -921,6 +1274,34 @@ export default function Sales() {
                       )
                     })}
                   </div>
+                </div>
+
+                <div>
+                  <label className="label">Profesional</label>
+                  <select
+                    value={professional}
+                    onChange={(event) => setProfessional(event.target.value as typeof professional)}
+                    className="input"
+                  >
+                    <option value="LUCY">Lucy</option>
+                    <option value="TAMARA">Tamara</option>
+                    <option value="CHEMA">Chema</option>
+                    <option value="OTROS">Otros</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="label">Estado</label>
+                  <select
+                    value={saleMode}
+                    onChange={(event) => setSaleMode(event.target.value as SaleMode)}
+                    className="input"
+                  >
+                    <option value="NORMAL">Normal</option>
+                    <option value="PENDING">Pendiente</option>
+                    <option value="ON_HOLD">En espera</option>
+                    <option value="QUOTE">Presupuesto</option>
+                  </select>
                 </div>
 
                 <div>
@@ -951,9 +1332,15 @@ export default function Sales() {
                   </div>
                 </div>
 
-                <button onClick={handleCompleteSale} disabled={cart.length === 0 || loading} className="btn btn-primary w-full">
-                  <Receipt className="w-5 h-5 mr-2" />
-                  {loading ? 'Procesando...' : 'Completar Venta'}
+                <button onClick={handleCompleteSale} disabled={cart.length === 0 || loading} className={`btn w-full ${saleMode === 'QUOTE' ? 'btn-secondary' : 'btn-primary'}`}>
+                  {saleMode === 'QUOTE' ? <FileText className="w-5 h-5 mr-2" /> : <Receipt className="w-5 h-5 mr-2" />}
+                  {loading
+                    ? 'Procesando...'
+                    : saleMode === 'QUOTE'
+                      ? 'Generar Presupuesto'
+                      : saleMode === 'PENDING'
+                        ? 'Guardar Pendiente'
+                        : 'Completar Venta'}
                 </button>
               </div>
             </div>
@@ -961,7 +1348,8 @@ export default function Sales() {
             {lastCompletedSale && (
               <div className="card border border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/20">
                 <p className="font-semibold text-green-900 dark:text-green-200">
-                  Venta {lastCompletedSale.saleNumber} completada.
+                  Venta {lastCompletedSale.saleNumber}{' '}
+                  {lastCompletedSale.status === 'PENDING' ? 'guardada como pendiente.' : 'completada.'}
                 </p>
                 <div className="flex gap-3 mt-4">
                   <button onClick={() => void handlePrintSale(lastCompletedSale)} className="btn btn-primary flex-1">
@@ -973,9 +1361,23 @@ export default function Sales() {
                 </div>
               </div>
             )}
+
+            {lastCompletedQuote && (
+              <div className="card border border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950/20">
+                <p className="font-semibold text-blue-900 dark:text-blue-200">
+                  Presupuesto {lastCompletedQuote.quoteNumber} generado.
+                </p>
+                <div className="flex gap-3 mt-4">
+                  <button onClick={() => void handlePrintQuote(lastCompletedQuote)} className="btn btn-primary flex-1">
+                    <FileText className="w-4 h-4 mr-2" />
+                    Imprimir presupuesto
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
-      ) : (
+      ) : view === 'history' ? (
         <div className="space-y-6">
           <div className="card">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1035,9 +1437,18 @@ export default function Sales() {
                       <tr key={sale.id}>
                         <td className="font-mono text-sm">{sale.saleNumber}</td>
                         <td>{format(new Date(sale.date), 'dd/MM/yyyy HH:mm', { locale: es })}</td>
-                        <td>{sale.client ? `${sale.client.firstName} ${sale.client.lastName}` : 'Cliente general'}</td>
+                        <td>{getSaleDisplayName(sale)}</td>
                         <td className="font-semibold">€{Number(sale.total).toFixed(2)}</td>
-                        <td>{paymentMethodLabel(sale.paymentMethod)}</td>
+                        <td>
+                          <div className="space-y-1">
+                            <p>{salePaymentMethodLabel(sale)}</p>
+                            {getSaleAccountBalanceMovement(sale) ? (
+                              <p className="text-xs text-amber-700 dark:text-amber-300">
+                                Saldo restante: {formatCurrency(Number(getSaleAccountBalanceMovement(sale)?.balanceAfter || 0))}
+                              </p>
+                            ) : null}
+                          </div>
+                        </td>
                         <td>{sale.status}</td>
                         <td>
                           <div className="flex gap-2">
@@ -1057,7 +1468,183 @@ export default function Sales() {
             </div>
           </div>
         </div>
+      ) : (
+        <div className="space-y-6">
+          <div className="card">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Buscar por cliente, concepto o venta..."
+                  value={historySearch}
+                  onChange={(event) => setHistorySearch(event.target.value)}
+                  className="input pl-10 w-full"
+                />
+              </div>
+              <input
+                type="date"
+                value={dateFilter.startDate}
+                onChange={(event) => setDateFilter({ ...dateFilter, startDate: event.target.value })}
+                className="input"
+              />
+              <input
+                type="date"
+                value={dateFilter.endDate}
+                onChange={(event) => setDateFilter({ ...dateFilter, endDate: event.target.value })}
+                className="input"
+              />
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Historial global de abonos</h2>
+              <button onClick={() => void loadAccountBalanceHistory()} className="btn btn-secondary btn-sm" disabled={loading}>
+                Actualizar
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Cliente</th>
+                    <th>Tipo</th>
+                    <th>Concepto</th>
+                    <th>Importe</th>
+                    <th>Saldo restante</th>
+                    <th>Venta</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr>
+                      <td colSpan={7} className="text-center py-8 text-gray-500 dark:text-gray-400">
+                        Cargando historial de abonos...
+                      </td>
+                    </tr>
+                  ) : filteredAccountBalanceHistory.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="text-center py-8 text-gray-500 dark:text-gray-400">
+                        No se encontraron movimientos de abono
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredAccountBalanceHistory.map((movement) => (
+                      <tr key={movement.id}>
+                        <td>{format(new Date(movement.operationDate), 'dd/MM/yyyy HH:mm', { locale: es })}</td>
+                        <td>{`${movement.client.firstName} ${movement.client.lastName}`}</td>
+                        <td>
+                          {movement.type === 'TOP_UP'
+                            ? 'Recarga'
+                            : movement.type === 'CONSUMPTION'
+                              ? 'Consumo'
+                              : 'Ajuste'}
+                        </td>
+                        <td>
+                          <div className="space-y-1">
+                            <p>{movement.description}</p>
+                            {movement.referenceItem ? (
+                              <p className="text-xs text-gray-500 dark:text-gray-400">{movement.referenceItem}</p>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className={`font-semibold ${movement.type === 'CONSUMPTION' ? 'text-red-600' : 'text-green-600'}`}>
+                          {movement.type === 'CONSUMPTION' ? '-' : '+'}
+                          {formatCurrency(Number(movement.amount || 0))}
+                        </td>
+                        <td>{formatCurrency(Number(movement.balanceAfter || 0))}</td>
+                        <td>
+                          {movement.sale ? (
+                            <div className="space-y-1">
+                              <p className="font-mono text-xs">{movement.sale.saleNumber}</p>
+                              <p className="text-xs text-gray-500 dark:text-gray-400">
+                                {salePaymentMethodLabel({ ...movement.sale, accountBalanceMovements: [movement] })}
+                              </p>
+                            </div>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       )}
+
+      <Modal
+        isOpen={accountBalanceConfirmModalOpen}
+        onClose={() => {
+          if (loading) return
+          setAccountBalanceConfirmModalOpen(false)
+        }}
+        title="Confirmar cobro con abono"
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3">
+              <p className="text-sm text-gray-500 dark:text-gray-400">Cliente</p>
+              <p className="font-semibold text-gray-900 dark:text-white">
+                {selectedClient ? `${selectedClient.firstName} ${selectedClient.lastName}` : 'Sin cliente'}
+              </p>
+            </div>
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3">
+              <p className="text-sm text-gray-500 dark:text-gray-400">Gasto de la venta</p>
+              <p className="font-semibold text-gray-900 dark:text-white">
+                {formatCurrency(accountBalanceSaleAmount)}
+              </p>
+            </div>
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3">
+              <p className="text-sm text-gray-500 dark:text-gray-400">Saldo actual en abono</p>
+              <p className="font-semibold text-gray-900 dark:text-white">
+                {formatCurrency(availableAccountBalance)}
+              </p>
+            </div>
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3">
+              <p className="text-sm text-gray-500 dark:text-gray-400">Saldo restante tras el cobro</p>
+              <p className="font-semibold text-amber-700 dark:text-amber-300">
+                {formatCurrency(accountBalanceRemainingAfterSale)}
+              </p>
+            </div>
+          </div>
+
+          {accountBalanceRemainderToPay > 0 ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+              El abono cubrirá {formatCurrency(accountBalanceUsableAmount)} y quedarán {formatCurrency(accountBalanceRemainderToPay)} pendientes por cobrar con otro método.
+            </div>
+          ) : (
+            <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900 dark:border-green-900 dark:bg-green-950/30 dark:text-green-200">
+              El importe completo se descontará del abono del cliente.
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => setAccountBalanceConfirmModalOpen(false)}
+              className="btn btn-secondary"
+              disabled={loading}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleConfirmAccountBalanceSale()}
+              className="btn btn-primary"
+              disabled={loading}
+            >
+              Continuar
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         isOpen={accountBalanceRemainderModalOpen}
@@ -1203,13 +1790,29 @@ export default function Sales() {
               <div>
                 <p className="text-sm text-gray-600 dark:text-gray-400">Cliente</p>
                 <p className="font-semibold">
-                  {selectedSale.client ? `${selectedSale.client.firstName} ${selectedSale.client.lastName}` : 'Cliente general'}
+                  {getSaleDisplayName(selectedSale)}
                 </p>
               </div>
               <div>
                 <p className="text-sm text-gray-600 dark:text-gray-400">Método de pago</p>
-                <p className="font-semibold">{paymentMethodLabel(selectedSale.paymentMethod)}</p>
+                <p className="font-semibold">{salePaymentMethodLabel(selectedSale)}</p>
               </div>
+              {selectedSaleAccountBalanceMovement ? (
+                <>
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Abono usado</p>
+                    <p className="font-semibold text-amber-700 dark:text-amber-300">
+                      {formatCurrency(Number(selectedSaleAccountBalanceMovement.amount || 0))}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Saldo restante</p>
+                    <p className="font-semibold text-amber-700 dark:text-amber-300">
+                      {formatCurrency(Number(selectedSaleAccountBalanceMovement.balanceAfter || 0))}
+                    </p>
+                  </div>
+                </>
+              ) : null}
             </div>
 
             <div className="space-y-2">

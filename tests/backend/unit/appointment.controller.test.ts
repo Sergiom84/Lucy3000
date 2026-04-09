@@ -16,7 +16,6 @@ describe('appointment.controller', () => {
 
   it('creates appointment with cabin and reminder notification', async () => {
     prismaMock.googleCalendarConfig.findFirst.mockResolvedValue(null)
-    // Mock for appointment slot validation (no conflicts)
     prismaMock.appointment.findMany.mockResolvedValue([])
     prismaMock.appointment.create.mockResolvedValue({
       id: 'appointment-1',
@@ -75,6 +74,79 @@ describe('appointment.controller', () => {
     expect(res.status).toHaveBeenCalledWith(201)
   })
 
+  it('creates guest appointment and uses guest name in notification', async () => {
+    prismaMock.googleCalendarConfig.findFirst.mockResolvedValue(null)
+    prismaMock.appointment.findMany.mockResolvedValue([])
+    prismaMock.appointment.create.mockResolvedValue({
+      id: 'appointment-guest-1',
+      clientId: null,
+      guestName: 'Cliente puntual',
+      guestPhone: '600123123',
+      cabin: 'LUCY',
+      reminder: true,
+      date: new Date('2099-06-15T10:00:00.000Z'),
+      client: null,
+      user: { id: 'user-1', name: 'Lucy', email: 'admin@lucy3000.com' },
+      service: { name: 'Limpieza facial' },
+      googleCalendarEventId: null
+    })
+    prismaMock.appointment.update.mockResolvedValue({
+      id: 'appointment-guest-1',
+      clientId: null,
+      guestName: 'Cliente puntual',
+      guestPhone: '600123123',
+      cabin: 'LUCY',
+      reminder: true,
+      date: new Date('2099-06-15T10:00:00.000Z'),
+      client: null,
+      user: { id: 'user-1', name: 'Lucy', email: 'admin@lucy3000.com' },
+      service: { name: 'Limpieza facial' },
+      googleCalendarEventId: null,
+      googleCalendarSyncStatus: 'DISABLED',
+      googleCalendarSyncError: null,
+      sale: null
+    })
+    prismaMock.notification.create.mockResolvedValue(undefined)
+
+    const req = createMockRequest({
+      body: {
+        clientId: null,
+        guestName: 'Cliente puntual',
+        guestPhone: '600123123',
+        userId: 'user-1',
+        serviceId: 'service-1',
+        cabin: 'LUCY',
+        date: '2099-06-15T10:00:00.000Z',
+        startTime: '10:00',
+        endTime: '10:30',
+        status: 'SCHEDULED',
+        notes: null,
+        reminder: true
+      }
+    })
+    const res = createMockResponse()
+
+    await createAppointment(req as any, res)
+
+    expect(prismaMock.appointment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          clientId: null,
+          guestName: 'Cliente puntual',
+          guestPhone: '600123123'
+        })
+      })
+    )
+    expect(prismaMock.notification.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          message: expect.stringContaining('Cliente puntual')
+        })
+      })
+    )
+    expect(res.status).toHaveBeenCalledWith(201)
+  })
+
   it('prevents deleting appointment with a completed sale linked', async () => {
     prismaMock.appointment.findUnique.mockResolvedValue({
       id: 'appointment-1',
@@ -96,6 +168,9 @@ describe('appointment.controller', () => {
     prismaMock.googleCalendarConfig.findFirst.mockResolvedValue(null)
     prismaMock.appointment.findUnique.mockResolvedValue({
       id: 'appointment-1',
+      clientId: 'client-1',
+      guestName: null,
+      guestPhone: null,
       status: 'SCHEDULED'
     })
 

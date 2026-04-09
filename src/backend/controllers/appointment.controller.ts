@@ -3,8 +3,13 @@ import { Request, Response } from 'express'
 import { prisma } from '../db'
 import { AuthRequest } from '../middleware/auth.middleware'
 import { AppointmentSyncInput, googleCalendarService } from '../services/googleCalendar.service'
+import {
+  getAppointmentDisplayEmail,
+  getAppointmentDisplayName,
+  getAppointmentDisplayPhone
+} from '../utils/customer-display'
 import { logError, logWarn } from '../utils/logger'
-import { validateAppointmentSlot } from '../utils/appointment-validation'
+import { isActiveAppointmentStatus, validateAppointmentSlot } from '../utils/appointment-validation'
 
 const appointmentInclude = {
   client: true,
@@ -26,24 +31,45 @@ const appointmentInclude = {
 
 const toDate = (value: string | Date) => new Date(value)
 
-const buildAppointmentPayload = (payload: Record<string, unknown>): Prisma.AppointmentUncheckedCreateInput => ({
-  clientId: String(payload.clientId),
-  userId: String(payload.userId),
-  serviceId: String(payload.serviceId),
-  cabin: payload.cabin as string,
-  professional: (payload.professional as string) || 'LUCY',
-  date: toDate(String(payload.date)),
-  startTime: String(payload.startTime),
-  endTime: String(payload.endTime),
-  status: payload.status as string,
-  notes: payload.notes ? String(payload.notes) : null,
-  reminder: payload.reminder === undefined ? true : Boolean(payload.reminder)
-})
+const normalizeNullableText = (value: unknown) => {
+  const trimmed = String(value ?? '').trim()
+  return trimmed || null
+}
+
+const normalizeNullableId = (value: unknown) => {
+  if (value === undefined || value === null) return null
+  const trimmed = String(value).trim()
+  return trimmed || null
+}
+
+const hasText = (value: unknown) => Boolean(String(value ?? '').trim())
+
+const buildAppointmentPayload = (payload: Record<string, unknown>): Prisma.AppointmentUncheckedCreateInput => {
+  const clientId = normalizeNullableId(payload.clientId)
+
+  return {
+    clientId,
+    guestName: clientId ? null : normalizeNullableText(payload.guestName),
+    guestPhone: clientId ? null : normalizeNullableText(payload.guestPhone),
+    userId: String(payload.userId),
+    serviceId: String(payload.serviceId),
+    cabin: payload.cabin as string,
+    professional: (payload.professional as string) || 'LUCY',
+    date: toDate(String(payload.date)),
+    startTime: String(payload.startTime),
+    endTime: String(payload.endTime),
+    status: payload.status as string,
+    notes: payload.notes ? String(payload.notes) : null,
+    reminder: payload.reminder === undefined ? true : Boolean(payload.reminder)
+  }
+}
 
 const buildAppointmentUpdatePayload = (payload: Record<string, unknown>): Prisma.AppointmentUncheckedUpdateInput => {
   const data: Prisma.AppointmentUncheckedUpdateInput = {}
 
-  if (payload.clientId !== undefined) data.clientId = String(payload.clientId)
+  if (payload.clientId !== undefined) data.clientId = normalizeNullableId(payload.clientId)
+  if (payload.guestName !== undefined) data.guestName = normalizeNullableText(payload.guestName)
+  if (payload.guestPhone !== undefined) data.guestPhone = normalizeNullableText(payload.guestPhone)
   if (payload.userId !== undefined) data.userId = String(payload.userId)
   if (payload.serviceId !== undefined) data.serviceId = String(payload.serviceId)
   if (payload.cabin !== undefined) data.cabin = payload.cabin as string
@@ -59,8 +85,9 @@ const buildAppointmentUpdatePayload = (payload: Record<string, unknown>): Prisma
 }
 
 const buildCalendarSyncInput = (appointment: any): AppointmentSyncInput => {
-  const clientName = `${appointment.client.firstName} ${appointment.client.lastName}`.trim()
-  const phoneLine = appointment.client.phone ? `\nTelefono: ${appointment.client.phone}` : ''
+  const clientName = getAppointmentDisplayName(appointment)
+  const phone = getAppointmentDisplayPhone(appointment)
+  const phoneLine = phone ? `\nTelefono: ${phone}` : ''
 
   return {
     appointmentId: appointment.id,
@@ -70,9 +97,41 @@ const buildCalendarSyncInput = (appointment: any): AppointmentSyncInput => {
     date: appointment.date,
     startTime: appointment.startTime,
     endTime: appointment.endTime,
-    clientEmail: appointment.client.email,
+    clientEmail: getAppointmentDisplayEmail(appointment),
     clientName
   }
+}
+
+const validateAppointmentPartyUpdate = (
+  existing: {
+    clientId?: string | null
+    guestName?: string | null
+    guestPhone?: string | null
+  },
+  updateData: Prisma.AppointmentUncheckedUpdateInput
+) => {
+  const existingIsGuest = !existing.clientId
+  const nextClientId =
+    updateData.clientId !== undefined ? (updateData.clientId as string | null) : existing.clientId || null
+  const nextGuestName =
+    updateData.guestName !== undefined ? (updateData.guestName as string | null) : existing.guestName || null
+  const nextGuestPhone =
+    updateData.guestPhone !== undefined ? (updateData.guestPhone as string | null) : existing.guestPhone || null
+  const nextIsGuest = !nextClientId
+
+  if (existingIsGuest !== nextIsGuest) {
+    return 'No se puede cambiar una cita entre cliente registrado y cliente puntual'
+  }
+
+  if (!nextIsGuest && (hasText(nextGuestName) || hasText(nextGuestPhone))) {
+    return 'Las citas de clientes registrados no pueden incluir datos de cliente puntual'
+  }
+
+  if (nextIsGuest && (!hasText(nextGuestName) || !hasText(nextGuestPhone))) {
+    return 'Las citas puntuales deben conservar nombre y telefono'
+  }
+
+  return null
 }
 
 const releaseReservedBonoSessions = async (appointmentId: string) => {
@@ -222,11 +281,12 @@ export const createAppointment = async (req: AuthRequest, res: Response) => {
     }
 
     if (data.reminder) {
+      const appointmentName = getAppointmentDisplayName(appointment)
       await prisma.notification.create({
         data: {
           type: 'APPOINTMENT',
           title: 'Nueva cita programada',
-          message: `Cita con ${appointment.client.firstName} ${appointment.client.lastName} el ${new Date(appointment.date).toLocaleDateString()}`,
+          message: `Cita con ${appointmentName} el ${new Date(appointment.date).toLocaleDateString()}`,
           priority: 'NORMAL'
         }
       })
@@ -255,12 +315,25 @@ export const updateAppointment = async (req: AuthRequest, res: Response) => {
     }
 
     const updateData = buildAppointmentUpdatePayload(req.body)
+    const partyValidationError = validateAppointmentPartyUpdate(existing, updateData)
+
+    if (partyValidationError) {
+      return res.status(400).json({ error: partyValidationError })
+    }
 
     // Validate only if scheduling-relevant fields are changing
-    const schedulingFieldChanged = updateData.date !== undefined || updateData.startTime !== undefined ||
-      updateData.endTime !== undefined || updateData.professional !== undefined || updateData.cabin !== undefined
+    const schedulingFieldChanged =
+      updateData.date !== undefined ||
+      updateData.startTime !== undefined ||
+      updateData.endTime !== undefined ||
+      updateData.professional !== undefined ||
+      updateData.cabin !== undefined
+    const nextStatus = String(updateData.status ?? existing.status)
+    const shouldValidateScheduling =
+      schedulingFieldChanged ||
+      (!isActiveAppointmentStatus(existing.status) && isActiveAppointmentStatus(nextStatus))
 
-    if (schedulingFieldChanged) {
+    if (shouldValidateScheduling) {
       const validation = await validateAppointmentSlot({
         date: (updateData.date as Date) || existing.date,
         startTime: (updateData.startTime as string) || existing.startTime,
@@ -342,7 +415,7 @@ export const deleteAppointment = async (req: Request, res: Response) => {
 
     const deleteSyncResult = await googleCalendarService.deleteAppointmentEvent(
       appointment.googleCalendarEventId,
-      appointment.client.email
+      getAppointmentDisplayEmail(appointment)
     )
 
     if (deleteSyncResult.error) {

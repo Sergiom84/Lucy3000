@@ -109,10 +109,12 @@ export default function Reports() {
   const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
 
   // Prepare chart data
-  const paymentMethodsData = salesReport ? Object.entries(salesReport.paymentMethods).map(([key, value]: any) => ({
-    name: paymentMethodLabel(key),
-    value: Number(value)
-  })) : []
+  const paymentMethodsData = salesReport
+    ? Object.entries(salesReport.paymentMethods).map(([key, value]: any) => ({
+        name: paymentMethodLabel(key),
+        value: Number(value)
+      }))
+    : []
 
   const topProductsData = productReport?.topProducts.slice(0, 5).map((p: any) => ({
     name: p.name.length > 20 ? p.name.substring(0, 20) + '...' : p.name,
@@ -251,7 +253,7 @@ export default function Reports() {
                     {salesReport?.totalSales || 0}
                   </p>
                   <p className="text-sm text-blue-600 mt-1">
-                    €{salesReport?.totalRevenue.toFixed(2) || '0.00'}
+                    €{salesReport?.workPerformedRevenue.toFixed(2) || '0.00'}
                   </p>
                 </div>
 
@@ -367,7 +369,7 @@ export default function Reports() {
           {/* Sales Tab */}
           {activeTab === 'sales' && salesReport && (
             <div className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
                 <div className="card">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm text-gray-600 dark:text-gray-400">Total Ventas</span>
@@ -380,11 +382,21 @@ export default function Reports() {
 
                 <div className="card">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm text-gray-600 dark:text-gray-400">Ingresos Totales</span>
+                    <span className="text-sm text-gray-600 dark:text-gray-400">Cobrado real</span>
                     <DollarSign className="w-5 h-5 text-green-600" />
                   </div>
                   <p className="text-3xl font-bold text-green-600">
-                    €{salesReport.totalRevenue.toFixed(2)}
+                    €{salesReport.collectedRevenue.toFixed(2)}
+                  </p>
+                </div>
+
+                <div className="card">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm text-gray-600 dark:text-gray-400">Trabajo realizado</span>
+                    <BarChart3 className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <p className="text-3xl font-bold text-blue-600">
+                    €{salesReport.workPerformedRevenue.toFixed(2)}
                   </p>
                 </div>
 

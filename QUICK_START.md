@@ -10,33 +10,29 @@ Guía rápida para poner en marcha Lucy3000 en menos de 10 minutos.
 npm install
 ```
 
-### 2️⃣ Configurar Supabase
+### 2️⃣ Configurar SQLite local
 
-**Opción A: Script Interactivo (Recomendado)**
-```bash
-node scripts/setup.js
-```
-
-**Opción B: Manual**
-1. Copiar `.env.example` a `.env`
-2. Completar con tus credenciales de Supabase
-3. Ejecutar migraciones:
+**Opción A: Entorno listo**
 ```bash
 npm run prisma:generate
-npm run prisma:migrate
+```
+
+**Opción B: Reinicializar esquema local**
+1. Copiar `.env.example` a `.env`
+2. Confirmar `DATABASE_URL="file:./prisma/lucy3000.db"` (Prisma la resolverá en disco como `prisma/prisma/lucy3000.db`)
+3. Ejecutar:
+```bash
+npx prisma db push
 ```
 
 ### 3️⃣ Crear Usuario Admin
 
-Ejecutar en Supabase SQL Editor:
-```bash
-# Copiar contenido de scripts/create-admin.sql
-```
-
-O usar Prisma Studio:
+Usar Prisma Studio para crear el primer usuario si la base local está vacía:
 ```bash
 npm run prisma:studio
 ```
+
+Si estás restaurando un entorno PostgreSQL/Supabase histórico, consulta `BACKUP_RESTORE.md`.
 
 ## 🎯 Iniciar Aplicación
 
@@ -52,14 +48,14 @@ Esto iniciará:
 
 ```
 Email: admin@lucy3000.com
-Password: admin123
+Password: lucy3000
 ```
 
 ## 📋 Checklist de Verificación
 
 - [ ] Node.js 18+ instalado
 - [ ] Dependencias instaladas (`npm install`)
-- [ ] Cuenta de Supabase creada
+- [ ] Base de datos local disponible
 - [ ] Archivo `.env` configurado
 - [ ] Migraciones ejecutadas
 - [ ] Usuario admin creado
@@ -74,8 +70,8 @@ npm install
 ```
 
 ### Error: "Database connection failed"
-- Verificar DATABASE_URL en `.env`
-- Comprobar que Supabase esté activo
+- Verificar `DATABASE_URL` en `.env`
+- Comprobar que `prisma/prisma/lucy3000.db` exista y sea escribible
 
 ### Error: "Invalid credentials"
 - Verificar que el usuario admin se creó correctamente

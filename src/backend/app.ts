@@ -1,6 +1,7 @@
-import express from 'express'
+import express, { type NextFunction, type Request, type Response } from 'express'
 import cors from 'cors'
 import path from 'path'
+import { logError, logInfo, logWarn, sanitizeForLog } from './utils/logger'
 
 // Routes
 import authRoutes from './routes/auth.routes'
@@ -16,6 +17,7 @@ import dashboardRoutes from './routes/dashboard.routes'
 import rankingRoutes from './routes/ranking.routes'
 import bonoRoutes from './routes/bono.routes'
 import calendarRoutes from './routes/calendar.routes'
+import quoteRoutes from './routes/quote.routes'
 
 export const app = express()
 
@@ -23,6 +25,46 @@ export const app = express()
 app.use(cors())
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
+app.use((req, res, next) => {
+  const startedAt = Date.now()
+
+  res.on('finish', () => {
+    if (req.path === '/health') {
+      return
+    }
+
+    const shouldLogSuccess = req.method !== 'GET' && req.method !== 'HEAD'
+    const shouldLogRequest = shouldLogSuccess || res.statusCode >= 400
+
+    if (!shouldLogRequest) {
+      return
+    }
+
+    const context = {
+      method: req.method,
+      path: req.originalUrl,
+      statusCode: res.statusCode,
+      durationMs: Date.now() - startedAt,
+      params: sanitizeForLog(req.params),
+      query: sanitizeForLog(req.query),
+      body: req.method === 'GET' || req.method === 'HEAD' ? undefined : sanitizeForLog(req.body)
+    }
+
+    if (res.statusCode >= 500) {
+      logError('API request completed with server error', undefined, context)
+      return
+    }
+
+    if (res.statusCode >= 400) {
+      logWarn('API request completed with client error', context)
+      return
+    }
+
+    logInfo('API request completed', context)
+  })
+
+  next()
+})
 
 // Health check
 app.get('/health', (_req, res) => {
@@ -43,6 +85,7 @@ app.use('/api/dashboard', dashboardRoutes)
 app.use('/api/ranking', rankingRoutes)
 app.use('/api/bonos', bonoRoutes)
 app.use('/api/calendar', calendarRoutes)
+app.use('/api/quotes', quoteRoutes)
 
 // Static frontend build (Vite)
 const clientDir = path.resolve(__dirname, '..')
@@ -55,11 +98,19 @@ app.get('*', (req, res, next) => {
 })
 
 // Error handling
-app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error(err.stack)
+app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
+  logError('Unhandled API error', err, {
+    method: req.method,
+    path: req.originalUrl,
+    params: req.params,
+    query: req.query,
+    body: req.body
+  })
+
+  const errorMessage = err instanceof Error ? err.message : 'Unexpected error'
   res.status(500).json({
     error: 'Something went wrong!',
-    message: process.env.NODE_ENV === 'development' ? err.message : undefined
+    message: process.env.NODE_ENV === 'development' ? errorMessage : undefined
   })
 })
 

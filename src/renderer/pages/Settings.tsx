@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertCircle, Calendar, CheckCircle2, Link2, Printer, RefreshCw, Save, Unlink } from 'lucide-react'
+import { AlertCircle, Calendar, CheckCircle2, Database, FolderOpen, HardDrive, Link2, Printer, RefreshCw, RotateCcw, Save, Unlink, Upload } from 'lucide-react'
 import toast from 'react-hot-toast'
+import Modal from '../components/Modal'
+import ImportProductsModal from '../components/ImportProductsModal'
+import ImportServicesModal from '../components/ImportServicesModal'
+import ImportClientsModal from '../components/ImportClientsModal'
+import ImportBonosModal from '../components/ImportBonosModal'
 import {
   getPrintTicketSuccessMessage,
+  getDebugLogFilePath,
   isDesktop,
   getTicketPrinterConfig,
   listTicketPrinters,
+  openDebugLogFolder,
   printTicket,
   saveTicketPrinterConfig,
   TicketPrinter
@@ -21,13 +28,19 @@ type GoogleCalendarConfig = {
   enabled: boolean
   sendClientInvites: boolean
   calendarId: string
+  oauthConfigured: boolean
+  missingEnvVars: string[]
+  redirectUri?: string | null
 }
 
 const DEFAULT_CALENDAR_CONFIG: GoogleCalendarConfig = {
   connected: false,
   enabled: false,
   sendClientInvites: true,
-  calendarId: 'primary'
+  calendarId: 'primary',
+  oauthConfigured: true,
+  missingEnvVars: [],
+  redirectUri: null
 }
 
 const GOOGLE_CALENDAR_MESSAGE_SOURCE = 'lucy3000-google-calendar-oauth'
@@ -47,6 +60,17 @@ export default function Settings() {
   const [loadingCalendar, setLoadingCalendar] = useState(false)
   const [savingCalendar, setSavingCalendar] = useState(false)
   const [calendarId, setCalendarId] = useState(DEFAULT_CALENDAR_CONFIG.calendarId)
+  const [desktopExePath, setDesktopExePath] = useState('')
+  const [desktopUserDataPath, setDesktopUserDataPath] = useState('')
+
+  const [importModal, setImportModal] = useState<'clients' | 'services' | 'products' | 'bonos' | null>(null)
+
+  const [backupFolder, setBackupFolder] = useState('')
+  const [autoBackupEnabled, setAutoBackupEnabled] = useState(true)
+  const [backups, setBackups] = useState<Array<{ name: string; date: string; size: number }>>([])
+  const [_loadingBackups, setLoadingBackups] = useState(false)
+  const [creatingBackup, setCreatingBackup] = useState(false)
+  const [debugLogPath, setDebugLogPath] = useState('')
 
   const desktopMode = isDesktop()
   const isAdmin = user?.role === 'ADMIN'
@@ -59,6 +83,14 @@ export default function Settings() {
       return window.location.origin
     }
   }, [])
+  const desktopExeEnvPath = useMemo(() => {
+    if (!desktopExePath) return ''
+
+    const lastSeparatorIndex = Math.max(desktopExePath.lastIndexOf('\\'), desktopExePath.lastIndexOf('/'))
+    if (lastSeparatorIndex < 0) return '.env'
+
+    return `${desktopExePath.slice(0, lastSeparatorIndex + 1)}.env`
+  }, [desktopExePath])
 
   const loadPrinters = async () => {
     if (!desktopMode) return
@@ -162,6 +194,122 @@ export default function Settings() {
     }
   }
 
+  const loadBackupConfig = async () => {
+    if (!desktopMode) return
+    try {
+      setLoadingBackups(true)
+      const config = await window.electronAPI!.backup.getConfig()
+      setBackupFolder(config.folder)
+      setAutoBackupEnabled(config.autoEnabled)
+
+      const result = await window.electronAPI!.backup.list()
+      if (result.success) setBackups(result.backups)
+    } catch {
+      // Backup config not available
+    } finally {
+      setLoadingBackups(false)
+    }
+  }
+
+  const loadDesktopExePath = async () => {
+    if (!desktopMode || !window.electronAPI) return
+
+    try {
+      const exePath = await window.electronAPI.getPath('exe')
+      setDesktopExePath(exePath)
+    } catch {
+      setDesktopExePath('')
+    }
+  }
+
+  const loadDesktopUserDataPath = async () => {
+    if (!desktopMode || !window.electronAPI) return
+
+    try {
+      const userDataPath = await window.electronAPI.getPath('userData')
+      setDesktopUserDataPath(userDataPath)
+    } catch {
+      setDesktopUserDataPath('')
+    }
+  }
+
+  const loadDebugLogPath = async () => {
+    if (!desktopMode) return
+
+    try {
+      const filePath = await getDebugLogFilePath()
+      setDebugLogPath(filePath)
+    } catch {
+      setDebugLogPath('')
+    }
+  }
+
+  const handleCreateBackup = async () => {
+    if (!desktopMode) return
+    try {
+      setCreatingBackup(true)
+      const result = await window.electronAPI!.backup.create()
+      if (result.success) {
+        toast.success(result.message || 'Backup creado')
+        loadBackupConfig()
+      } else {
+        toast.error(result.message || 'Error al crear backup')
+      }
+    } catch {
+      toast.error('Error al crear backup')
+    } finally {
+      setCreatingBackup(false)
+    }
+  }
+
+  const handleRestoreBackup = async () => {
+    if (!desktopMode) return
+    if (!confirm('Esto reemplazara la base de datos actual con el backup seleccionado. Se creara una copia de seguridad automatica antes de restaurar. ¿Continuar?')) return
+    try {
+      const result = await window.electronAPI!.backup.restore()
+      if (result.success) {
+        toast.success(result.message || 'Backup restaurado')
+      } else {
+        toast.error(result.message || 'Error al restaurar')
+      }
+    } catch {
+      toast.error('Error al restaurar backup')
+    }
+  }
+
+  const handleSelectBackupFolder = async () => {
+    if (!desktopMode) return
+    const result = await window.electronAPI!.backup.selectFolder()
+    if (!result.canceled && result.folder) {
+      setBackupFolder(result.folder)
+    }
+  }
+
+  const handleSaveBackupConfig = async () => {
+    if (!desktopMode) return
+    try {
+      await window.electronAPI!.backup.setConfig({
+        folder: backupFolder,
+        autoEnabled: autoBackupEnabled,
+        cronExpression: '0 3 * * 0'
+      })
+      toast.success('Configuracion de backup guardada')
+    } catch {
+      toast.error('Error al guardar configuracion')
+    }
+  }
+
+  const handleOpenLogsFolder = async () => {
+    if (!desktopMode) return
+
+    try {
+      const folderPath = await openDebugLogFolder()
+      toast.success(`Carpeta de logs abierta: ${folderPath}`)
+    } catch (error: any) {
+      toast.error(error.message || 'No se pudo abrir la carpeta de logs')
+    }
+  }
+
   const buildPrinterConfig = (): TicketPrinterConfig => ({
     mode: printerMode,
     ticketPrinterName: selectedPrinter || null,
@@ -232,6 +380,10 @@ export default function Settings() {
   useEffect(() => {
     loadPrinters()
     loadCalendarConfig()
+    loadBackupConfig()
+    loadDebugLogPath()
+    loadDesktopExePath()
+    loadDesktopUserDataPath()
   }, [isAdmin])
 
   useEffect(() => {
@@ -418,6 +570,33 @@ export default function Settings() {
             </div>
           ) : calendarConfig.connected ? (
             <div className="space-y-4">
+              {!calendarConfig.oauthConfigured && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                  <p className="font-semibold">Falta configurar Google Calendar en el entorno del .exe.</p>
+                  <p className="mt-2">
+                    Variables pendientes: {calendarConfig.missingEnvVars.join(', ')}.
+                  </p>
+                  <p className="mt-2">
+                    Añádelas en el archivo <span className="font-mono">.env</span> de la carpeta de datos de Lucy3000 y reinicia la app.
+                  </p>
+                  {desktopUserDataPath && (
+                    <p className="mt-2 break-all font-mono text-xs">
+                      Ruta recomendada: {desktopUserDataPath}\.env
+                    </p>
+                  )}
+                  {desktopExeEnvPath && (
+                    <p className="mt-2 break-all text-xs">
+                      Alternativa compatible: <span className="font-mono">{desktopExeEnvPath}</span>
+                    </p>
+                  )}
+                  {calendarConfig.redirectUri && (
+                    <p className="mt-2 break-all text-xs">
+                      Redirect URI esperada: <span className="font-mono">{calendarConfig.redirectUri}</span>
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="flex items-center justify-between rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-900 dark:bg-green-950/30">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="h-5 w-5 text-green-600" />
@@ -494,18 +673,211 @@ export default function Settings() {
             </div>
           ) : (
             <div className="space-y-4">
+              {!calendarConfig.oauthConfigured && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                  <p className="font-semibold">Google Calendar no está listo todavía.</p>
+                  <p className="mt-2">
+                    Faltan estas variables: {calendarConfig.missingEnvVars.join(', ')}.
+                  </p>
+                  <p className="mt-2">
+                    Crea o completa el archivo <span className="font-mono">.env</span> en la carpeta de datos de Lucy3000 y reinicia la aplicación antes de pulsar conectar.
+                  </p>
+                  {desktopUserDataPath && (
+                    <p className="mt-2 break-all font-mono text-xs">
+                      Ruta recomendada: {desktopUserDataPath}\.env
+                    </p>
+                  )}
+                  {desktopExeEnvPath && (
+                    <p className="mt-2 break-all text-xs">
+                      Alternativa compatible: <span className="font-mono">{desktopExeEnvPath}</span>
+                    </p>
+                  )}
+                  <p className="mt-2 text-xs">
+                    Variables necesarias: <span className="font-mono">GOOGLE_CALENDAR_CLIENT_ID</span>, <span className="font-mono">GOOGLE_CALENDAR_CLIENT_SECRET</span>, <span className="font-mono">GOOGLE_CALENDAR_REDIRECT_URI</span>.
+                  </p>
+                </div>
+              )}
+
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200">
                 Conecta una cuenta de Google para registrar las citas en tu calendario y, si el cliente tiene email,
                 enviarle la invitación del evento desde Google.
               </div>
 
-              <button onClick={handleConnectGoogleCalendar} className="btn btn-primary w-full">
+              <button
+                onClick={handleConnectGoogleCalendar}
+                className="btn btn-primary w-full"
+                disabled={!calendarConfig.oauthConfigured}
+              >
                 <Link2 className="mr-2 h-4 w-4" />
                 Conectar Google Calendar
               </button>
             </div>
           )}
         </div>
+
+        <div className="card space-y-5">
+          <div className="flex items-center gap-3">
+            <Database className="h-5 w-5 text-primary-600" />
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Importar datos</h2>
+              <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                Carga clientes, tratamientos o productos desde un archivo Excel.
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <button
+              onClick={() => setImportModal('clients')}
+              className="btn btn-secondary w-full justify-start"
+            >
+              <Upload className="mr-2 h-4 w-4" />
+              Importar Clientes
+            </button>
+            <button
+              onClick={() => setImportModal('services')}
+              className="btn btn-secondary w-full justify-start"
+            >
+              <Upload className="mr-2 h-4 w-4" />
+              Importar Tratamientos
+            </button>
+            <button
+              onClick={() => setImportModal('products')}
+              className="btn btn-secondary w-full justify-start"
+            >
+              <Upload className="mr-2 h-4 w-4" />
+              Importar Productos
+            </button>
+            <button
+              onClick={() => setImportModal('bonos')}
+              className="btn btn-secondary w-full justify-start"
+            >
+              <Upload className="mr-2 h-4 w-4" />
+              Importar Bonos
+            </button>
+          </div>
+
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+            La importacion no borra datos existentes. Los nuevos registros se anaden a los actuales.
+            Si un registro ya existe (por SKU en productos), se omite.
+          </div>
+        </div>
+
+        {desktopMode && (
+          <div className="card space-y-5">
+            <div className="flex items-center gap-3">
+              <HardDrive className="h-5 w-5 text-primary-600" />
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Backups</h2>
+                <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                  Copia de seguridad de la base de datos local.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <button
+                onClick={handleCreateBackup}
+                className="btn btn-primary w-full"
+                disabled={creatingBackup}
+              >
+                <Save className="mr-2 h-4 w-4" />
+                {creatingBackup ? 'Creando backup...' : 'Hacer backup ahora'}
+              </button>
+
+              <button
+                onClick={handleRestoreBackup}
+                className="btn btn-secondary w-full"
+              >
+                <RotateCcw className="mr-2 h-4 w-4" />
+                Restaurar backup
+              </button>
+            </div>
+
+            <div className="space-y-3 border-t border-gray-200 dark:border-gray-700 pt-4">
+              <div>
+                <label className="label">Carpeta de backups</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={backupFolder}
+                    onChange={(e) => setBackupFolder(e.target.value)}
+                    className="input flex-1"
+                    placeholder="Carpeta destino"
+                    readOnly
+                  />
+                  <button onClick={handleSelectBackupFolder} className="btn btn-secondary">
+                    <FolderOpen className="h-4 w-4" />
+                  </button>
+                </div>
+                <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                  Si usas Google Drive o OneDrive, elige una carpeta sincronizada para subir los backups a la nube automaticamente.
+                </p>
+              </div>
+
+              <label className="flex cursor-pointer items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={autoBackupEnabled}
+                  onChange={(e) => setAutoBackupEnabled(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                />
+                <span className="text-sm font-medium text-gray-900 dark:text-white">
+                  Backup automatico semanal
+                </span>
+              </label>
+
+              <button onClick={handleSaveBackupConfig} className="btn btn-secondary w-full">
+                <Save className="mr-2 h-4 w-4" />
+                Guardar configuracion de backup
+              </button>
+            </div>
+
+            {backups.length > 0 && (
+              <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">
+                  Backups existentes ({backups.length})
+                </h3>
+                <div className="max-h-36 overflow-y-auto space-y-1">
+                  {backups.map((backup) => (
+                    <div key={backup.name} className="flex justify-between items-center text-xs text-gray-600 dark:text-gray-400 py-1">
+                      <span className="truncate flex-1">{backup.name}</span>
+                      <span className="ml-2 whitespace-nowrap">{(backup.size / 1024 / 1024).toFixed(1)} MB</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {desktopMode && (
+          <div className="card space-y-5">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="h-5 w-5 text-primary-600" />
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Diagnostico y logs</h2>
+                <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                  Lucy3000 guarda errores del renderer, Electron y backend en un fichero local.
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200">
+              <p className="font-medium text-gray-900 dark:text-white">Archivo actual de log</p>
+              <p className="mt-2 break-all font-mono">{debugLogPath || 'No disponible todavia'}</p>
+            </div>
+
+            <button onClick={handleOpenLogsFolder} className="btn btn-secondary w-full">
+              <FolderOpen className="mr-2 h-4 w-4" />
+              Abrir carpeta de logs
+            </button>
+
+            <p className="text-xs text-gray-600 dark:text-gray-400">
+              Reproduce el error y enviame el contenido del log mas reciente para localizar el fallo exacto.
+            </p>
+          </div>
+        )}
 
         <div className="card space-y-4 lg:col-span-2">
           <div className="flex items-center gap-3">
@@ -537,6 +909,34 @@ export default function Settings() {
           </div>
         </div>
       </div>
+
+      <Modal isOpen={importModal === 'clients'} title="Importar Clientes" onClose={() => setImportModal(null)}>
+        <ImportClientsModal
+          onSuccess={() => { setImportModal(null) }}
+          onCancel={() => setImportModal(null)}
+        />
+      </Modal>
+
+      <Modal isOpen={importModal === 'services'} title="Importar Tratamientos" onClose={() => setImportModal(null)}>
+        <ImportServicesModal
+          onSuccess={() => { setImportModal(null) }}
+          onCancel={() => setImportModal(null)}
+        />
+      </Modal>
+
+      <Modal isOpen={importModal === 'products'} title="Importar Productos" onClose={() => setImportModal(null)}>
+        <ImportProductsModal
+          onSuccess={() => { setImportModal(null) }}
+          onCancel={() => setImportModal(null)}
+        />
+      </Modal>
+
+      <Modal isOpen={importModal === 'bonos'} title="Importar Bonos" onClose={() => setImportModal(null)}>
+        <ImportBonosModal
+          onSuccess={() => { setImportModal(null) }}
+          onCancel={() => setImportModal(null)}
+        />
+      </Modal>
     </div>
   )
 }

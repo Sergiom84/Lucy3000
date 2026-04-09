@@ -4,13 +4,14 @@ import { Calendar as BigCalendar, momentLocalizer, View } from 'react-big-calend
 import moment from 'moment'
 import 'moment/locale/es'
 import 'react-big-calendar/lib/css/react-big-calendar.css'
-import { ChevronLeft, ChevronRight, CreditCard, Plus } from 'lucide-react'
+import { ChevronLeft, ChevronRight, CreditCard, Plus, UserX } from 'lucide-react'
 import api from '../utils/api'
-import { formatDate } from '../utils/format'
+import { getAppointmentColorTheme, TREATMENT_CATEGORY_LABELS } from '../utils/appointmentColors'
 import { paymentMethodLabel } from '../utils/tickets'
 import toast from 'react-hot-toast'
 import Modal from '../components/Modal'
 import AppointmentForm from '../components/AppointmentForm'
+import { getAppointmentDisplayName } from '../../shared/customerDisplay'
 
 moment.locale('es')
 const localizer = momentLocalizer(moment)
@@ -31,15 +32,6 @@ const messages = {
   showMore: (total: number) => `+ Ver más (${total})`
 }
 
-const statusColors: Record<string, string> = {
-  SCHEDULED: '#64748b',
-  CONFIRMED: '#2563eb',
-  IN_PROGRESS: '#f59e0b',
-  COMPLETED: '#10b981',
-  CANCELLED: '#ef4444',
-  NO_SHOW: '#b91c1c'
-}
-
 const cabinResources = [
   { resourceId: 'LUCY', resourceTitle: 'Lucy' },
   { resourceId: 'TAMARA', resourceTitle: 'Tamara' },
@@ -47,14 +39,60 @@ const cabinResources = [
   { resourceId: 'CABINA_2', resourceTitle: 'Cabina 2' }
 ]
 
+const professionalLabels: Record<string, string> = {
+  LUCY: 'Lucy',
+  TAMARA: 'Tamara',
+  CHEMA: 'Chema',
+  OTROS: 'Otros'
+}
+const INACTIVE_STATUSES = new Set(['COMPLETED', 'CANCELLED', 'NO_SHOW'])
+
+const cabinLabels: Record<string, string> = {
+  LUCY: 'Lucy',
+  TAMARA: 'Tamara',
+  CABINA_1: 'Cabina 1',
+  CABINA_2: 'Cabina 2'
+}
+
 function AppointmentEvent({ event }: { event: any }) {
+  const { appointment } = event
+  const clientName = getAppointmentDisplayName(appointment)
+  const serviceName = appointment.service?.name || ''
+  const timeRange = `${appointment.startTime} - ${appointment.endTime}`
+  const tooltip = `${clientName}\n${serviceName}\n${timeRange}\nCabina: ${cabinLabels[appointment.cabin] || appointment.cabin}`
+
+  const startMinutes = (() => {
+    const [h, m] = appointment.startTime.split(':').map(Number)
+    return h * 60 + m
+  })()
+  const endMinutes = (() => {
+    const [h, m] = appointment.endTime.split(':').map(Number)
+    return h * 60 + m
+  })()
+  const duration = endMinutes - startMinutes
+
+  if (duration <= 30) {
+    return (
+      <div className="leading-[1.15] overflow-hidden" title={tooltip}>
+        <p className="text-[10px] font-semibold truncate">{clientName} &middot; {serviceName}</p>
+      </div>
+    )
+  }
+
+  if (duration <= 45) {
+    return (
+      <div className="leading-[1.15] overflow-hidden" title={tooltip}>
+        <p className="text-[11px] font-semibold truncate">{clientName}</p>
+        <p className="text-[10px] opacity-90 truncate">{serviceName}</p>
+      </div>
+    )
+  }
+
   return (
-    <div className="leading-tight">
-      <p className="font-semibold text-xs truncate">{event.appointment.client.firstName} {event.appointment.client.lastName}</p>
-      <p className="text-[11px] opacity-90 truncate">{event.appointment.service.name}</p>
-      <p className="text-[10px] opacity-80">
-        {event.appointment.startTime} - {event.appointment.endTime}
-      </p>
+    <div className="leading-tight overflow-hidden" title={tooltip}>
+      <p className="font-semibold text-xs truncate">{clientName}</p>
+      <p className="text-[11px] opacity-90 truncate">{serviceName}</p>
+      <p className="text-[10px] opacity-80">{timeRange}</p>
     </div>
   )
 }
@@ -145,10 +183,28 @@ export default function Appointments() {
     }
   }
 
+  const handleMarkNoShow = async (id: string) => {
+    if (!confirm('¿Marcar esta cita como "No acudio"?')) return
+
+    try {
+      await api.put(`/appointments/${id}`, { status: 'NO_SHOW' })
+      toast.success('Cita marcada como no acudio')
+      fetchAppointments()
+      handleCloseModal()
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Error al actualizar cita')
+    }
+  }
+
   const goToCharge = (appointment: any) => {
-    navigate(
-      `/sales?clientId=${appointment.clientId}&serviceId=${appointment.serviceId}&appointmentId=${appointment.id}`
-    )
+    const params = new URLSearchParams({
+      serviceId: appointment.serviceId,
+      appointmentId: appointment.id
+    })
+    if (appointment.clientId) {
+      params.set('clientId', appointment.clientId)
+    }
+    navigate(`/sales?${params.toString()}`)
   }
 
   const events = useMemo(
@@ -165,7 +221,7 @@ export default function Appointments() {
         end.setHours(parseInt(endHours, 10), parseInt(endMinutes, 10))
 
         return {
-          title: `${appointment.client.firstName} ${appointment.client.lastName}`,
+          title: getAppointmentDisplayName(appointment),
           start,
           end,
           appointment,
@@ -176,13 +232,20 @@ export default function Appointments() {
   )
 
   const eventStyleGetter = (event: any) => {
-    const backgroundColor = statusColors[event.appointment.status] || '#64748b'
+    const theme = getAppointmentColorTheme(
+      event.appointment.service?.category,
+      event.appointment.service?.name
+    )
+    const isInactive = INACTIVE_STATUSES.has(String(event.appointment.status || '').toUpperCase())
+
     return {
       style: {
-        backgroundColor,
+        backgroundColor: theme.background,
         borderRadius: '8px',
-        color: 'white',
+        color: theme.text,
         border: '0px',
+        boxShadow: `inset 0 0 0 1px ${theme.border}33`,
+        opacity: isInactive ? 0.74 : 1,
         fontSize: '12px',
         padding: '4px 6px'
       }
@@ -236,7 +299,7 @@ export default function Appointments() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Agenda de Citas</h1>
           <p className="text-gray-600 dark:text-gray-400 mt-1">
-            Vista diaria priorizada por cabinas.
+            Vista diaria priorizada por cabinas. El color de cada cita se asigna segun el tratamiento.
           </p>
         </div>
         <button
@@ -329,6 +392,24 @@ export default function Appointments() {
         </div>
       </div>
 
+      <div className="card p-3">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <span className="text-xs font-medium text-gray-500 dark:text-gray-400 mr-1">Leyenda:</span>
+          {TREATMENT_CATEGORY_LABELS.map(({ key, label }) => {
+            const theme = getAppointmentColorTheme(label, null)
+            return (
+              <span key={key} className="inline-flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300">
+                <span
+                  className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: theme.background }}
+                />
+                {label}
+              </span>
+            )
+          })}
+        </div>
+      </div>
+
       <div className="card" style={{ height: '760px' }}>
         <BigCalendar
           localizer={localizer}
@@ -365,30 +446,36 @@ export default function Appointments() {
       >
         <div className="space-y-4">
           {editingAppointment?.id && (
-            <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
+            <div
+              className="space-y-4 rounded-lg p-4"
+              style={{
+                backgroundColor: getAppointmentColorTheme(editingAppointment.service?.category, editingAppointment.service?.name).softBackground,
+                border: `1px solid ${getAppointmentColorTheme(editingAppointment.service?.category, editingAppointment.service?.name).border}`
+              }}
+            >
+              <div className="grid grid-cols-2 gap-4 text-sm md:grid-cols-4">
                 <div>
-                  <p className="text-gray-600 dark:text-gray-400">Cliente</p>
+                  <p className="text-gray-600 dark:text-gray-400">Profesional</p>
                   <p className="font-medium text-gray-900 dark:text-white">
-                    {editingAppointment.client.firstName} {editingAppointment.client.lastName}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-gray-600 dark:text-gray-400">Servicio</p>
-                  <p className="font-medium text-gray-900 dark:text-white">
-                    {editingAppointment.service.name}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-gray-600 dark:text-gray-400">Fecha</p>
-                  <p className="font-medium text-gray-900 dark:text-white">
-                    {formatDate(editingAppointment.date)}
+                    {professionalLabels[editingAppointment.professional] || editingAppointment.professional || 'Lucy'}
                   </p>
                 </div>
                 <div>
                   <p className="text-gray-600 dark:text-gray-400">Cabina</p>
                   <p className="font-medium text-gray-900 dark:text-white">
-                    {cabinResources.find((resource) => resource.resourceId === editingAppointment.cabin)?.resourceTitle}
+                    {cabinLabels[editingAppointment.cabin] || editingAppointment.cabin}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-600 dark:text-gray-400">Fecha</p>
+                  <p className="font-medium text-gray-900 dark:text-white">
+                    {new Date(editingAppointment.date).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-600 dark:text-gray-400">Horario</p>
+                  <p className="font-medium text-gray-900 dark:text-white">
+                    {editingAppointment.startTime} - {editingAppointment.endTime}
                   </p>
                 </div>
               </div>
@@ -404,12 +491,21 @@ export default function Appointments() {
                 </button>
               )}
 
-              <button
-                onClick={() => handleDeleteAppointment(editingAppointment.id)}
-                className="btn btn-secondary text-red-600 hover:bg-red-50 dark:hover:bg-red-900 text-sm"
-              >
-                Eliminar Cita
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleMarkNoShow(editingAppointment.id)}
+                  className="btn btn-secondary text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-900/30 text-sm"
+                >
+                  <UserX className="w-4 h-4 mr-2" />
+                  No acudio
+                </button>
+                <button
+                  onClick={() => handleDeleteAppointment(editingAppointment.id)}
+                  className="btn btn-secondary text-red-600 hover:bg-red-50 dark:hover:bg-red-900 text-sm"
+                >
+                  Eliminar Cita
+                </button>
+              </div>
             </div>
           )}
 

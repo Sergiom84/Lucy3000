@@ -1,8 +1,10 @@
-import { PaymentMethod, Prisma, SaleStatus } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 import { Request, Response } from 'express'
 import { prisma } from '../db'
 import { AuthRequest } from '../middleware/auth.middleware'
 import { buildInclusiveDateRange } from '../utils/date-range'
+import { getAppointmentDisplayName, getSaleDisplayName } from '../utils/customer-display'
+import { withPostgresSequenceLock } from '../utils/sequence-lock'
 
 class BusinessError extends Error {
   statusCode: number
@@ -16,6 +18,7 @@ class BusinessError extends Error {
 type SaleItemInput = {
   productId?: string | null
   serviceId?: string | null
+  bonoTemplateId?: string | null
   description: string
   quantity: number
   price: number
@@ -30,8 +33,29 @@ type AccountBalanceUsageInput = {
 
 type TxClient = Prisma.TransactionClient
 
-const SALE_STATUSES: SaleStatus[] = ['PENDING', 'COMPLETED', 'CANCELLED', 'REFUNDED']
-const PAYMENT_METHODS: PaymentMethod[] = ['CASH', 'CARD', 'BIZUM', 'OTHER']
+type BonoTemplate = {
+  id: string
+  category: string
+  description: string
+  serviceId: string
+  serviceName: string
+  serviceLookup: string
+  totalSessions: number
+  price: number
+  isActive: boolean
+  createdAt: string
+}
+
+type SaleBonoMatch = {
+  item: SaleItemInput
+  template: BonoTemplate
+}
+
+const SALE_STATUSES: string[] = ['PENDING', 'COMPLETED', 'CANCELLED', 'REFUNDED']
+const PAYMENT_METHODS: string[] = ['CASH', 'CARD', 'BIZUM', 'ABONO', 'OTHER']
+const BONO_TEMPLATES_SETTING_KEY = 'bono_templates_catalog'
+const isAccountBalancePaymentMethod = (paymentMethod: string) =>
+  ['ABONO', 'OTHER'].includes(String(paymentMethod || '').toUpperCase())
 
 const saleInclude = {
   client: true,
@@ -48,6 +72,18 @@ const saleInclude = {
     include: {
       product: true,
       service: true
+    }
+  },
+  accountBalanceMovements: {
+    orderBy: [{ operationDate: 'desc' as const }, { createdAt: 'desc' as const }],
+    select: {
+      id: true,
+      type: true,
+      operationDate: true,
+      amount: true,
+      balanceAfter: true,
+      referenceItem: true,
+      notes: true
     }
   },
   cashMovement: true
@@ -78,6 +114,7 @@ const ensureValidSaleItems = (items: unknown): SaleItemInput[] => {
     return {
       productId: row.productId || null,
       serviceId: row.serviceId || null,
+      bonoTemplateId: row.bonoTemplateId || null,
       description: String(row.description).trim(),
       quantity,
       price
@@ -98,6 +135,145 @@ const calculateTotals = (items: SaleItemInput[], discount: number, tax: number) 
 
 const roundCurrency = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100
 
+const normalizeSearchText = (value: unknown) =>
+  String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+
+const readBonoTemplates = async () => {
+  const setting = await prisma.setting.findUnique({
+    where: { key: BONO_TEMPLATES_SETTING_KEY }
+  })
+
+  if (!setting) return [] as BonoTemplate[]
+
+  try {
+    const parsed = JSON.parse(setting.value)
+    if (!Array.isArray(parsed)) return []
+
+    return parsed
+      .map((template) => {
+        const row = template as Partial<BonoTemplate>
+
+        return {
+          id: String(row.id || '').trim(),
+          category: String(row.category || '').trim(),
+          description: String(row.description || '').trim(),
+          serviceId: String(row.serviceId || '').trim(),
+          serviceName: String(row.serviceName || '').trim(),
+          serviceLookup: String(row.serviceLookup || '').trim(),
+          totalSessions: Number(row.totalSessions) || 0,
+          price: roundCurrency(Number(row.price) || 0),
+          isActive: row.isActive !== false,
+          createdAt: String(row.createdAt || new Date().toISOString())
+        }
+      })
+      .filter(
+        (template) =>
+          template.isActive !== false &&
+          Boolean(template.id) &&
+          Boolean(template.description) &&
+          Boolean(template.serviceId) &&
+          template.totalSessions > 0
+      )
+  } catch {
+    return []
+  }
+}
+
+const findBonoTemplateForItem = (item: SaleItemInput, templates: BonoTemplate[]) => {
+  if (item.bonoTemplateId) {
+    const explicitTemplate = templates.find((template) => template.id === item.bonoTemplateId)
+    if (!explicitTemplate) {
+      throw new BusinessError(400, `Bono template ${item.bonoTemplateId} not found`)
+    }
+
+    return explicitTemplate
+  }
+
+  const normalizedDescription = normalizeSearchText(item.description)
+  const normalizedServiceId = normalizeSearchText(item.serviceId || '')
+  const normalizedPrice = roundCurrency(Number(item.price) || 0)
+
+  return (
+    templates.find(
+      (template) =>
+        normalizeSearchText(template.description) === normalizedDescription &&
+        normalizeSearchText(template.serviceId) === normalizedServiceId &&
+        roundCurrency(Number(template.price) || 0) === normalizedPrice
+    ) || null
+  )
+}
+
+const getBonoMatchesForSale = (items: SaleItemInput[], templates: BonoTemplate[]): SaleBonoMatch[] =>
+  items
+    .map((item) => {
+      const template = findBonoTemplateForItem(item, templates)
+      return template ? { item, template } : null
+    })
+    .filter((entry): entry is SaleBonoMatch => Boolean(entry))
+
+const buildBonoPackNotes = (saleId: string, saleNumber: string, notes?: string | null) => {
+  const marker = `BONO_SALE:${saleId}`
+  const parts = [marker, `Venta ${saleNumber}`, notes?.trim()].filter(Boolean)
+  return parts.join(' | ')
+}
+
+const createBonoPacksForSale = async (
+  tx: TxClient,
+  payload: {
+    saleId: string
+    saleNumber: string
+    clientId: string | null
+    notes?: string | null
+    matches: SaleBonoMatch[]
+  }
+) => {
+  if (payload.matches.length === 0) return
+
+  if (!payload.clientId) {
+    throw new BusinessError(400, 'Sales with bonos require a client')
+  }
+
+  const packNotes = buildBonoPackNotes(payload.saleId, payload.saleNumber, payload.notes)
+
+  for (const match of payload.matches) {
+    for (let index = 0; index < match.item.quantity; index += 1) {
+      await tx.bonoPack.create({
+        data: {
+          clientId: payload.clientId,
+          name: match.template.description,
+          serviceId: match.template.serviceId,
+          totalSessions: match.template.totalSessions,
+          price: match.template.price,
+          notes: packNotes,
+          sessions: {
+            create: Array.from({ length: match.template.totalSessions }, (_, sessionIndex) => ({
+              sessionNumber: sessionIndex + 1
+            }))
+          }
+        }
+      })
+    }
+  }
+}
+
+const deleteBonoPacksForSale = async (tx: TxClient, saleId: string) => {
+  const marker = `BONO_SALE:${saleId}`
+  const packs = await tx.bonoPack.findMany({
+    where: {
+      notes: {
+        contains: marker
+      }
+    },
+    select: { id: true }
+  })
+
+  await Promise.all(packs.map((pack) => tx.bonoPack.delete({ where: { id: pack.id } })))
+}
+
 const buildAccountBalanceReference = (items: SaleItemInput[]): string => {
   const reference = items
     .map((item) => `${item.description}${item.quantity > 1 ? ` x${item.quantity}` : ''}`)
@@ -108,18 +284,18 @@ const buildAccountBalanceReference = (items: SaleItemInput[]): string => {
 }
 
 const buildSaleNumber = async (tx: TxClient): Promise<string> => {
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(3001001)`
+  return withPostgresSequenceLock(tx, 3001001, async () => {
+    const lastSale = await tx.sale.findFirst({
+      select: { saleNumber: true },
+      orderBy: { saleNumber: 'desc' }
+    })
 
-  const lastSale = await tx.sale.findFirst({
-    select: { saleNumber: true },
-    orderBy: { saleNumber: 'desc' }
+    const next = lastSale?.saleNumber.match(/^V-(\d{6,})$/)
+      ? Number(lastSale.saleNumber.split('-')[1]) + 1
+      : 1
+
+    return `V-${next.toString().padStart(6, '0')}`
   })
-
-  const next = lastSale?.saleNumber.match(/^V-(\d{6,})$/)
-    ? Number(lastSale.saleNumber.split('-')[1]) + 1
-    : 1
-
-  return `V-${next.toString().padStart(6, '0')}`
 }
 
 const getOpenCashRegister = async (tx: TxClient) =>
@@ -138,7 +314,7 @@ const syncAutomaticCashMovement = async (
     userId: string
     total: number
     cashAmount?: number
-    paymentMethod: PaymentMethod
+    paymentMethod: string
     showInOfficialCash?: boolean
     deleteOnly?: boolean
   }
@@ -226,7 +402,7 @@ const applySaleEffects = async (
     appointmentId: string | null
     total: number
     cashMovementTotal?: number
-    paymentMethod: PaymentMethod
+    paymentMethod: string
     showInOfficialCash: boolean
     items: SaleItemInput[]
   }
@@ -406,6 +582,8 @@ const rollbackSaleEffects = async (
     paymentMethod: 'CASH',
     deleteOnly: true
   })
+
+  await deleteBonoPacksForSale(tx, payload.saleId)
 }
 
 const toHttpError = (error: unknown) => {
@@ -437,8 +615,8 @@ export const getSales = async (req: Request, res: Response) => {
 
     if (clientId) where.clientId = clientId as string
     if (appointmentId) where.appointmentId = appointmentId as string
-    if (paymentMethod) where.paymentMethod = paymentMethod as PaymentMethod
-    if (status) where.status = status as SaleStatus
+    if (paymentMethod) where.paymentMethod = paymentMethod as string
+    if (status) where.status = status as string
 
     const sales = await prisma.sale.findMany({
       where,
@@ -475,35 +653,39 @@ export const getSaleById = async (req: Request, res: Response) => {
 
 export const createSale = async (req: AuthRequest, res: Response) => {
   try {
-    const {
-      clientId,
-      appointmentId,
-      items,
-      discount,
-      tax,
-      paymentMethod,
-      notes,
-      showInOfficialCash,
-      accountBalanceUsage
-    } = req.body
+      const {
+        clientId,
+        appointmentId,
+        items,
+        discount,
+        tax,
+        paymentMethod,
+        status,
+        professional,
+        notes,
+        showInOfficialCash,
+        accountBalanceUsage
+      } = req.body
 
     if (!req.user?.id) {
       throw new BusinessError(401, 'Unauthorized')
     }
 
-    if (!PAYMENT_METHODS.includes(paymentMethod as PaymentMethod)) {
+    if (!PAYMENT_METHODS.includes(paymentMethod as string)) {
       throw new BusinessError(400, 'Invalid payment method')
     }
 
-    const normalizedItems = ensureValidSaleItems(items)
-    const discountValue = Number(discount) || 0
-    const taxValue = Number(tax) || 0
-    const { subtotal, total } = calculateTotals(normalizedItems, discountValue, taxValue)
-    let parsedAccountBalanceUsage: AccountBalanceUsageInput | null = accountBalanceUsage
-      ? {
-          operationDate: new Date(accountBalanceUsage.operationDate),
-          referenceItem:
-            typeof accountBalanceUsage.referenceItem === 'string'
+      const normalizedItems = ensureValidSaleItems(items)
+      const discountValue = Number(discount) || 0
+      const taxValue = Number(tax) || 0
+      const { subtotal, total } = calculateTotals(normalizedItems, discountValue, taxValue)
+      const bonoTemplates = await readBonoTemplates()
+      const bonoMatches = getBonoMatchesForSale(normalizedItems, bonoTemplates)
+      let parsedAccountBalanceUsage: AccountBalanceUsageInput | null = accountBalanceUsage
+        ? {
+            operationDate: new Date(accountBalanceUsage.operationDate),
+            referenceItem:
+              typeof accountBalanceUsage.referenceItem === 'string'
               ? accountBalanceUsage.referenceItem.trim()
               : '',
           amount: roundCurrency(Number(accountBalanceUsage.amount)),
@@ -511,7 +693,7 @@ export const createSale = async (req: AuthRequest, res: Response) => {
         }
       : null
 
-    if (paymentMethod === 'OTHER' && !parsedAccountBalanceUsage) {
+    if (isAccountBalancePaymentMethod(paymentMethod as string) && !parsedAccountBalanceUsage) {
       parsedAccountBalanceUsage = {
         operationDate: new Date(),
         referenceItem: buildAccountBalanceReference(normalizedItems),
@@ -538,133 +720,156 @@ export const createSale = async (req: AuthRequest, res: Response) => {
       throw new BusinessError(400, 'Account balance usage amount must be greater than zero')
     }
 
-    if (parsedAccountBalanceUsage && parsedAccountBalanceUsage.amount > total) {
-      throw new BusinessError(400, 'Account balance usage amount cannot be greater than sale total')
-    }
+      if (parsedAccountBalanceUsage && parsedAccountBalanceUsage.amount > total) {
+        throw new BusinessError(400, 'Account balance usage amount cannot be greater than sale total')
+      }
 
-    const officialCashTotal = parsedAccountBalanceUsage
-      ? roundCurrency(total - parsedAccountBalanceUsage.amount)
-      : roundCurrency(total)
+      const nextStatus = status || 'COMPLETED'
+      if (nextStatus !== 'COMPLETED' && parsedAccountBalanceUsage) {
+        throw new BusinessError(400, 'Account balance usage requires a completed sale')
+      }
 
-    if (parsedAccountBalanceUsage && paymentMethod === 'OTHER' && officialCashTotal > 0) {
-      throw new BusinessError(400, 'Payment method OTHER requires full account balance coverage')
+      const officialCashTotal = parsedAccountBalanceUsage
+        ? roundCurrency(total - parsedAccountBalanceUsage.amount)
+        : roundCurrency(total)
+
+    if (parsedAccountBalanceUsage && isAccountBalancePaymentMethod(paymentMethod as string) && officialCashTotal > 0) {
+      throw new BusinessError(400, 'Payment method ABONO requires full account balance coverage')
     }
 
     let shouldShowInOfficialCash = paymentMethod === 'CASH' ? showInOfficialCash !== false : true
-    if (parsedAccountBalanceUsage && (paymentMethod === 'OTHER' || officialCashTotal <= 0)) {
+    if (parsedAccountBalanceUsage && (isAccountBalancePaymentMethod(paymentMethod as string) || officialCashTotal <= 0)) {
       shouldShowInOfficialCash = false
     }
 
-    const sale = await prisma.$transaction(async (tx) => {
-      let resolvedClientId = clientId || null
-      let appointmentClientName = ''
+      const sale = await prisma.$transaction(async (tx) => {
+        let resolvedClientId = clientId || null
+        let appointmentClientName = ''
 
-      if (appointmentId) {
-        const appointment = await tx.appointment.findUnique({
-          where: { id: appointmentId },
-          select: {
-            id: true,
-            clientId: true,
-            client: {
-              select: {
-                firstName: true,
-                lastName: true
-              }
-            },
-            sale: {
-              select: {
-                id: true,
-                status: true
+        if (appointmentId) {
+          const appointment = await tx.appointment.findUnique({
+            where: { id: appointmentId },
+            select: {
+              id: true,
+              clientId: true,
+              guestName: true,
+              client: {
+                select: {
+                  firstName: true,
+                  lastName: true
+                }
+              },
+              sale: {
+                select: {
+                  id: true,
+                  status: true
+                }
               }
             }
+          })
+
+          if (!appointment) {
+            throw new BusinessError(404, 'Appointment not found')
+          }
+
+          if (appointment.sale?.status === 'COMPLETED') {
+            throw new BusinessError(400, 'This appointment already has a completed sale')
+          }
+
+          if (resolvedClientId && resolvedClientId !== appointment.clientId) {
+            throw new BusinessError(400, 'Appointment and sale client must match')
+          }
+
+          resolvedClientId = appointment.clientId
+          appointmentClientName = getAppointmentDisplayName(appointment, 'Cliente general')
+        }
+
+        if (parsedAccountBalanceUsage && !resolvedClientId) {
+          throw new BusinessError(400, 'Account balance usage requires a client')
+        }
+
+        if (bonoMatches.length > 0 && !resolvedClientId) {
+          throw new BusinessError(400, 'Sales with bonos require a client')
+        }
+
+        const saleNumber = await buildSaleNumber(tx)
+
+        const createdSale = await tx.sale.create({
+          data: {
+            clientId: resolvedClientId,
+            appointmentId: appointmentId || null,
+            userId: req.user!.id,
+            professional: professional || 'LUCY',
+            saleNumber,
+            subtotal,
+            discount: discountValue,
+            tax: taxValue,
+            total,
+            paymentMethod,
+            showInOfficialCash: shouldShowInOfficialCash,
+            status: nextStatus,
+            notes: notes || null,
+            items: {
+              create: normalizedItems.map((item) => ({
+                productId: item.productId || null,
+                serviceId: item.serviceId || null,
+                description: item.description,
+                quantity: item.quantity,
+                price: item.price,
+                subtotal: item.quantity * item.price
+              }))
+            }
+          },
+          include: {
+            client: true,
+            items: true
           }
         })
 
-        if (!appointment) {
-          throw new BusinessError(404, 'Appointment not found')
+        if (nextStatus === 'COMPLETED') {
+          await createBonoPacksForSale(tx, {
+            saleId: createdSale.id,
+            saleNumber,
+            clientId: createdSale.clientId,
+            notes: notes || null,
+            matches: bonoMatches
+          })
         }
 
-        if (appointment.sale?.status === 'COMPLETED') {
-          throw new BusinessError(400, 'This appointment already has a completed sale')
-        }
+        const clientName = createdSale.client
+          ? `${createdSale.client.firstName} ${createdSale.client.lastName}`.trim()
+          : appointmentClientName
 
-        if (resolvedClientId && resolvedClientId !== appointment.clientId) {
-          throw new BusinessError(400, 'Appointment and sale client must match')
-        }
+        if (nextStatus === 'COMPLETED') {
+          await applySaleEffects(tx, {
+            saleId: createdSale.id,
+            saleNumber,
+            clientId: createdSale.clientId,
+            clientName,
+            userId: req.user!.id,
+            appointmentId: createdSale.appointmentId,
+            total,
+            cashMovementTotal: officialCashTotal,
+            paymentMethod,
+            showInOfficialCash: createdSale.showInOfficialCash,
+            items: normalizedItems
+          })
 
-        resolvedClientId = appointment.clientId
-        appointmentClientName = `${appointment.client.firstName} ${appointment.client.lastName}`.trim()
-      }
-
-      if (parsedAccountBalanceUsage && !resolvedClientId) {
-        throw new BusinessError(400, 'Account balance usage requires a client')
-      }
-
-      const saleNumber = await buildSaleNumber(tx)
-
-      const createdSale = await tx.sale.create({
-        data: {
-          clientId: resolvedClientId,
-          appointmentId: appointmentId || null,
-          userId: req.user!.id,
-          saleNumber,
-          subtotal,
-          discount: discountValue,
-          tax: taxValue,
-          total,
-          paymentMethod,
-          showInOfficialCash: shouldShowInOfficialCash,
-          status: 'COMPLETED',
-          notes: notes || null,
-          items: {
-            create: normalizedItems.map((item) => ({
-              productId: item.productId || null,
-              serviceId: item.serviceId || null,
-              description: item.description,
-              quantity: item.quantity,
-              price: item.price,
-              subtotal: item.quantity * item.price
-            }))
+          if (parsedAccountBalanceUsage && createdSale.clientId) {
+            await applyAccountBalanceUsage(tx, {
+              clientId: createdSale.clientId,
+              saleId: createdSale.id,
+              saleNumber,
+              usage: parsedAccountBalanceUsage
+            })
           }
-        },
-        include: {
-          client: true,
-          items: true
         }
-      })
 
-      const clientName = createdSale.client
-        ? `${createdSale.client.firstName} ${createdSale.client.lastName}`.trim()
-        : appointmentClientName
-
-      await applySaleEffects(tx, {
-        saleId: createdSale.id,
-        saleNumber,
-        clientId: createdSale.clientId,
-        clientName,
-        userId: req.user!.id,
-        appointmentId: createdSale.appointmentId,
-        total,
-        cashMovementTotal: officialCashTotal,
-        paymentMethod,
-        showInOfficialCash: createdSale.showInOfficialCash,
-        items: normalizedItems
-      })
-
-      if (parsedAccountBalanceUsage && createdSale.clientId) {
-        await applyAccountBalanceUsage(tx, {
-          clientId: createdSale.clientId,
-          saleId: createdSale.id,
-          saleNumber,
-          usage: parsedAccountBalanceUsage
+        return tx.sale.findUnique({
+          where: { id: createdSale.id },
+          include: saleInclude
         })
-      }
-
-      return tx.sale.findUnique({
-        where: { id: createdSale.id },
-        include: saleInclude
       })
-    })
 
     res.status(201).json(sale)
   } catch (error) {
@@ -695,19 +900,26 @@ export const updateSale = async (req: Request, res: Response) => {
       throw new BusinessError(400, 'Updating sale lines or links is not supported')
     }
 
-    if (status && !SALE_STATUSES.includes(status as SaleStatus)) {
+    if (status && !SALE_STATUSES.includes(status as string)) {
       throw new BusinessError(400, 'Invalid sale status')
     }
 
-    if (paymentMethod && !PAYMENT_METHODS.includes(paymentMethod as PaymentMethod)) {
+    if (paymentMethod && !PAYMENT_METHODS.includes(paymentMethod as string)) {
       throw new BusinessError(400, 'Invalid payment method')
     }
+
+    const bonoTemplates = await readBonoTemplates()
 
     const updatedSale = await prisma.$transaction(async (tx) => {
       const sale = await tx.sale.findUnique({
         where: { id },
         include: {
           client: true,
+          appointment: {
+            select: {
+              guestName: true
+            }
+          },
           items: true
         }
       })
@@ -716,9 +928,19 @@ export const updateSale = async (req: Request, res: Response) => {
         throw new BusinessError(404, 'Sale not found')
       }
 
-      const nextStatus = (status || sale.status) as SaleStatus
-      const nextPaymentMethod = (paymentMethod || sale.paymentMethod) as PaymentMethod
+      const nextStatus = (status || sale.status) as string
+      const nextstring = (paymentMethod || sale.paymentMethod) as string
       const normalizedItems = normalizeItemsFromSale(sale.items)
+      const bonoMatches = getBonoMatchesForSale(
+        normalizedItems.map((item) => ({
+          productId: item.productId,
+          serviceId: item.serviceId,
+          description: item.description,
+          quantity: item.quantity,
+          price: item.price
+        })),
+        bonoTemplates
+      )
 
       if (sale.status === 'COMPLETED' && nextStatus !== 'COMPLETED') {
         await rollbackSaleEffects(tx, {
@@ -734,35 +956,52 @@ export const updateSale = async (req: Request, res: Response) => {
         where: { id },
         data: {
           status: nextStatus,
-          paymentMethod: nextPaymentMethod,
+          paymentMethod: nextstring,
           notes: notes ?? sale.notes
         },
         include: {
-          client: true
+          client: true,
+          appointment: {
+            select: {
+              guestName: true
+            }
+          }
         }
       })
 
       if (sale.status !== 'COMPLETED' && nextStatus === 'COMPLETED') {
+        if (bonoMatches.length > 0 && !sale.clientId) {
+          throw new BusinessError(400, 'Sales with bonos require a client')
+        }
+
+        await createBonoPacksForSale(tx, {
+          saleId: sale.id,
+          saleNumber: sale.saleNumber,
+          clientId: sale.clientId,
+          notes: notes ?? sale.notes,
+          matches: bonoMatches
+        })
+
         await applySaleEffects(tx, {
           saleId: sale.id,
           saleNumber: sale.saleNumber,
           clientId: sale.clientId,
-          clientName: persisted.client ? `${persisted.client.firstName} ${persisted.client.lastName}`.trim() : '',
+          clientName: getSaleDisplayName(persisted, ''),
           userId: sale.userId,
           appointmentId: sale.appointmentId,
           total: Number(sale.total),
-          paymentMethod: nextPaymentMethod,
+          paymentMethod: nextstring,
           showInOfficialCash: sale.showInOfficialCash,
           items: normalizedItems
         })
-      } else if (sale.status === 'COMPLETED' && nextStatus === 'COMPLETED' && nextPaymentMethod !== sale.paymentMethod) {
+      } else if (sale.status === 'COMPLETED' && nextStatus === 'COMPLETED' && nextstring !== sale.paymentMethod) {
         await syncAutomaticCashMovement(tx, {
           saleId: sale.id,
           saleNumber: sale.saleNumber,
-          clientName: persisted.client ? `${persisted.client.firstName} ${persisted.client.lastName}`.trim() : '',
+          clientName: getSaleDisplayName(persisted, ''),
           userId: sale.userId,
           total: Number(sale.total),
-          paymentMethod: nextPaymentMethod,
+          paymentMethod: nextstring,
           showInOfficialCash: sale.showInOfficialCash
         })
       }

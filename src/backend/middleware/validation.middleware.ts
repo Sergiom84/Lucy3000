@@ -1,5 +1,6 @@
 import { NextFunction, Request, RequestHandler, Response } from 'express'
 import { ZodIssue, ZodTypeAny } from 'zod'
+import { logWarn, sanitizeForLog } from '../utils/logger'
 
 type ValidationSchemas = {
   body?: ZodTypeAny
@@ -27,9 +28,20 @@ export const validateRequest = (schemas: ValidationSchemas): RequestHandler => {
 
       const result = schema.safeParse((req as any)[target])
       if (!result.success) {
+        const details = formatValidationIssues(result.error.issues)
+        logWarn('Request validation failed', {
+          method: req.method,
+          path: req.originalUrl,
+          target,
+          details,
+          params: sanitizeForLog(req.params),
+          query: sanitizeForLog(req.query),
+          body: sanitizeForLog(req.body)
+        })
+
         return res.status(400).json({
           error: 'Validation error',
-          details: formatValidationIssues(result.error.issues)
+          details
         })
       }
 
@@ -39,4 +51,3 @@ export const validateRequest = (schemas: ValidationSchemas): RequestHandler => {
     next()
   }
 }
-

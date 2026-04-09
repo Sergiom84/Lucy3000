@@ -19,7 +19,12 @@ describe('bono.controller account balance', () => {
   it('creates a top-up and updates client account balance', async () => {
     const tx: any = {
       client: {
-        findUnique: vi.fn().mockResolvedValue({ id: 'client-1', accountBalance: 10 }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'client-1',
+          firstName: 'Ana',
+          lastName: 'Lopez',
+          accountBalance: 10
+        }),
         update: vi.fn().mockResolvedValue({ id: 'client-1', accountBalance: 30 })
       },
       accountBalanceMovement: {
@@ -28,6 +33,7 @@ describe('bono.controller account balance', () => {
           clientId: 'client-1',
           saleId: null,
           type: 'TOP_UP',
+          paymentMethod: 'CARD',
           operationDate: new Date('2026-03-15T09:00:00.000Z'),
           description: 'Regalo para mi hija',
           referenceItem: null,
@@ -36,6 +42,14 @@ describe('bono.controller account balance', () => {
           notes: null,
           createdAt: new Date('2026-03-15T09:00:00.000Z')
         })
+      },
+      cashRegister: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'cash-1' })
+      },
+      cashMovement: {
+        create: vi.fn().mockResolvedValue({
+          id: 'cash-movement-1'
+        })
       }
     }
 
@@ -43,9 +57,11 @@ describe('bono.controller account balance', () => {
 
     const req = createMockRequest({
       params: { clientId: 'client-1' },
+      user: { id: 'user-1', email: 'admin@lucy3000.com', role: 'ADMIN' },
       body: {
         description: 'Regalo para mi hija',
         amount: 20,
+        paymentMethod: 'CARD',
         operationDate: '2026-03-15',
         notes: null
       }
@@ -64,8 +80,21 @@ describe('bono.controller account balance', () => {
         data: expect.objectContaining({
           clientId: 'client-1',
           type: 'TOP_UP',
+          paymentMethod: 'CARD',
           amount: 20,
           balanceAfter: 30
+        })
+      })
+    )
+    expect(tx.cashMovement.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          cashRegisterId: 'cash-1',
+          userId: 'user-1',
+          type: 'INCOME',
+          paymentMethod: 'CARD',
+          amount: 20,
+          category: 'Abonos'
         })
       })
     )
@@ -74,6 +103,7 @@ describe('bono.controller account balance', () => {
         currentBalance: 30,
         movement: expect.objectContaining({
           type: 'TOP_UP',
+          paymentMethod: 'CARD',
           amount: 20,
           balanceAfter: 30
         })
@@ -191,6 +221,7 @@ describe('bono.controller bono appointments and sessions', () => {
   })
 
   it('creates appointment from bono and reserves next available session', async () => {
+    prismaMock.appointment.findMany.mockResolvedValue([])
     prismaMock.googleCalendarConfig.findFirst.mockResolvedValue(null)
     prismaMock.bonoPack.findUnique.mockResolvedValue({
       id: 'bono-1',
@@ -253,7 +284,7 @@ describe('bono.controller bono appointments and sessions', () => {
       body: {
         userId: 'user-1',
         cabin: 'LUCY',
-        date: '2026-03-15T10:00:00.000Z',
+        date: '2026-04-15T10:00:00.000Z',
         startTime: '10:00',
         endTime: '10:30',
         status: 'SCHEDULED',
@@ -278,6 +309,7 @@ describe('bono.controller bono appointments and sessions', () => {
   })
 
   it('returns 400 when creating appointment from bono without available sessions', async () => {
+    prismaMock.appointment.findMany.mockResolvedValue([])
     prismaMock.bonoPack.findUnique.mockResolvedValue({
       id: 'bono-1',
       clientId: 'client-1',
@@ -296,7 +328,7 @@ describe('bono.controller bono appointments and sessions', () => {
         userId: 'user-1',
         serviceId: 'service-1',
         cabin: 'LUCY',
-        date: '2026-03-15T10:00:00.000Z',
+        date: '2026-04-15T10:00:00.000Z',
         startTime: '10:00',
         endTime: '10:30',
         status: 'SCHEDULED',

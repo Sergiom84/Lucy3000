@@ -1,5 +1,6 @@
 import { Request, Response } from 'express'
 import { Prisma } from '@prisma/client'
+import * as XLSX from 'xlsx'
 import { prisma } from '../db'
 
 const parseDecimal = (value: unknown): number | null => {
@@ -169,3 +170,163 @@ export const deleteService = async (req: Request, res: Response) => {
   }
 }
 
+const parseImportDecimal = (val: unknown): number => {
+  if (val === null || val === undefined || String(val).trim() === '') return 0
+
+  const raw = String(val).trim().replace(/\s*€\s*/g, '').replace('%', '').replace(/\s/g, '')
+  const normalized = raw.includes(',') && raw.includes('.')
+    ? raw.replace(/\./g, '').replace(',', '.')
+    : raw.replace(',', '.')
+  const parsed = Number.parseFloat(normalized)
+
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+const parseImportDuration = (val: unknown): number => {
+  if (!val || String(val).trim() === '') return 30
+  const first = String(val).split('-')[0].replace(/[^0-9]/g, '')
+  const num = parseInt(first, 10)
+  return isNaN(num) || num <= 0 ? 30 : num
+}
+
+const normalizeImportKey = (value: string) =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+
+const buildNormalizedImportRow = (row: Record<string, unknown>) => {
+  const normalized: Record<string, unknown> = {}
+
+  for (const [key, value] of Object.entries(row)) {
+    const normalizedKey = normalizeImportKey(key)
+    if (!normalizedKey || Object.prototype.hasOwnProperty.call(normalized, normalizedKey)) continue
+    normalized[normalizedKey] = value
+  }
+
+  return normalized
+}
+
+const getImportRowValue = (row: Record<string, unknown>, aliases: string[]) => {
+  for (const alias of aliases) {
+    const normalizedAlias = normalizeImportKey(alias)
+    if (!normalizedAlias || !Object.prototype.hasOwnProperty.call(row, normalizedAlias)) continue
+    const value = row[normalizedAlias]
+    if (value === null || value === undefined) continue
+    if (typeof value === 'string' && value.trim() === '') continue
+    return value
+  }
+
+  return null
+}
+
+export const importServicesFromExcel = async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' })
+    }
+
+    const workbook = XLSX.read(req.file.buffer, { type: 'buffer' })
+    const sheetName = workbook.SheetNames[0]
+    const worksheet = workbook.Sheets[sheetName]
+    const data = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '' })
+
+    const results = {
+      success: 0,
+      errors: [] as { row: number; error: string }[],
+      skipped: 0
+    }
+
+    let currentCategory = 'Sin categoria'
+
+    for (let i = 0; i < data.length; i++) {
+      const row = buildNormalizedImportRow(data[i] || {})
+
+      try {
+        const code = String(getImportRowValue(row, ['Codigo', 'Código', 'ID', 'Code']) || '').trim()
+        const desc = String(
+          getImportRowValue(row, ['Descripcion', 'Descripción', 'Nombre', 'Tratamiento', 'Servicio']) ??
+            ''
+        ).trim()
+        const categoryRaw = getImportRowValue(row, ['Categoria', 'Categoría', 'Familia', 'Category'])
+        const tarifaRaw = getImportRowValue(row, ['Tarifa 1', 'Tarifa1', 'Tarifa', 'Precio', 'Price', 'PVP'])
+        const ivaRaw = getImportRowValue(row, ['IVA', 'Impuesto'])
+        const tiempoRaw = getImportRowValue(row, ['Tiempo', 'Duracion', 'Duración', 'Minutos'])
+
+        // Detect category header rows
+        if (code === '\u02C4\u02C5' || code === '˄˅') {
+          if (desc) currentCategory = desc
+          continue
+        }
+
+        // Skip header-like rows
+        if (!code || !desc) continue
+        if (String(tarifaRaw).trim() === 'Tarifa 1' || String(tarifaRaw).trim() === 'Tarifa') continue
+
+        const explicitCategory = String(categoryRaw ?? '').trim()
+        const price = parseImportDecimal(tarifaRaw)
+        const duration = parseImportDuration(tiempoRaw)
+        const taxRate = ivaRaw !== undefined && ivaRaw !== null ? parseImportDecimal(ivaRaw) : null
+        const category = explicitCategory || currentCategory
+
+        if (price <= 0) {
+          throw new Error(`Tarifa inválida o ausente: ${String(tarifaRaw ?? '').trim() || '(vacío)'}`)
+        }
+
+        const serviceData = {
+          name: desc,
+          description: code ? `Codigo: ${code}` : null,
+          price,
+          duration,
+          category,
+          serviceCode: code || null,
+          taxRate,
+          isActive: true
+        }
+
+        const matchingServices = await prisma.service.findMany({
+          where: code
+            ? {
+                OR: [
+                  { serviceCode: code },
+                  { name: desc, category }
+                ]
+              }
+            : {
+                name: desc,
+                category
+              }
+        })
+
+        if (matchingServices.length > 0) {
+          await Promise.all(
+            matchingServices.map((service) =>
+              prisma.service.update({
+                where: { id: service.id },
+                data: serviceData
+              })
+            )
+          )
+        } else {
+          await prisma.service.create({
+            data: serviceData
+          })
+        }
+
+        results.success++
+      } catch (error: any) {
+        results.errors.push({
+          row: i + 2,
+          error: error.message
+        })
+        results.skipped++
+      }
+    }
+
+    res.json({ message: 'Import completed', results })
+  } catch (error) {
+    console.error('Import services error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}

@@ -32,6 +32,7 @@ export const accountBalanceTopUpBodySchema = z
   .object({
     description: z.string().trim().min(1, 'Description is required').max(250, 'Description is too long'),
     amount: positiveMoneySchema,
+    paymentMethod: z.enum(['CASH', 'CARD', 'BIZUM']),
     operationDate: z.coerce.date().optional(),
     notes: optionalNullableTextSchema(500)
   })

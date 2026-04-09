@@ -11,10 +11,58 @@ const appointmentStatusSchema = z.enum([
 ])
 
 const cabinSchema = z.enum(['LUCY', 'TAMARA', 'CABINA_1', 'CABINA_2'])
+const professionalSchema = z.enum(['LUCY', 'TAMARA', 'CHEMA', 'OTROS'])
+const userIdSchema = z.string().trim().min(1, 'Invalid userId')
 
 const timeSchema = z
   .string()
   .regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Invalid time format')
+
+const clientIdSchema = z.string().uuid('Invalid clientId').nullable().optional()
+const guestNameSchema = optionalNullableTextSchema(120)
+const guestPhoneSchema = optionalNullableTextSchema(40)
+
+const hasText = (value: string | null | undefined) => Boolean(String(value || '').trim())
+
+const validateAppointmentOwnershipMode = (
+  payload: {
+    clientId?: string | null
+    guestName?: string | null
+    guestPhone?: string | null
+  },
+  ctx: z.RefinementCtx
+) => {
+  const hasClient = Boolean(payload.clientId)
+  const hasGuestName = hasText(payload.guestName)
+  const hasGuestPhone = hasText(payload.guestPhone)
+
+  if (hasClient && (hasGuestName || hasGuestPhone)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['clientId'],
+      message: 'Registered client appointments cannot include guest data'
+    })
+    return
+  }
+
+  if (hasClient) return
+
+  if (!hasGuestName) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['guestName'],
+      message: 'Guest name is required when no client is selected'
+    })
+  }
+
+  if (!hasGuestPhone) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['guestPhone'],
+      message: 'Guest phone is required when no client is selected'
+    })
+  }
+}
 
 export const appointmentIdParamSchema = uuidParamSchema
 
@@ -40,10 +88,13 @@ export const appointmentsQuerySchema = z
 
 export const createAppointmentBodySchema = z
   .object({
-    clientId: z.string().uuid('Invalid clientId'),
+    clientId: clientIdSchema,
+    guestName: guestNameSchema,
+    guestPhone: guestPhoneSchema,
     serviceId: z.string().uuid('Invalid serviceId'),
-    userId: z.string().uuid('Invalid userId'),
+    userId: userIdSchema,
     cabin: cabinSchema,
+    professional: professionalSchema.default('LUCY'),
     date: dateQuerySchema,
     startTime: timeSchema,
     endTime: timeSchema,
@@ -52,13 +103,17 @@ export const createAppointmentBodySchema = z
     reminder: z.boolean().optional().default(true)
   })
   .strict()
+  .superRefine(validateAppointmentOwnershipMode)
 
 export const updateAppointmentBodySchema = z
   .object({
-    clientId: z.string().uuid('Invalid clientId').optional(),
+    clientId: clientIdSchema,
+    guestName: guestNameSchema,
+    guestPhone: guestPhoneSchema,
     serviceId: z.string().uuid('Invalid serviceId').optional(),
-    userId: z.string().uuid('Invalid userId').optional(),
+    userId: userIdSchema.optional(),
     cabin: cabinSchema.optional(),
+    professional: professionalSchema.optional(),
     date: dateQuerySchema.optional(),
     startTime: timeSchema.optional(),
     endTime: timeSchema.optional(),

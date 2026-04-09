@@ -1,6 +1,8 @@
 # 🌟 Lucy3000 - Sistema de Gestión para Estética
 
-Sistema de contabilidad y gestión completo para tiendas de estética, desarrollado con Electron, React, TypeScript, Node.js y Supabase.
+Sistema de contabilidad y gestión completo para tiendas de estética, desarrollado con Electron, React, TypeScript, Node.js y Prisma sobre SQLite local.
+
+> Nota: este repo se ejecuta en local con SQLite por defecto. Las referencias a Supabase en esta documentación son históricas o aplicables solo a backups/restauraciones y despliegues remotos.
 
 Estado actual del proyecto y plan de trabajo: [ROADMAP.md](ROADMAP.md)
 Guía de recuperación de base de datos: [BACKUP_RESTORE.md](BACKUP_RESTORE.md)
@@ -82,13 +84,13 @@ Guía de recuperación de base de datos: [BACKUP_RESTORE.md](BACKUP_RESTORE.md)
 - **Node.js**: Runtime de JavaScript
 - **Express**: Framework web
 - **Prisma**: ORM para base de datos
-- **PostgreSQL**: Base de datos (via Supabase)
+- **SQLite**: Base de datos local del runtime de escritorio
 - **JWT**: Autenticación
 - **Bcrypt**: Encriptación de contraseñas
 
 ### Base de Datos
-- **Supabase**: Backend as a Service
-- **PostgreSQL**: Base de datos relacional
+- **SQLite**: Base de datos local por defecto
+- **Supabase**: Referencia histórica para backups/restauración o despliegues remotos
 
 ## 📦 Instalación
 
@@ -96,7 +98,7 @@ Guía de recuperación de base de datos: [BACKUP_RESTORE.md](BACKUP_RESTORE.md)
 
 - Node.js 18+ 
 - npm o yarn
-- Cuenta de Supabase (gratuita)
+- Cuenta de Supabase solo si vas a trabajar con restauración histórica o despliegue remoto
 
 ### Pasos de Instalación
 
@@ -111,26 +113,21 @@ cd Lucy3000
 npm install
 ```
 
-3. **Configurar Supabase**
+3. **Configurar entorno local**
 
-   a. Crear un proyecto en [Supabase](https://supabase.com)
+   a. La app usa SQLite local. En `.env` se configura como `file:./prisma/lucy3000.db` y Prisma la resuelve físicamente en `prisma/prisma/lucy3000.db`
    
-   b. Obtener las credenciales:
-      - URL del proyecto
-      - Anon Key
-      - Service Key
-      - Database URL (en Settings > Database)
+   b. Si necesitas restaurar un estado previo, consulta `BACKUP_RESTORE.md`
 
 4. **Configurar variables de entorno**
 
 Copiar `.env.example` a `.env` y completar:
 
 ```env
-# Supabase Configuration
-DATABASE_URL="postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres"
-SUPABASE_URL="https://[PROJECT-REF].supabase.co"
-SUPABASE_ANON_KEY="your-anon-key"
-SUPABASE_SERVICE_KEY="your-service-key"
+# SQLite local
+# Nota: Prisma resuelve esta ruta relativa desde `prisma/schema.prisma`,
+# por eso el fichero real queda en `prisma/prisma/lucy3000.db`.
+DATABASE_URL="file:./prisma/lucy3000.db"
 
 # Backend Configuration
 PORT=3001
@@ -164,7 +161,7 @@ WHATSAPP_REMINDER_INTERVAL_MINUTES=30
   3. Fecha de la cita
   4. Hora de inicio
 
-5. **Configurar la base de datos**
+5. **Sincronizar la base de datos local**
 
 ```bash
 # Generar cliente de Prisma
@@ -176,27 +173,13 @@ npm run prisma:migrate
 
 6. **Crear usuario administrador inicial**
 
-Puedes usar Prisma Studio para crear el primer usuario:
+Usa Prisma Studio para crear el primer usuario si la base local está vacía:
 
 ```bash
 npm run prisma:studio
 ```
 
-O ejecutar este script SQL en Supabase:
-
-```sql
-INSERT INTO users (id, email, password, name, role, "isActive", "createdAt", "updatedAt")
-VALUES (
-  gen_random_uuid(),
-  'admin@lucy3000.com',
-  '$2a$10$YourHashedPasswordHere', -- Usar bcrypt para hashear 'admin123'
-  'Administrador',
-  'ADMIN',
-  true,
-  NOW(),
-  NOW()
-);
-```
+Si estás restaurando un entorno PostgreSQL/Supabase histórico, el flujo SQL original sigue documentado en `BACKUP_RESTORE.md`.
 
 ## 🎯 Uso
 
@@ -228,7 +211,7 @@ npm run build
 
 ```
 Email: admin@lucy3000.com
-Password: admin123
+Password: lucy3000
 ```
 
 ## 🗂️ Estructura del Proyecto
@@ -286,7 +269,7 @@ npm run prisma:studio    # Abrir Prisma Studio
 
 ### Base de Datos
 
-Ya está configurada en Supabase, no requiere deployment adicional.
+El runtime local usa SQLite y no depende de Supabase para operar. Si publicas un backend remoto, tendrás que definir una estrategia de persistencia distinta.
 
 ## 📊 Modelos de Base de Datos
 
@@ -336,8 +319,8 @@ Reemplazar archivos en `/public`:
 ## 🐛 Solución de Problemas
 
 ### Error de conexión a la base de datos
-- Verificar DATABASE_URL en `.env`
-- Comprobar que Supabase esté activo
+- Verificar `DATABASE_URL` en `.env`
+- Confirmar que la SQLite local exista en `prisma/prisma/lucy3000.db` y tenga permisos de escritura
 - Ejecutar `npm run prisma:generate`
 
 ### Error al iniciar Electron
@@ -388,7 +371,7 @@ Este proyecto está bajo la Licencia MIT.
 
 ## 🙏 Agradecimientos
 
-- Supabase por el excelente BaaS
+- Supabase por los backups y el histórico de restauración
 - Electron por hacer posible las apps de escritorio
 - La comunidad de React y TypeScript
 

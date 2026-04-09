@@ -38,11 +38,19 @@ type CashRegister = {
   }>
 }
 
+const commercialPaymentMethods = ['CASH', 'CARD', 'BIZUM', 'ABONO'] as const
+
+const formatQuantity = (value: number) => {
+  if (Number.isInteger(value)) return String(value)
+  return value.toFixed(3).replace(/\.?0+$/, '')
+}
+
 export default function Cash() {
   const [activeCashRegister, setActiveCashRegister] = useState<CashRegister | null>(null)
   const [summary, setSummary] = useState<any>(null)
   const [analyticsRows, setAnalyticsRows] = useState<any[]>([])
   const [ranking, setRanking] = useState<any>(null)
+  const [initialDataLoaded, setInitialDataLoaded] = useState(false)
   const [clients, setClients] = useState<any[]>([])
   const [services, setServices] = useState<any[]>([])
   const [products, setProducts] = useState<any[]>([])
@@ -86,21 +94,19 @@ export default function Cash() {
   })
 
   useEffect(() => {
-    void Promise.all([loadActiveCashRegister(), loadSummary(), loadFilterOptions()])
+    const bootstrapCashPage = async () => {
+      await loadSummary()
+      await loadFilterOptions()
+      setInitialDataLoaded(true)
+    }
+
+    void bootstrapCashPage()
   }, [])
 
   useEffect(() => {
+    if (!initialDataLoaded) return
     void Promise.all([loadAnalytics(), loadRanking()])
-  }, [period, filters])
-
-  const loadActiveCashRegister = async () => {
-    try {
-      const response = await api.get('/cash?status=OPEN')
-      setActiveCashRegister(response.data[0] || null)
-    } catch (error) {
-      toast.error('No se pudo cargar la caja activa')
-    }
-  }
+  }, [initialDataLoaded, period, filters])
 
   const loadSummary = async () => {
     try {
@@ -115,7 +121,7 @@ export default function Cash() {
   const loadFilterOptions = async () => {
     try {
       const [clientsRes, servicesRes, productsRes] = await Promise.all([
-        api.get('/clients?isActive=true'),
+        api.get('/clients?isActive=true&includeCounts=false'),
         api.get('/services?isActive=true'),
         api.get('/products?isActive=true')
       ])
@@ -206,7 +212,7 @@ export default function Cash() {
       setOpenCashModal(false)
       setOpeningBalance('')
       setOpenNotes('')
-      await Promise.all([loadActiveCashRegister(), loadSummary()])
+      await loadSummary()
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'No se pudo abrir la caja')
     }
@@ -224,7 +230,7 @@ export default function Cash() {
       setCloseCashModal(false)
       setClosingBalance('')
       setCloseNotes('')
-      await Promise.all([loadActiveCashRegister(), loadSummary(), loadCashHistory()])
+      await Promise.all([loadSummary(), loadCashHistory()])
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'No se pudo cerrar la caja')
     }
@@ -249,7 +255,7 @@ export default function Cash() {
       setMovementCategory('')
       setMovementDescription('')
       setMovementReference('')
-      await Promise.all([loadActiveCashRegister(), loadSummary()])
+      await loadSummary()
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'No se pudo registrar el movimiento')
     }
@@ -267,7 +273,7 @@ export default function Cash() {
       setEditOpeningBalanceModal(false)
       setNewOpeningBalance('')
       setEditOpeningNotes('')
-      await Promise.all([loadActiveCashRegister(), loadSummary()])
+      await loadSummary()
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'No se pudo actualizar el saldo inicial')
     }
@@ -275,6 +281,7 @@ export default function Cash() {
 
   const paymentsByMethod = summary?.cards?.paymentsByMethod || {}
   const incomeCards = summary?.cards?.income || { day: 0, month: 0, year: 0 }
+  const workPerformedCards = summary?.cards?.workPerformed || { day: 0, month: 0, year: 0 }
 
   const currentCashBalance = summary?.cards?.currentBalance || 0
 
@@ -325,7 +332,7 @@ export default function Cash() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
         <div className="card">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm text-gray-600 dark:text-gray-400">Saldo inicial</span>
@@ -357,7 +364,7 @@ export default function Cash() {
             <CreditCard className="w-5 h-5 text-purple-600" />
           </div>
           <div className="space-y-1 text-sm">
-            {(['CASH', 'CARD', 'BIZUM', 'OTHER'] as const).map((method) => (
+            {commercialPaymentMethods.map((method) => (
               <div key={method} className="flex items-center justify-between">
                 <span className="text-gray-600 dark:text-gray-400">{paymentMethodLabel(method)}</span>
                 <strong>{formatCurrency(Number(paymentsByMethod[method] || 0))}</strong>
@@ -368,7 +375,7 @@ export default function Cash() {
 
         <div className="card">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-gray-600 dark:text-gray-400">Ingresos</span>
+            <span className="text-sm text-gray-600 dark:text-gray-400">Cobrado real</span>
             <ShoppingBag className="w-5 h-5 text-green-600" />
           </div>
           <div className="space-y-1 text-sm">
@@ -387,6 +394,27 @@ export default function Cash() {
           </div>
         </div>
 
+        <div className="card">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-gray-600 dark:text-gray-400">Trabajo realizado</span>
+            <ShoppingBag className="w-5 h-5 text-blue-600" />
+          </div>
+          <div className="space-y-1 text-sm">
+            <div className="flex justify-between">
+              <span className="text-gray-600 dark:text-gray-400">Día</span>
+              <strong>{formatCurrency(Number(workPerformedCards.day || 0))}</strong>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600 dark:text-gray-400">Mes</span>
+              <strong>{formatCurrency(Number(workPerformedCards.month || 0))}</strong>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600 dark:text-gray-400">Año</span>
+              <strong>{formatCurrency(Number(workPerformedCards.year || 0))}</strong>
+            </div>
+          </div>
+        </div>
+
         <div className="card bg-gradient-to-br from-blue-600 to-blue-700 text-white">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm opacity-90">Saldo actual</span>
@@ -394,7 +422,7 @@ export default function Cash() {
           </div>
           <p className="text-2xl font-bold">{formatCurrency(Number(currentCashBalance || 0))}</p>
           <p className="text-xs opacity-80 mt-2">
-            Saldo inicial + ventas en efectivo + depósitos - gastos - retiros
+            Saldo inicial + cobros en efectivo + recargas en efectivo + depósitos - gastos - retiros
           </p>
         </div>
       </div>
@@ -403,7 +431,7 @@ export default function Cash() {
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Movimientos unificados</h2>
           <button
-            onClick={() => void Promise.all([loadAnalytics(), loadRanking(), loadActiveCashRegister(), loadSummary()])}
+            onClick={() => void Promise.all([loadAnalytics(), loadRanking(), loadSummary()])}
             className="btn btn-secondary btn-sm"
           >
             <RefreshCw className="w-4 h-4 mr-2" />
@@ -465,7 +493,7 @@ export default function Cash() {
                       <div key={`top-${group.key}-${item.id}`} className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2">
                         <p className="text-sm font-medium text-gray-900 dark:text-white">{item.name}</p>
                         <p className="text-xs text-gray-500 dark:text-gray-400">
-                          {item.quantity} uds · {formatCurrency(Number(item.revenue))}
+                          {formatQuantity(Number(item.quantity || 0))} uds · {formatCurrency(Number(item.revenue))}
                         </p>
                       </div>
                     ))}
@@ -478,7 +506,7 @@ export default function Cash() {
                       <div key={`bottom-${group.key}-${item.id}`} className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2">
                         <p className="text-sm font-medium text-gray-900 dark:text-white">{item.name}</p>
                         <p className="text-xs text-gray-500 dark:text-gray-400">
-                          {item.quantity} uds · {formatCurrency(Number(item.revenue))}
+                          {formatQuantity(Number(item.quantity || 0))} uds · {formatCurrency(Number(item.revenue))}
                         </p>
                       </div>
                     ))}
@@ -522,7 +550,7 @@ export default function Cash() {
               className="input"
             >
               <option value="">Todos los pagos</option>
-              {(['CASH', 'CARD', 'BIZUM', 'OTHER'] as const).map((method) => (
+              {commercialPaymentMethods.map((method) => (
                 <option key={method} value={method}>
                   {paymentMethodLabel(method)}
                 </option>
@@ -793,8 +821,8 @@ export default function Cash() {
                       <p className="text-sm text-gray-900 dark:text-white mt-1">{row.clientName}</p>
                     </div>
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Usuario</p>
-                      <p className="text-sm text-gray-900 dark:text-white mt-1">{row.userName}</p>
+                      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Profesional</p>
+                      <p className="text-sm text-gray-900 dark:text-white mt-1">{row.professionalName}</p>
                     </div>
                     <div>
                       <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Importe</p>

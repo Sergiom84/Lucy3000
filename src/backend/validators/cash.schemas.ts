@@ -3,7 +3,7 @@ import { dateQuerySchema, optionalNullableTextSchema, uuidParamSchema } from './
 
 const cashStatusSchema = z.enum(['OPEN', 'CLOSED'])
 const cashMovementTypeSchema = z.enum(['INCOME', 'EXPENSE', 'WITHDRAWAL', 'DEPOSIT'])
-const paymentMethodSchema = z.enum(['CASH', 'CARD', 'BIZUM', 'OTHER'])
+const paymentMethodSchema = z.enum(['CASH', 'CARD', 'BIZUM', 'ABONO', 'OTHER'])
 const analyticsPeriodSchema = z.enum(['DAY', 'WEEK', 'MONTH', 'YEAR'])
 
 const positiveMoneySchema = z.coerce.number().finite().positive('Amount must be greater than 0')

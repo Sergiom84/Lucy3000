@@ -1,10 +1,26 @@
-import { PaymentMethod, Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 import { Request, Response } from 'express'
 import { prisma } from '../db'
 import { AuthRequest } from '../middleware/auth.middleware'
 import { buildInclusiveDateRange } from '../utils/date-range'
+import { getSaleDisplayName } from '../utils/customer-display'
+import {
+  COMMERCIAL_PAYMENT_METHODS,
+  addBreakdownEntriesToBuckets,
+  createCommercialPaymentBuckets,
+  getSalePaymentBreakdown,
+  getTopUpCollectedEntry
+} from '../utils/payment-breakdown'
+import {
+  accountBalanceTopUpSummarySelect,
+  buildSaleAnalyticsRows,
+  formatProfessionalName,
+  getCollectedRevenue,
+  getWorkPerformedRevenue,
+  saleAnalyticsInclude,
+  saleSummarySelect
+} from '../utils/sales-reporting'
 
-const paymentMethods: PaymentMethod[] = ['CASH', 'CARD', 'BIZUM', 'OTHER']
 const PRIVATE_NO_TICKET_CASH_PIN = '0852'
 
 const formatCurrency = (amount: number) => {
@@ -57,13 +73,21 @@ const getPeriodRange = (period: 'DAY' | 'WEEK' | 'MONTH' | 'YEAR', referenceDate
   return { start, end }
 }
 
-const saleRangeWhere = (start: Date, end: Date): Prisma.SaleWhereInput => ({
+const commercialSaleRangeWhere = (start: Date, end: Date): Prisma.SaleWhereInput => ({
   status: 'COMPLETED',
+  date: {
+    gte: start,
+    lte: end
+  },
   NOT: {
     paymentMethod: 'CASH',
     showInOfficialCash: false
-  },
-  date: {
+  }
+})
+
+const topUpRangeWhere = (start: Date, end: Date): Prisma.AccountBalanceMovementWhereInput => ({
+  type: 'TOP_UP',
+  operationDate: {
     gte: start,
     lte: end
   }
@@ -72,9 +96,9 @@ const saleRangeWhere = (start: Date, end: Date): Prisma.SaleWhereInput => ({
 const computeExpectedBalance = (cashRegister: {
   openingBalance: Prisma.Decimal
   movements: {
-    type: 'INCOME' | 'EXPENSE' | 'WITHDRAWAL' | 'DEPOSIT'
+    type: string
     amount: Prisma.Decimal
-    paymentMethod: PaymentMethod | null
+    paymentMethod: string | null
   }[]
 }) => {
   let total = Number(cashRegister.openingBalance)
@@ -104,7 +128,8 @@ const buildCashSummary = async (referenceDate: Date) => {
   const { start: monthStart, end: monthEnd } = getPeriodRange('MONTH', referenceDate)
   const { start: yearStart, end: yearEnd } = getPeriodRange('YEAR', referenceDate)
 
-  const [activeCashRegister, daySales, monthSales, yearSales] = await Promise.all([
+  const [activeCashRegister, daySales, monthSales, yearSales, dayTopUps, monthTopUps, yearTopUps] =
+    await prisma.$transaction([
     prisma.cashRegister.findFirst({
       where: { status: 'OPEN' },
       include: {
@@ -120,26 +145,42 @@ const buildCashSummary = async (referenceDate: Date) => {
       orderBy: { openedAt: 'desc' }
     }),
     prisma.sale.findMany({
-      where: saleRangeWhere(dayStart, dayEnd),
-      select: { total: true, paymentMethod: true }
+      where: commercialSaleRangeWhere(dayStart, dayEnd),
+      select: saleSummarySelect
     }),
     prisma.sale.findMany({
-      where: saleRangeWhere(monthStart, monthEnd),
-      select: { total: true }
+      where: commercialSaleRangeWhere(monthStart, monthEnd),
+      select: saleSummarySelect
     }),
     prisma.sale.findMany({
-      where: saleRangeWhere(yearStart, yearEnd),
-      select: { total: true }
+      where: commercialSaleRangeWhere(yearStart, yearEnd),
+      select: saleSummarySelect
+    }),
+    prisma.accountBalanceMovement.findMany({
+      where: topUpRangeWhere(dayStart, dayEnd),
+      select: accountBalanceTopUpSummarySelect
+    }),
+    prisma.accountBalanceMovement.findMany({
+      where: topUpRangeWhere(monthStart, monthEnd),
+      select: accountBalanceTopUpSummarySelect
+    }),
+    prisma.accountBalanceMovement.findMany({
+      where: topUpRangeWhere(yearStart, yearEnd),
+      select: accountBalanceTopUpSummarySelect
     })
   ])
 
-  const paymentsByMethod = paymentMethods.reduce<Record<PaymentMethod, number>>((acc, method) => {
-    acc[method] = 0
-    return acc
-  }, {} as Record<PaymentMethod, number>)
+  const paymentsByMethod = createCommercialPaymentBuckets()
 
   for (const sale of daySales) {
-    paymentsByMethod[sale.paymentMethod] += Number(sale.total)
+    addBreakdownEntriesToBuckets(paymentsByMethod, getSalePaymentBreakdown(sale))
+  }
+
+  for (const topUp of dayTopUps) {
+    const topUpEntry = getTopUpCollectedEntry(topUp)
+    if (topUpEntry) {
+      addBreakdownEntriesToBuckets(paymentsByMethod, [topUpEntry])
+    }
   }
 
   let deposits = 0
@@ -156,8 +197,7 @@ const buildCashSummary = async (referenceDate: Date) => {
   }
 
   const openingBalance = activeCashRegister ? Number(activeCashRegister.openingBalance) : 0
-  const cashIncomeToday = paymentsByMethod.CASH
-  const currentBalance = openingBalance + cashIncomeToday + deposits - expenses - withdrawals
+  const currentBalance = activeCashRegister ? computeExpectedBalance(activeCashRegister) : 0
 
   return {
     activeCashRegister,
@@ -165,9 +205,18 @@ const buildCashSummary = async (referenceDate: Date) => {
       openingBalance,
       paymentsByMethod,
       income: {
-        day: daySales.reduce((sum, sale) => sum + Number(sale.total), 0),
-        month: monthSales.reduce((sum, sale) => sum + Number(sale.total), 0),
-        year: yearSales.reduce((sum, sale) => sum + Number(sale.total), 0)
+        day: getCollectedRevenue(daySales) + dayTopUps.reduce((sum, topUp) => sum + (getTopUpCollectedEntry(topUp)?.amount || 0), 0),
+        month:
+          getCollectedRevenue(monthSales) +
+          monthTopUps.reduce((sum, topUp) => sum + (getTopUpCollectedEntry(topUp)?.amount || 0), 0),
+        year:
+          getCollectedRevenue(yearSales) +
+          yearTopUps.reduce((sum, topUp) => sum + (getTopUpCollectedEntry(topUp)?.amount || 0), 0)
+      },
+      workPerformed: {
+        day: getWorkPerformedRevenue(daySales),
+        month: getWorkPerformedRevenue(monthSales),
+        year: getWorkPerformedRevenue(yearSales)
       },
       currentBalance,
       manualAdjustments: {
@@ -196,7 +245,7 @@ const resolveAnalyticsRange = (query: Request['query'] | undefined) => {
 const getAnalyticsRows = async (query: Request['query'] | undefined) => {
   const safeQuery = query || {}
   const { start, end } = resolveAnalyticsRange(safeQuery)
-  const paymentMethod = safeQuery.paymentMethod as PaymentMethod | undefined
+  const paymentMethod = safeQuery.paymentMethod as string | undefined
   const clientId = safeQuery.clientId as string | undefined
   const serviceId = safeQuery.serviceId as string | undefined
   const productId = safeQuery.productId as string | undefined
@@ -210,64 +259,20 @@ const getAnalyticsRows = async (query: Request['query'] | undefined) => {
 
   const sales = await prisma.sale.findMany({
     where: {
-      status: 'COMPLETED',
-      NOT: {
-        paymentMethod: 'CASH',
-        showInOfficialCash: false
-      },
-      date: {
-        gte: start,
-        lte: end
-      },
+      ...commercialSaleRangeWhere(start, end),
       ...(clientId ? { clientId } : {}),
-      ...(paymentMethod ? { paymentMethod } : {}),
       ...(serviceId || productId || type !== 'ALL' ? { items: { some: itemFilter } } : {})
     },
-    include: {
-      user: {
-        select: {
-          name: true
-        }
-      },
-      client: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true
-        }
-      },
-      items: {
-        where: serviceId || productId || type !== 'ALL' ? itemFilter : undefined,
-        include: {
-          service: {
-            select: { id: true, name: true }
-          },
-          product: {
-            select: { id: true, name: true }
-          }
-        }
-      }
-    },
+    include: saleAnalyticsInclude,
     orderBy: { date: 'desc' }
   })
 
-  return sales.flatMap((sale) =>
-    sale.items.map((item) => ({
-      saleId: sale.id,
-      saleNumber: sale.saleNumber,
-      date: sale.date,
-      clientId: sale.clientId,
-      clientName: sale.client ? `${sale.client.firstName} ${sale.client.lastName}`.trim() : 'Cliente general',
-      paymentMethod: sale.paymentMethod,
-      professionalName: sale.user?.name || 'Sin usuario',
-      itemType: item.serviceId ? 'SERVICE' : 'PRODUCT',
-      serviceId: item.serviceId,
-      productId: item.productId,
-      concept: item.service?.name || item.product?.name || item.description,
-      quantity: item.quantity,
-      amount: Number(item.subtotal)
-    }))
-  )
+  return buildSaleAnalyticsRows(sales, {
+    paymentMethod,
+    serviceId,
+    productId,
+    type
+  })
 }
 
 export const getPrivateNoTicketCashSales = async (req: Request, res: Response) => {
@@ -290,6 +295,11 @@ export const getPrivateNoTicketCashSales = async (req: Request, res: Response) =
             lastName: true
           }
         },
+        appointment: {
+          select: {
+            guestName: true
+          }
+        },
         user: {
           select: {
             name: true
@@ -305,8 +315,8 @@ export const getPrivateNoTicketCashSales = async (req: Request, res: Response) =
       date: sale.date,
       amount: Number(sale.total),
       description: sale.notes || null,
-      clientName: sale.client ? `${sale.client.firstName} ${sale.client.lastName}`.trim() : 'Cliente general',
-      userName: sale.user?.name || 'Sin usuario'
+      clientName: getSaleDisplayName(sale),
+      professionalName: formatProfessionalName(sale.professional, sale.user?.name)
     }))
 
     res.json({

@@ -11,14 +11,11 @@
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:electron\"",
     "dev:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-backend.ps1",
     "dev:electron": "vite",
-    "build": "npm run build:backend && tsc && vite build && electron-builder",
+    "build": "tsc && vite build && npm run build:backend && electron-builder",
     "build:backend": "tsc -p tsconfig.backend.json",
     "test": "vitest run",
     "test:unit": "vitest run tests/backend/unit",
     "test:smoke": "vitest run tests/backend/smoke",
-    "backup:analyze": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/analyze-backup.ps1",
-    "backup:restore": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/restore-backup.ps1",
-    "db:rebuild": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/rebuild-supabase-db.ps1",
     "preview": "vite preview",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
@@ -27,7 +24,6 @@
   "dependencies": {
     "@hookform/resolvers": "^3.3.4",
     "@prisma/client": "^5.8.0",
-    "@supabase/supabase-js": "^2.39.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
@@ -74,7 +70,6 @@
     "electron-builder": "^24.9.1",
     "nodemon": "^3.0.2",
     "postcss": "^8.4.32",
-    "supabase": "^2.76.9",
     "supertest": "^7.2.2",
     "tailwindcss": "^3.4.0",
     "ts-node": "^10.9.2",
@@ -92,25 +87,58 @@
     "files": [
       "dist/**/*",
       "node_modules/**/*",
+      "node_modules/.prisma/**/*",
+      "prisma/**/*",
       "package.json"
+    ],
+    "asarUnpack": [
+      "dist/backend/**/*",
+      "node_modules/.prisma/**/*",
+      "node_modules/@prisma/client/**/*",
+      "node_modules/@prisma/engines/**/*",
+      "prisma/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/.prisma/client",
+        "to": "app.asar.unpacked/node_modules/.prisma/client"
+      },
+      {
+        "from": "prisma/schema.prisma",
+        "to": "prisma/schema.prisma"
+      },
+      {
+        "from": "prisma/migrations",
+        "to": "prisma/migrations"
+      }
     ],
     "win": {
       "target": [
         "nsis"
       ],
-      "signAndEditExecutable": false
+      "signAndEditExecutable": false,
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Lucy3000",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico"
     },
     "mac": {
       "target": [
         "dmg"
-      ],
-      "icon": "public/icon.icns"
+      ]
     },
     "linux": {
       "target": [
         "AppImage"
       ],
-      "icon": "public/icon.png"
+      "icon": "assets/icon.png"
     }
   }
 }

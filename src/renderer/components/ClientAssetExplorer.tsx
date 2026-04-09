@@ -569,7 +569,7 @@ export default function ClientAssetExplorer({
                   <div className="mb-4 flex items-start justify-between gap-3">
                     <div className="min-w-0 pr-2">
                       <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${folder.accentTextClass}`}>Carpeta</p>
-                      <h4 className="mt-2 break-words text-2xl font-semibold leading-tight text-gray-900 dark:text-white">{folder.label}</h4>
+                      <h4 className="mt-2 break-words text-base font-semibold leading-tight text-gray-900 dark:text-white">{folder.label}</h4>
                     </div>
                     <div className="rounded-2xl bg-white/80 p-3 shadow-sm dark:bg-gray-900/70">
                       <Icon className={`h-5 w-5 ${folder.accentTextClass}`} />

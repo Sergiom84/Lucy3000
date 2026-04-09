@@ -2,6 +2,8 @@
 
 Estado de revisión: 2026-02-17
 
+> Nota: este documento describe un flujo histórico de restauración sobre Supabase/PostgreSQL. No implica que el runtime actual de la app de escritorio use Supabase; ese runtime usa SQLite local por defecto.
+
 ## Resumen rápido
 - Backup analizado: `C:\Users\sergi\Desktop\backup Lucy3000\db_cluster-08-11-2025@00-27-55.backup`
 - Formato real detectado: SQL plano (texto), no `pg_dump` custom

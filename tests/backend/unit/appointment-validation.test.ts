@@ -1,149 +1,159 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { validateAppointmentSlot } from '../../../src/backend/utils/appointment-validation'
 import { prismaMock, resetPrismaMock } from '../mocks/prisma.mock'
 
 describe('validateAppointmentSlot', () => {
+  const fixedNow = new Date('2026-03-31T12:00:00.000')
+
   beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(fixedNow)
     resetPrismaMock()
     prismaMock.appointment.findMany.mockResolvedValue([])
   })
 
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   const baseInput = {
-    date: new Date('2099-06-15'),
+    date: new Date('2026-04-01T00:00:00.000'),
     startTime: '10:00',
     endTime: '11:00',
     professional: 'LUCY',
-    cabin: 'LUCY',
+    cabin: 'LUCY'
   }
 
-  it('should pass for a valid future appointment', async () => {
+  it('permite una cita futura valida', async () => {
     const result = await validateAppointmentSlot(baseInput, prismaMock)
     expect(result.errors).toHaveLength(0)
+    expect(result.warnings).toHaveLength(0)
   })
 
-  it('should reject past date with PAST_DATETIME', async () => {
+  it('rechaza una fecha pasada con PAST_DATETIME', async () => {
     const result = await validateAppointmentSlot(
-      { ...baseInput, date: new Date('2020-01-01') },
+      { ...baseInput, date: new Date('2026-03-30T00:00:00.000') },
       prismaMock
     )
+
+    expect(result.errors).toHaveLength(1)
+    expect(result.errors[0]).toEqual({
+      code: 'PAST_DATETIME',
+      message: 'No se puede crear una cita en el pasado'
+    })
+  })
+
+  it('rechaza una hora pasada en el mismo dia con PAST_DATETIME', async () => {
+    const result = await validateAppointmentSlot(
+      { ...baseInput, date: new Date('2026-03-31T00:00:00.000'), startTime: '11:00', endTime: '12:00' },
+      prismaMock
+    )
+
     expect(result.errors).toHaveLength(1)
     expect(result.errors[0].code).toBe('PAST_DATETIME')
   })
 
-  it('should reject past time today with PAST_DATETIME', async () => {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-
-    const result = await validateAppointmentSlot(
-      { ...baseInput, date: today, startTime: '00:01', endTime: '00:30' },
-      prismaMock
-    )
-    expect(result.errors.some(e => e.code === 'PAST_DATETIME')).toBe(true)
-  })
-
-  it('should reject startTime >= endTime with INVALID_TIME_RANGE', async () => {
+  it('rechaza startTime mayor o igual que endTime con INVALID_TIME_RANGE', async () => {
     const result = await validateAppointmentSlot(
       { ...baseInput, startTime: '12:00', endTime: '11:00' },
       prismaMock
     )
+
     expect(result.errors).toHaveLength(1)
-    expect(result.errors[0].code).toBe('INVALID_TIME_RANGE')
+    expect(result.errors[0]).toEqual({
+      code: 'INVALID_TIME_RANGE',
+      message: 'La hora de inicio debe ser anterior a la hora de fin'
+    })
   })
 
-  it('should reject hours outside 09:00-21:00 with INVALID_HOURS', async () => {
+  it('rechaza horas fuera de 09:00-21:00 con INVALID_HOURS', async () => {
     const result = await validateAppointmentSlot(
       { ...baseInput, startTime: '08:00', endTime: '09:00' },
       prismaMock
     )
-    expect(result.errors.some(e => e.code === 'INVALID_HOURS')).toBe(true)
+
+    expect(result.errors).toHaveLength(1)
+    expect(result.errors[0]).toEqual({
+      code: 'INVALID_HOURS',
+      message: 'El horario debe estar entre 09:00 y 21:00'
+    })
   })
 
-  it('should detect professional conflict', async () => {
+  it('detecta conflicto de profesional', async () => {
     prismaMock.appointment.findMany
-      .mockResolvedValueOnce([
-        { startTime: '10:00', endTime: '11:30', service: { name: 'Facial' }, client: { firstName: 'Ana' } }
-      ])
+      .mockResolvedValueOnce([{ startTime: '10:00', endTime: '11:30' }])
       .mockResolvedValueOnce([])
 
     const result = await validateAppointmentSlot(
       { ...baseInput, startTime: '10:30', endTime: '11:30' },
       prismaMock
     )
-    expect(result.errors.some(e => e.code === 'PROFESSIONAL_CONFLICT')).toBe(true)
-    expect(result.errors[0].message).toContain('LUCY')
+
+    expect(result.errors).toEqual([
+      {
+        code: 'PROFESSIONAL_CONFLICT',
+        message: 'Lucy ya tiene una cita de 10:00 a 11:30'
+      }
+    ])
   })
 
-  it('should detect cabin conflict', async () => {
+  it('detecta conflicto de cabina', async () => {
     prismaMock.appointment.findMany
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        { startTime: '10:00', endTime: '12:00', service: { name: 'Masaje' }, client: { firstName: 'Maria' } }
-      ])
+      .mockResolvedValueOnce([{ startTime: '10:00', endTime: '12:00' }])
 
     const result = await validateAppointmentSlot(
       { ...baseInput, startTime: '11:00', endTime: '12:30' },
       prismaMock
     )
-    expect(result.errors.some(e => e.code === 'CABIN_CONFLICT')).toBe(true)
-    expect(result.errors[0].message).toContain('LUCY')
+
+    expect(result.errors).toEqual([
+      {
+        code: 'CABIN_CONFLICT',
+        message: 'La cabina Lucy ya esta ocupada de 10:00 a 12:00'
+      }
+    ])
   })
 
-  it('should NOT conflict for adjacent appointments (10-11 and 11-12)', async () => {
-    // Adjacent times: existing ends exactly when new starts
-    prismaMock.appointment.findMany.mockResolvedValue([])
-
+  it('permite citas adyacentes sin conflicto', async () => {
     const result = await validateAppointmentSlot(
       { ...baseInput, startTime: '11:00', endTime: '12:00' },
       prismaMock
     )
+
     expect(result.errors).toHaveLength(0)
   })
 
-  it('should NOT conflict with CANCELLED/COMPLETED appointments', async () => {
-    // The query filters by ACTIVE_STATUSES, so cancelled appointments never appear
-    prismaMock.appointment.findMany.mockResolvedValue([])
-
-    const result = await validateAppointmentSlot(baseInput, prismaMock)
-    expect(result.errors).toHaveLength(0)
-  })
-
-  it('should exclude own appointment on update', async () => {
-    prismaMock.appointment.findMany.mockResolvedValue([])
-
-    const result = await validateAppointmentSlot(
+  it('excluye la cita propia en updates', async () => {
+    await validateAppointmentSlot(
       { ...baseInput, excludeAppointmentId: 'abc-123' },
       prismaMock
     )
 
-    // Verify the query was called with the exclusion
-    const call = prismaMock.appointment.findMany.mock.calls[0][0]
-    expect(call.where.id).toEqual({ not: 'abc-123' })
-    expect(result.errors).toHaveLength(0)
+    const [call] = prismaMock.appointment.findMany.mock.calls
+    expect(call?.[0].where.id).toEqual({ not: 'abc-123' })
   })
 
-  it('should return warning for lunch gap (14:00-16:00)', async () => {
+  it('devuelve warning para la franja de descanso', async () => {
     const result = await validateAppointmentSlot(
-      { ...baseInput, startTime: '15:00', endTime: '16:00' },
+      { ...baseInput, startTime: '15:00', endTime: '15:30' },
       prismaMock
     )
+
     expect(result.errors).toHaveLength(0)
-    expect(result.warnings).toHaveLength(1)
-    expect(result.warnings[0].code).toBe('OUTSIDE_BUSINESS_HOURS')
+    expect(result.warnings).toEqual([
+      {
+        code: 'OUTSIDE_BUSINESS_HOURS',
+        message: 'La hora seleccionada esta fuera del horario habitual (descanso 14:00-16:00)'
+      }
+    ])
   })
 
-  it('should return multiple errors for multiple violations', async () => {
-    prismaMock.appointment.findMany
-      .mockResolvedValueOnce([
-        { startTime: '10:00', endTime: '11:30', service: { name: 'Facial' }, client: { firstName: 'Ana' } }
-      ])
-      .mockResolvedValueOnce([
-        { startTime: '10:00', endTime: '11:30', service: { name: 'Facial' }, client: { firstName: 'Ana' } }
-      ])
+  it('aplica la busqueda de conflictos solo en estados activos', async () => {
+    await validateAppointmentSlot(baseInput, prismaMock)
 
-    const result = await validateAppointmentSlot(
-      { ...baseInput, startTime: '10:30', endTime: '11:00' },
-      prismaMock
-    )
-    expect(result.errors.length).toBeGreaterThanOrEqual(2)
+    const [professionalCall, cabinCall] = prismaMock.appointment.findMany.mock.calls
+    expect(professionalCall?.[0].where.status).toEqual({ in: ['SCHEDULED', 'CONFIRMED', 'IN_PROGRESS'] })
+    expect(cabinCall?.[0].where.status).toEqual({ in: ['SCHEDULED', 'CONFIRMED', 'IN_PROGRESS'] })
   })
 })

@@ -18,25 +18,19 @@
 
 
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│  🗄️  PASO 2: CONFIGURAR SUPABASE                                            │
+│  🗄️  PASO 2: CONFIGURAR SQLITE LOCAL                                         │
 └──────────────────────────────────────────────────────────────────────────────┘
 
-   A. Crear cuenta en Supabase (gratuita):
-      👉 https://supabase.com
+   A. Copiar `.env.example` a `.env`
 
-   B. Crear nuevo proyecto
+   B. Confirmar que DATABASE_URL apunte a:
+      • file:./prisma/lucy3000.db
+      • Prisma la resolverá físicamente en: prisma/prisma/lucy3000.db
 
-   C. Obtener credenciales en Settings > Database:
-      • Connection String (DATABASE_URL)
-      • Project URL (SUPABASE_URL)
-      • Anon Key (SUPABASE_ANON_KEY)
-      • Service Key (SUPABASE_SERVICE_KEY)
+   C. Generar cliente y sincronizar esquema:
 
-   D. Ejecutar script de configuración:
-
-      node scripts/setup.js
-
-      O copiar manualmente .env.example a .env y completar
+      npm run prisma:generate
+      npx prisma db push
 
 
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -63,8 +57,7 @@
 
    Opción B - SQL Directo:
    
-      Copiar contenido de scripts/create-admin.sql
-      Ejecutar en Supabase SQL Editor
+      Consultar BACKUP_RESTORE.md si estás trabajando sobre un entorno PostgreSQL histórico.
 
 
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -85,7 +78,7 @@
 └──────────────────────────────────────────────────────────────────────────────┘
 
    Email:    admin@lucy3000.com
-   Password: admin123
+   Password: lucy3000
 
 
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -109,7 +102,7 @@
 
    Error: "Database connection failed"
    → Verificar DATABASE_URL en .env
-   → Comprobar que Supabase esté activo
+   → Comprobar que prisma/prisma/lucy3000.db existe y es escribible
 
    Error: "Invalid credentials"
    → Verificar que el usuario admin se creó correctamente

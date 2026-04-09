@@ -173,6 +173,27 @@ const printTicketInBrowser = async (payload: TicketPayload): Promise<TicketPrint
 
 export const isDesktop = () => Boolean(window.electronAPI)
 
+export const getDebugLogFilePath = async () => {
+  if (!window.electronAPI) {
+    throw new Error(desktopUnavailableError)
+  }
+
+  return window.electronAPI.logs.getFilePath()
+}
+
+export const openDebugLogFolder = async () => {
+  if (!window.electronAPI) {
+    throw new Error(desktopUnavailableError)
+  }
+
+  const response = await window.electronAPI.logs.openFolder()
+  if (!response.success) {
+    throw new Error(response.error || 'No se pudo abrir la carpeta de logs')
+  }
+
+  return response.path
+}
+
 export const listClientAssets = async (clientId: string, clientName: string): Promise<ClientAssetsResponse> => {
   if (!window.electronAPI) {
     throw new Error(desktopUnavailableError)

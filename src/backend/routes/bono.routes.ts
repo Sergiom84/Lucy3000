@@ -1,6 +1,10 @@
 import { Router } from 'express'
+import multer from 'multer'
 import {
   getClientBonos,
+  getBonoTemplates,
+  getGlobalAccountBalanceHistory,
+  importBonoTemplatesFromExcel,
   createBonoPack,
   createBonoAppointment,
   consumeSession,
@@ -22,9 +26,13 @@ import {
 } from '../validators/bono.schemas'
 
 const router = Router()
+const upload = multer({ storage: multer.memoryStorage() })
 
 router.use(authMiddleware)
 
+router.get('/templates', getBonoTemplates)
+router.get('/account-balance/history', getGlobalAccountBalanceHistory)
+router.post('/import-templates', upload.single('file'), importBonoTemplatesFromExcel)
 router.get('/client/:clientId', validateRequest({ params: clientIdParamSchema }), getClientBonos)
 router.post('/', createBonoPack)
 router.post(

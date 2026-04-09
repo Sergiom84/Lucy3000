@@ -1,5 +1,6 @@
 import { Request, Response } from 'express'
 import { prisma } from '../db'
+import { getAppointmentDisplayName, getSaleDisplayName } from '../utils/customer-display'
 
 export const getDashboardStats = async (req: Request, res: Response) => {
   try {
@@ -107,6 +108,11 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       },
       include: {
         client: true,
+        appointment: {
+          select: {
+            guestName: true
+          }
+        },
         items: true
       },
       orderBy: { date: 'desc' },
@@ -156,8 +162,14 @@ export const getDashboardStats = async (req: Request, res: Response) => {
         unreadNotifications
       },
       openCashRegister,
-      upcomingAppointments,
-      recentSales,
+      upcomingAppointments: upcomingAppointments.map((appointment) => ({
+        ...appointment,
+        displayName: getAppointmentDisplayName(appointment)
+      })),
+      recentSales: recentSales.map((sale) => ({
+        ...sale,
+        displayName: getSaleDisplayName(sale)
+      })),
       salesChart: last7Days
     })
   } catch (error) {

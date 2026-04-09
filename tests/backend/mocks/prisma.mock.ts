@@ -58,6 +58,7 @@ export const prismaMock: any = {
 
   service: {
     findMany: vi.fn(),
+    findFirst: vi.fn(),
     findUnique: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
@@ -107,7 +108,8 @@ export const prismaMock: any = {
   setting: {
     findMany: vi.fn(),
     findUnique: vi.fn(),
-    update: vi.fn()
+    update: vi.fn(),
+    upsert: vi.fn()
   },
 
   googleCalendarConfig: {

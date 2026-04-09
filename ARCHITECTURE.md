@@ -65,7 +65,7 @@ Documentación técnica de la arquitectura del sistema.
 │  └─────────────────────────────────────────────────────┘   │
 │                         ↕ SQL                               │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │           SUPABASE (PostgreSQL)                      │   │
+│  │     SQLITE LOCAL (resuelta en prisma/prisma/lucy3000.db)     │   │
 │  │  ┌───────────────────────────────────────────────┐  │   │
 │  │  │  Database Tables                               │  │   │
 │  │  │  - users, clients, appointments                │  │   │
@@ -93,7 +93,7 @@ Auth Controller
     ↓
 Prisma Query (users table)
     ↓
-Supabase PostgreSQL
+SQLite local
     ↓
 JWT Token Generation
     ↓
@@ -122,7 +122,7 @@ Client Controller
     ↓
 Prisma Create
     ↓
-Supabase PostgreSQL
+SQLite local
     ↓
 Response to Frontend
     ↓
@@ -292,13 +292,13 @@ CashRegister (1) ───── (N) CashMovement
 - **Node.js**: 18+ - Runtime
 - **Express**: ^4.18.2 - Web framework
 - **Prisma**: ^5.8.0 - ORM
-- **PostgreSQL**: via Supabase - Database
+- **SQLite**: base de datos local
 - **JWT**: ^9.0.2 - Authentication
 - **Bcrypt**: ^2.4.3 - Password hashing
 - **Zod**: ^3.22.4 - Validation
 
 ### DevOps
-- **Supabase**: Database hosting
+- **Supabase**: histórico / backups / despliegues remotos
 - **Render**: Backend hosting
 - **GitHub**: Version control
 
@@ -337,7 +337,7 @@ CashRegister (1) ───── (N) CashMovement
 - Console logs
 
 ### Base de Datos
-- Supabase Dashboard
+- Prisma Studio / archivo SQLite local
 - Query performance
 - Storage usage
 
@@ -350,7 +350,7 @@ CashRegister (1) ───── (N) CashMovement
 
 ### Vertical
 - Upgrade de plan en Render
-- Upgrade de plan en Supabase
+- Migrar a un motor persistente si se publica backend remoto
 - Optimización de queries
 
 ### Caché

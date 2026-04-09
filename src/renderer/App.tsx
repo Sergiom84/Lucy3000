@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import { useAuthStore } from './stores/authStore'
 
@@ -21,6 +21,7 @@ import ClientRanking from './pages/ClientRanking'
 
 function App() {
   const { isAuthenticated } = useAuthStore()
+  const Router = window.location.protocol === 'file:' ? HashRouter : BrowserRouter
 
   return (
     <Router>

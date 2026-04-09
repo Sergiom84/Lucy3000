@@ -1,5 +1,6 @@
 import { Request, Response } from 'express'
 import { Prisma } from '@prisma/client'
+import * as XLSX from 'xlsx'
 import { prisma } from '../db'
 
 const parseDecimalValue = (value: unknown): number | null => {
@@ -29,8 +30,14 @@ const parseDateValue = (value: unknown): Date | null => {
 
 const normalizeGender = (value: unknown): 'HOMBRE' | 'MUJER' | null => {
   if (value === null || value === undefined) return null
-  const normalized = String(value).trim().toUpperCase()
-  if (normalized === 'HOMBRE' || normalized === 'MUJER') return normalized
+  const normalized = String(value)
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+
+  if (['HOMBRE', 'MASCULINO', 'VARON', 'MALE', 'H'].includes(normalized)) return 'HOMBRE'
+  if (['MUJER', 'FEMENINO', 'FEMALE', 'F'].includes(normalized)) return 'MUJER'
   return null
 }
 
@@ -220,14 +227,14 @@ export const getClients = async (req: Request, res: Response) => {
 
     if (normalizedSearch) {
       where.OR = [
-        { firstName: { contains: normalizedSearch, mode: 'insensitive' } },
-        { lastName: { contains: normalizedSearch, mode: 'insensitive' } },
-        { externalCode: { contains: normalizedSearch, mode: 'insensitive' } },
-        { dni: { contains: normalizedSearch, mode: 'insensitive' } },
-        { email: { contains: normalizedSearch, mode: 'insensitive' } },
-        { phone: { contains: normalizedSearch, mode: 'insensitive' } },
-        { mobilePhone: { contains: normalizedSearch, mode: 'insensitive' } },
-        { landlinePhone: { contains: normalizedSearch, mode: 'insensitive' } }
+        { firstName: { contains: normalizedSearch } },
+        { lastName: { contains: normalizedSearch } },
+        { externalCode: { contains: normalizedSearch } },
+        { dni: { contains: normalizedSearch } },
+        { email: { contains: normalizedSearch } },
+        { phone: { contains: normalizedSearch } },
+        { mobilePhone: { contains: normalizedSearch } },
+        { landlinePhone: { contains: normalizedSearch } }
       ]
     }
 
@@ -547,6 +554,383 @@ export const getBirthdaysThisMonth = async (_req: Request, res: Response) => {
     res.json(birthdaysThisMonth)
   } catch (error) {
     console.error('Get birthdays error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+const textOrNull = (val: unknown): string | null => {
+  if (!val) return null
+  const s = String(val).trim()
+  return s === '' || s === '@' ? null : s
+}
+
+const normalizeColumnKey = (value: string) =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+
+const buildNormalizedRow = (row: Record<string, unknown>) => {
+  const normalized: Record<string, unknown> = {}
+
+  for (const [key, value] of Object.entries(row)) {
+    const normalizedKey = normalizeColumnKey(key)
+    if (!normalizedKey || Object.prototype.hasOwnProperty.call(normalized, normalizedKey)) continue
+    normalized[normalizedKey] = value
+  }
+
+  return normalized
+}
+
+const getRowValue = (row: Record<string, unknown>, aliases: string[]) => {
+  for (const alias of aliases) {
+    const normalizedAlias = normalizeColumnKey(alias)
+    if (!normalizedAlias || !Object.prototype.hasOwnProperty.call(row, normalizedAlias)) continue
+    const value = row[normalizedAlias]
+    if (value === null || value === undefined) continue
+    if (typeof value === 'string' && value.trim() === '') continue
+    return value
+  }
+
+  return null
+}
+
+const parseBooleanValue = (value: unknown): boolean | null => {
+  if (value === null || value === undefined) return null
+  if (typeof value === 'boolean') return value
+
+  const normalized = normalizeColumnKey(String(value).trim())
+  if (!normalized) return null
+
+  if (['si', 'true', '1', 'yes', 'y', 'x', 'activo', 'activa'].includes(normalized)) return true
+  if (['no', 'false', '0', 'n', 'inactivo', 'inactiva'].includes(normalized)) return false
+
+  return null
+}
+
+const parseIntegerValue = (value: unknown): number | null => {
+  if (value === null || value === undefined || String(value).trim() === '') return null
+  const parsed = Number.parseInt(String(value).trim(), 10)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const getMonthName = (monthNumber: number | null): string | null => {
+  if (!monthNumber || monthNumber < 1 || monthNumber > 12) return null
+
+  const date = new Date(2000, monthNumber - 1, 1)
+  const monthName = date.toLocaleDateString('es-ES', { month: 'long' })
+  return monthName.charAt(0).toUpperCase() + monthName.slice(1)
+}
+
+const parseBirthMonthValue = (value: unknown): number | null => {
+  if (value === null || value === undefined || String(value).trim() === '') return null
+
+  const numericMonth = parseIntegerValue(value)
+  if (numericMonth && numericMonth >= 1 && numericMonth <= 12) return numericMonth
+
+  const normalized = normalizeColumnKey(String(value))
+  const monthMap: Record<string, number> = {
+    enero: 1,
+    febrero: 2,
+    marzo: 3,
+    abril: 4,
+    mayo: 5,
+    junio: 6,
+    julio: 7,
+    agosto: 8,
+    septiembre: 9,
+    setiembre: 9,
+    octubre: 10,
+    noviembre: 11,
+    diciembre: 12
+  }
+
+  return monthMap[normalized] ?? null
+}
+
+const parseExcelDate = (val: unknown): Date | null => {
+  if (!val) return null
+  if (val instanceof Date) {
+    return Number.isNaN(val.getTime()) ? null : val
+  }
+  if (typeof val === 'number') {
+    const epoch = new Date(1899, 11, 30)
+    return new Date(epoch.getTime() + val * 86400000)
+  }
+  const s = String(val).trim()
+  if (!s || s === '01-01-01') return null
+
+  const normalizedDate = s.replace(/[./]/g, '-')
+  const parts = normalizedDate.split('-')
+  if (parts.length === 3 && parts.every(part => /^\d+$/.test(part))) {
+    let day: number
+    let month: number
+    let yyOrYear: number
+
+    if (parts[0].length === 4) {
+      yyOrYear = parseInt(parts[0], 10)
+      month = parseInt(parts[1], 10)
+      day = parseInt(parts[2], 10)
+    } else {
+      day = parseInt(parts[0], 10)
+      month = parseInt(parts[1], 10)
+      yyOrYear = parseInt(parts[2], 10)
+    }
+
+    if (isNaN(day) || isNaN(month) || isNaN(yyOrYear)) return null
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null
+    const year = parts[0].length === 4 || parts[2].length === 4
+      ? yyOrYear
+      : (yyOrYear <= 30 ? 2000 + yyOrYear : 1900 + yyOrYear)
+    const parsed = new Date(year, month - 1, day)
+    return Number.isNaN(parsed.getTime()) ? null : parsed
+  }
+
+  const d = new Date(s)
+  return isNaN(d.getTime()) ? null : d
+}
+
+const resolveBirthMetadata = (row: Record<string, unknown>) => {
+  const explicitYear = parseIntegerValue(getRowValue(row, ['Año de nacimiento', 'Ano de nacimiento', 'birthYear']))
+  const explicitDay = parseIntegerValue(getRowValue(row, ['Día de nacimiento', 'Dia de nacimiento', 'birthDay']))
+  const explicitMonthNumber = parseBirthMonthValue(
+    getRowValue(row, ['Mes de nacimiento', 'Mes de nacimiento 2', 'Mes nacimiento', 'birthMonthNumber', 'birthMonthName'])
+  )
+
+  const birthDateRaw = getRowValue(row, ['Fecha de nacimiento', 'birthDate'])
+  const birthDate = parseExcelDate(birthDateRaw)
+
+  if (birthDate) {
+    if (explicitYear) birthDate.setFullYear(explicitYear)
+
+    return {
+      birthDate,
+      birthDay: birthDate.getDate(),
+      birthMonthNumber: birthDate.getMonth() + 1,
+      birthMonthName: getMonthName(birthDate.getMonth() + 1),
+      birthYear: birthDate.getFullYear()
+    }
+  }
+
+  return {
+    birthDate: null,
+    birthDay: explicitDay,
+    birthMonthNumber: explicitMonthNumber,
+    birthMonthName: getMonthName(explicitMonthNumber),
+    birthYear: explicitYear
+  }
+}
+
+const addClientReferenceToLookup = (
+  lookup: Map<string, string>,
+  client: {
+    id: string
+    externalCode?: string | null
+    email?: string | null
+    phone?: string | null
+    mobilePhone?: string | null
+    landlinePhone?: string | null
+    firstName?: string | null
+    lastName?: string | null
+  }
+) => {
+  const addValue = (value: string | null | undefined) => {
+    const normalized = textOrNull(value)
+    if (!normalized) return
+
+    const key = normalizeColumnKey(normalized)
+    if (!key || lookup.has(key)) return
+    lookup.set(key, client.id)
+  }
+
+  addValue(client.externalCode)
+  addValue(client.email)
+  addValue(client.phone)
+  addValue(client.mobilePhone)
+  addValue(client.landlinePhone)
+
+  const fullName = `${client.firstName || ''} ${client.lastName || ''}`.trim()
+  addValue(fullName)
+}
+
+export const importClientsFromExcel = async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' })
+    }
+
+    const workbook = XLSX.read(req.file.buffer, { type: 'buffer' })
+    const sheetName = workbook.SheetNames[0]
+    const worksheet = workbook.Sheets[sheetName]
+    const data = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '' })
+
+    const results = {
+      success: 0,
+      errors: [] as { row: number; error: string }[],
+      skipped: 0
+    }
+
+    const seenEmails = new Set<string>()
+    const linkedClientLookup = new Map<string, string>()
+    const pendingLinks: Array<{ clientId: string; reference: string }> = []
+
+    const existingClients = await prisma.client.findMany({
+      select: {
+        id: true,
+        externalCode: true,
+        email: true,
+        phone: true,
+        mobilePhone: true,
+        landlinePhone: true,
+        firstName: true,
+        lastName: true
+      }
+    })
+
+    for (const client of existingClients) {
+      addClientReferenceToLookup(linkedClientLookup, client)
+    }
+
+    for (let i = 0; i < data.length; i++) {
+      const row = buildNormalizedRow(data[i] || {})
+
+      try {
+        let firstName = textOrNull(getRowValue(row, ['Nombre', 'firstName'])) || ''
+        let lastName = textOrNull(getRowValue(row, ['Apellidos', 'lastName'])) || ''
+
+        if (!firstName && !lastName) {
+          results.errors.push({ row: i + 2, error: 'Faltan Nombre y Apellidos' })
+          results.skipped++
+          continue
+        }
+
+        if (!firstName) firstName = 'SIN_NOMBRE'
+        if (!lastName) lastName = 'SIN_APELLIDOS'
+
+        const externalCode = textOrNull(
+          getRowValue(row, ['Nº Cliente', 'NCliente', 'Numero cliente', 'externalCode', 'Codigo cliente'])
+        )
+
+        const phone = textOrNull(getRowValue(row, ['Teléfono principal', 'Telefono principal', 'Telefono', 'phone']))
+          || textOrNull(getRowValue(row, ['Móvil', 'Movil', 'mobilePhone']))
+          || textOrNull(getRowValue(row, ['Teléfono fijo', 'Telefono fijo', 'landlinePhone']))
+          || `NO_PHONE_${externalCode || i}`
+
+        const mobilePhone = textOrNull(getRowValue(row, ['Móvil', 'Movil', 'mobilePhone']))
+        const landlinePhone = textOrNull(getRowValue(row, ['Teléfono fijo', 'Telefono fijo', 'landlinePhone']))
+
+        let emailRaw = textOrNull(getRowValue(row, ['Email', 'eMail', 'Correo electrónico', 'correo', 'mail']))
+        let email: string | null = null
+        if (emailRaw && emailRaw.includes('@') && emailRaw.includes('.')) {
+          const normalized = emailRaw.toLowerCase()
+          if (!seenEmails.has(normalized)) {
+            seenEmails.add(normalized)
+            email = normalized
+          }
+        }
+
+        const billedRaw = getRowValue(row, ['Importe facturado', 'billedAmount', 'Total facturado'])
+        const pendingRaw = getRowValue(row, ['Importe pendiente', 'pendingAmount', 'Deuda'])
+        const accountBalanceRaw = getRowValue(row, ['Saldo a cuenta', 'accountBalance', 'Abono'])
+        const birthMetadata = resolveBirthMetadata(row)
+        const linkedClientReference = textOrNull(
+          getRowValue(row, ['Cliente vinculado', 'Enlazar cliente', 'Referencia cliente vinculado', 'linkedClientReference'])
+        )
+        const debtAlertEnabled = parseBooleanValue(
+          getRowValue(row, ['Avisar deuda', 'Alerta deuda', 'debtAlertEnabled'])
+        )
+        const isActive = parseBooleanValue(getRowValue(row, ['Cliente activo', 'Activo', 'isActive']))
+
+        const clientPayload = normalizeClientPayload({
+          externalCode,
+          dni: getRowValue(row, ['DNI', 'dni']),
+          firstName,
+          lastName,
+          email,
+          phone,
+          mobilePhone,
+          landlinePhone,
+          gender: getRowValue(row, ['Sexo', 'gender']),
+          birthDate: birthMetadata.birthDate,
+          birthDay: birthMetadata.birthDay,
+          birthMonthNumber: birthMetadata.birthMonthNumber,
+          birthMonthName: birthMetadata.birthMonthName,
+          birthYear: birthMetadata.birthYear,
+          registrationDate: parseExcelDate(getRowValue(row, ['Fecha de alta', 'registrationDate'])),
+          lastVisit: parseExcelDate(getRowValue(row, ['Última visita', 'Ultima visita', 'lastVisit'])),
+          address: getRowValue(row, ['Dirección', 'Direccion', 'address']),
+          city: getRowValue(row, ['Ciudad', 'city']),
+          postalCode: getRowValue(row, ['CP', 'Código postal', 'Codigo postal', 'postalCode']),
+          province: getRowValue(row, ['Provincia', 'province']),
+          notes: getRowValue(row, ['Notas', 'Nota', 'Observaciones', 'notes']),
+          allergies: getRowValue(row, ['Alergias', 'allergies']),
+          gifts: getRowValue(row, ['Obsequios', 'gifts']),
+          activeTreatmentCount: getRowValue(row, [
+            'Nº tratamientos activos',
+            'Numero tratamientos activos',
+            'Número de Tratamientos activos',
+            'Numero de tratamientos activos',
+            'activeTreatmentCount'
+          ]),
+          activeTreatmentNames: getRowValue(row, [
+            'Tratamientos activos',
+            'Nombre de los tratamientos activos',
+            'Nombre tratamientos activos',
+            'activeTreatmentNames'
+          ]),
+          bondCount: getRowValue(row, [
+            'Nº abonos',
+            'Numero abonos',
+            'Número de abonos',
+            'Numero de abonos',
+            'bondCount'
+          ]),
+          giftVoucher: getRowValue(row, ['Cheque regalo', 'giftVoucher']),
+          serviceCount: getRowValue(row, ['Cantidad de servicios', 'Número de servicios', 'Numero de servicios', 'serviceCount']),
+          accountBalance: accountBalanceRaw,
+          billedAmount: billedRaw,
+          totalSpent: billedRaw,
+          pendingAmount: pendingRaw,
+          debtAlertEnabled: debtAlertEnabled ?? undefined,
+          linkedClientReference,
+          relationshipType: getRowValue(row, ['Parentesco', 'Tipo de relación', 'Tipo de relacion', 'relationshipType']),
+          isActive: isActive ?? true
+        })
+
+        const createdClient = await prisma.client.create({
+          data: clientPayload as Prisma.ClientCreateInput
+        })
+
+        addClientReferenceToLookup(linkedClientLookup, createdClient)
+
+        if (linkedClientReference) {
+          pendingLinks.push({
+            clientId: createdClient.id,
+            reference: linkedClientReference
+          })
+        }
+
+        results.success++
+      } catch (error: any) {
+        results.errors.push({ row: i + 2, error: error.message })
+        results.skipped++
+      }
+    }
+
+    for (const pendingLink of pendingLinks) {
+      const linkedClientId = linkedClientLookup.get(normalizeColumnKey(pendingLink.reference))
+      if (!linkedClientId || linkedClientId === pendingLink.clientId) continue
+
+      await prisma.client.update({
+        where: { id: pendingLink.clientId },
+        data: { linkedClientId }
+      })
+    }
+
+    res.json({ message: 'Import completed', results })
+  } catch (error) {
+    console.error('Import clients error:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 }

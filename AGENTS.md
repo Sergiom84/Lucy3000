@@ -2,7 +2,7 @@
 
 ## Contexto del proyecto
 Lucy3000 es una app de escritorio para gestión de estética.
-Combina Electron (main/preload), React + Vite (renderer) y un backend Express con Prisma sobre PostgreSQL (Supabase).
+Combina Electron (main/preload), React + Vite (renderer) y un backend Express con Prisma sobre SQLite local en el runtime actual. Las referencias a Supabase quedan como histórico o para flujos de backup/restore y despliegue remoto.
 
 ## Estado actual y fuentes de verdad
 Usa estas fuentes en este orden para decidir cómo trabajar:
@@ -16,7 +16,7 @@ Usa estas fuentes en este orden para decidir cómo trabajar:
 - Frontend: React 18, TypeScript, Vite, Tailwind, Zustand, Axios.
 - Desktop: Electron + `vite-plugin-electron`.
 - Backend: Express + TypeScript + Zod.
-- Datos: Prisma ORM + PostgreSQL (Supabase).
+- Datos: Prisma ORM + SQLite local por defecto. Supabase solo aparece en documentación histórica o flujos remotos específicos.
 - Tests: Vitest + Supertest (enfocados en backend).
 
 ## Estructura importante
@@ -47,7 +47,7 @@ Usa estas fuentes en este orden para decidir cómo trabajar:
 - `npm run prisma:studio`: inspección/edición manual de datos.
 - `npm run backup:analyze`: auditoría de backup.
 - `npm run backup:restore`: restauración desde backup.
-- `npm run db:rebuild`: reconstrucción de BD Supabase (script avanzado).
+- `npm run db:rebuild`: reconstrucción de BD Supabase histórica/remota (script avanzado).
 
 ## Flujo local recomendado
 1. Instalar dependencias: `npm install`.
@@ -66,7 +66,7 @@ Usa estas fuentes en este orden para decidir cómo trabajar:
   - `JWT_SECRET`
   - `PORT`
   - `NODE_ENV`
-- Variables Supabase para cliente/API:
+- Variables Supabase para cliente/API, solo si trabajas con un flujo remoto o histórico:
   - `SUPABASE_URL`
   - `SUPABASE_ANON_KEY`
   - `SUPABASE_SERVICE_KEY`

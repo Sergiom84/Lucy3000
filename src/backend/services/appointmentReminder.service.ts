@@ -1,9 +1,10 @@
-import { AppointmentStatus, Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 import { prisma } from '../db'
+import { getAppointmentDisplayName, getAppointmentDisplayPhone } from '../utils/customer-display'
 import { whatsappService } from './whatsapp.service'
 
 const WHATSAPP_SENT_NOTIFICATION_TYPE = 'WHATSAPP_REMINDER_SENT'
-const APPOINTMENT_REMINDER_STATUSES: AppointmentStatus[] = ['SCHEDULED', 'CONFIRMED']
+const APPOINTMENT_REMINDER_STATUSES: string[] = ['SCHEDULED', 'CONFIRMED']
 const DEFAULT_INTERVAL_MINUTES = 30
 
 const appointmentReminderInclude = {
@@ -126,10 +127,8 @@ class AppointmentReminderService {
       const title = reminderTitle(appointment.id)
       if (sentTitles.has(title)) continue
 
-      const phoneCandidate =
-        appointment.client.mobilePhone || appointment.client.phone || appointment.client.landlinePhone || ''
-
-      const clientName = `${appointment.client.firstName} ${appointment.client.lastName}`.trim()
+      const phoneCandidate = getAppointmentDisplayPhone(appointment)
+      const clientName = getAppointmentDisplayName(appointment)
       const result = await whatsappService.sendAppointmentReminder({
         appointmentId: appointment.id,
         clientName,

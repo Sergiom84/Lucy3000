@@ -4,21 +4,17 @@ Esta guía te ayudará a desplegar Lucy3000 en Render.
 
 ## 📋 Prerrequisitos
 
+> Nota: este documento cubre el despliegue remoto del backend. El runtime local de escritorio sigue usando SQLite por defecto; solo usa Supabase si vas a publicar una variante remota o a restaurar un histórico.
+
 1. Cuenta en [Render](https://render.com) (gratuita)
-2. Cuenta en [Supabase](https://supabase.com) (gratuita)
-3. Repositorio en GitHub con el código
+2. Repositorio en GitHub con el código
 
-## 🗄️ Paso 1: Configurar Supabase
+## 🗄️ Paso 1: Preparar la base de datos remota
 
-1. Crear un nuevo proyecto en Supabase
-2. Ir a Settings > Database y copiar:
-   - Connection String (URI)
-   - Host
-   - Database name
-   - Port
-   - User
-   - Password
+Si vas a desplegar un backend remoto, necesitas una base de datos persistente. Supabase es una opción histórica/compatible, pero no es la base activa del runtime local.
 
+1. Elegir proveedor de base de datos persistente
+2. Obtener la `DATABASE_URL`
 3. Ejecutar las migraciones de Prisma:
 
 ```bash
@@ -26,7 +22,7 @@ Esta guía te ayudará a desplegar Lucy3000 en Render.
 npm run prisma:migrate
 ```
 
-4. Crear usuario administrador inicial usando Prisma Studio o SQL:
+4. Crear usuario administrador inicial usando Prisma Studio o el flujo de seed que uses para esa base remota:
 
 ```sql
 INSERT INTO users (id, email, password, name, role, "isActive", "createdAt", "updatedAt")
@@ -77,9 +73,6 @@ En la sección "Environment" del servicio, agregar:
 
 ```
 DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
-SUPABASE_URL=https://[PROJECT-REF].supabase.co
-SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_KEY=your-service-key
 PORT=3001
 NODE_ENV=production
 JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
@@ -192,11 +185,10 @@ En Settings > Build & Deploy:
 - 512 MB RAM
 - Sin suspensión
 
-### Supabase Gratuito
+### Base de Datos Remota
 
-- 500 MB de base de datos
-- 1 GB de transferencia
-- 50,000 usuarios activos mensuales
+- Usa una base persistente externa si necesitas despliegue remoto.
+- No apoyes el backend remoto en la SQLite local del escritorio.
 
 ## 🐛 Solución de Problemas
 
@@ -214,11 +206,11 @@ app.listen(PORT, '0.0.0.0', () => {
 
 ### Error: "Database connection failed"
 
-**Causa:** DATABASE_URL incorrecta o Supabase inactivo
+**Causa:** `DATABASE_URL` incorrecta o la base remota no está accesible
 
 **Solución:**
-1. Verificar DATABASE_URL en variables de entorno
-2. Comprobar que Supabase esté activo
+1. Verificar `DATABASE_URL` en variables de entorno
+2. Comprobar conectividad con el proveedor de base de datos
 3. Verificar que las migraciones se ejecutaron
 
 ### Error: "Build failed"
@@ -286,7 +278,7 @@ app.use('/api/', limiter)
 
 ### Base de Datos
 
-- **Supabase**: Recomendado (actual)
+- **PostgreSQL gestionado**: opción recomendada para backend remoto
 - **PlanetScale**: MySQL serverless
 - **Neon**: PostgreSQL serverless
 - **MongoDB Atlas**: NoSQL
@@ -304,7 +296,7 @@ Si tienes problemas con el deployment:
 
 1. Revisar logs en Render
 2. Verificar variables de entorno
-3. Comprobar conexión a Supabase
+3. Comprobar conexión a la base de datos remota
 4. Consultar documentación de Render: https://render.com/docs
 
 ---

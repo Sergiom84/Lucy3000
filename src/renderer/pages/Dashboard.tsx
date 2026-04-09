@@ -138,7 +138,7 @@ export default function Dashboard() {
                     <Calendar className="w-5 h-5 text-primary-600" />
                     <div>
                       <p className="text-sm font-medium text-gray-900 dark:text-white">
-                        {appointment.client.firstName} {appointment.client.lastName}
+                        {appointment.displayName || 'Cliente puntual'}
                       </p>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
                         {appointment.service.name}
@@ -200,7 +200,7 @@ export default function Dashboard() {
                       {sale.saleNumber}
                     </td>
                     <td className="py-3 px-4 text-sm text-gray-900 dark:text-white">
-                      {sale.client ? `${sale.client.firstName} ${sale.client.lastName}` : 'Cliente anónimo'}
+                      {sale.displayName || 'Cliente anónimo'}
                     </td>
                     <td className="py-3 px-4 text-sm text-gray-500 dark:text-gray-400">
                       {formatDate(sale.date)}

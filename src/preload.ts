@@ -5,7 +5,19 @@ const electronAPI = {
   getVersion: () => ipcRenderer.invoke('app:getVersion'),
   getPath: (name: string) => ipcRenderer.invoke('app:getPath', name),
   quit: () => ipcRenderer.invoke('app:quit'),
-  createBackup: () => ipcRenderer.invoke('backup:create'),
+  logs: {
+    getFilePath: () => ipcRenderer.invoke('logs:getFilePath'),
+    openFolder: () => ipcRenderer.invoke('logs:openFolder')
+  },
+  backup: {
+    create: (destFolder?: string) => ipcRenderer.invoke('backup:create', destFolder),
+    restore: () => ipcRenderer.invoke('backup:restore'),
+    list: () => ipcRenderer.invoke('backup:list'),
+    selectFolder: () => ipcRenderer.invoke('backup:selectFolder'),
+    getConfig: () => ipcRenderer.invoke('backup:getConfig'),
+    setConfig: (config: { folder: string; autoEnabled: boolean; cronExpression: string }) =>
+      ipcRenderer.invoke('backup:setConfig', config)
+  },
   printPDF: (data: any) => ipcRenderer.invoke('print:pdf', data),
   clientAssets: {
     list: (payload: { clientId: string; clientName: string }) => ipcRenderer.invoke('clientAssets:list', payload),
@@ -53,7 +65,18 @@ declare global {
       getVersion: () => Promise<string>
       getPath: (name: string) => Promise<string>
       quit: () => Promise<void>
-      createBackup: () => Promise<{ success: boolean; message?: string }>
+      logs: {
+        getFilePath: () => Promise<string>
+        openFolder: () => Promise<{ success: boolean; path: string; error?: string }>
+      }
+      backup: {
+        create: (destFolder?: string) => Promise<{ success: boolean; message?: string; path?: string }>
+        restore: () => Promise<{ success: boolean; message?: string }>
+        list: () => Promise<{ success: boolean; backups: Array<{ name: string; date: string; size: number }> }>
+        selectFolder: () => Promise<{ canceled: boolean; folder?: string }>
+        getConfig: () => Promise<{ folder: string; autoEnabled: boolean; cronExpression: string }>
+        setConfig: (config: { folder: string; autoEnabled: boolean; cronExpression: string }) => Promise<{ success: boolean }>
+      }
       printPDF: (data: any) => Promise<{ success: boolean; error?: any }>
       clientAssets: {
         list: (payload: { clientId: string; clientName: string }) => Promise<any>

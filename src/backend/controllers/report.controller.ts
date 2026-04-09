@@ -1,12 +1,19 @@
 import { Request, Response } from 'express'
 import { prisma } from '../db'
 import { buildInclusiveDateRange } from '../utils/date-range'
+import {
+  buildCommercialPaymentMethodResponse,
+  buildTopProducts,
+  getCollectedRevenue,
+  getWorkPerformedRevenue,
+  saleAnalyticsInclude
+} from '../utils/sales-reporting'
 
 export const getSalesReport = async (req: Request, res: Response) => {
   try {
     const { startDate, endDate } = req.query
 
-    const where: any = {
+    const where: Record<string, unknown> = {
       status: 'COMPLETED'
     }
 
@@ -16,44 +23,21 @@ export const getSalesReport = async (req: Request, res: Response) => {
 
     const sales = await prisma.sale.findMany({
       where,
-      include: {
-        items: true,
-        client: true,
-        user: {
-          select: { name: true }
-        }
-      }
+      include: saleAnalyticsInclude
     })
 
-    // Calcular estadísticas
     const totalSales = sales.length
-    const totalRevenue = sales.reduce((sum, sale) => sum + Number(sale.total), 0)
-    const averageTicket = totalSales > 0 ? totalRevenue / totalSales : 0
-
-    // Ventas por método de pago
-    const paymentMethods = sales.reduce((acc: any, sale) => {
-      acc[sale.paymentMethod] = (acc[sale.paymentMethod] || 0) + Number(sale.total)
-      return acc
-    }, {})
-
-    // Productos más vendidos
-    const productSales: any = {}
-    sales.forEach(sale => {
-      sale.items.forEach(item => {
-        if (item.productId) {
-          productSales[item.description] = (productSales[item.description] || 0) + item.quantity
-        }
-      })
-    })
-
-    const topProducts = Object.entries(productSales)
-      .sort(([, a]: any, [, b]: any) => b - a)
-      .slice(0, 10)
-      .map(([name, quantity]) => ({ name, quantity }))
+    const collectedRevenue = getCollectedRevenue(sales)
+    const workPerformedRevenue = getWorkPerformedRevenue(sales)
+    const averageTicket = totalSales > 0 ? workPerformedRevenue / totalSales : 0
+    const paymentMethods = buildCommercialPaymentMethodResponse(sales)
+    const topProducts = buildTopProducts(sales)
 
     res.json({
       totalSales,
-      totalRevenue,
+      totalRevenue: workPerformedRevenue,
+      collectedRevenue,
+      workPerformedRevenue,
       averageTicket,
       paymentMethods,
       topProducts,
@@ -83,11 +67,10 @@ export const getClientReport = async (req: Request, res: Response) => {
     const totalSpent = clients.reduce((sum, client) => sum + Number(client.totalSpent), 0)
     const averageSpent = totalClients > 0 ? totalSpent / totalClients : 0
 
-    // Clientes top por gasto
     const topClients = clients
       .sort((a, b) => Number(b.totalSpent) - Number(a.totalSpent))
       .slice(0, 10)
-      .map(client => ({
+      .map((client) => ({
         id: client.id,
         name: `${client.firstName} ${client.lastName}`,
         totalSpent: client.totalSpent,
@@ -122,32 +105,29 @@ export const getProductReport = async (req: Request, res: Response) => {
     })
 
     const totalProducts = products.length
-    const totalValue = products.reduce((sum, product) => 
-      sum + (Number(product.price) * product.stock), 0
-    )
+    const totalValue = products.reduce((sum, product) => sum + Number(product.price) * product.stock, 0)
 
-    // Productos con stock bajo
     const lowStockProducts = products
-      .filter(p => p.stock <= p.minStock)
-      .map(p => ({
-        id: p.id,
-        name: p.name,
-        stock: p.stock,
-        minStock: p.minStock
-      }))
-
-    // Productos más vendidos
-    const productSales = products.map(product => {
-      const totalSold = product.stockMovements.reduce((sum, movement) => 
-        sum + movement.quantity, 0
-      )
-      return {
+      .filter((product) => product.stock <= product.minStock)
+      .map((product) => ({
         id: product.id,
         name: product.name,
-        totalSold,
-        revenue: totalSold * Number(product.price)
-      }
-    }).sort((a, b) => b.totalSold - a.totalSold).slice(0, 10)
+        stock: product.stock,
+        minStock: product.minStock
+      }))
+
+    const productSales = products
+      .map((product) => {
+        const totalSold = product.stockMovements.reduce((sum, movement) => sum + movement.quantity, 0)
+        return {
+          id: product.id,
+          name: product.name,
+          totalSold,
+          revenue: totalSold * Number(product.price)
+        }
+      })
+      .sort((a, b) => b.totalSold - a.totalSold)
+      .slice(0, 10)
 
     res.json({
       totalProducts,
@@ -165,7 +145,7 @@ export const getCashReport = async (req: Request, res: Response) => {
   try {
     const { startDate, endDate } = req.query
 
-    const where: any = {}
+    const where: Record<string, unknown> = {}
 
     if (startDate && endDate) {
       where.date = buildInclusiveDateRange(startDate as string, endDate as string)
@@ -183,8 +163,8 @@ export const getCashReport = async (req: Request, res: Response) => {
     let totalWithdrawals = 0
     let totalDeposits = 0
 
-    cashRegisters.forEach(register => {
-      register.movements.forEach(movement => {
+    cashRegisters.forEach((register) => {
+      register.movements.forEach((movement) => {
         const amount = Number(movement.amount)
         switch (movement.type) {
           case 'INCOME':
@@ -218,4 +198,3 @@ export const getCashReport = async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Internal server error' })
   }
 }
-

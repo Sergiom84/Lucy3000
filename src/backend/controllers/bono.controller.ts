@@ -3,8 +3,15 @@ import { Prisma } from '@prisma/client'
 import { Request, Response } from 'express'
 import * as XLSX from 'xlsx'
 import { prisma } from '../db'
+import { AuthRequest } from '../middleware/auth.middleware'
 import { AppointmentSyncInput, googleCalendarService } from '../services/googleCalendar.service'
 import { validateAppointmentSlot } from '../utils/appointment-validation'
+import {
+  getAppointmentDisplayEmail,
+  getAppointmentDisplayName,
+  getAppointmentDisplayPhone
+} from '../utils/customer-display'
+import { normalizeTopUpPaymentMethod } from '../utils/payment-breakdown'
 
 class AccountBalanceError extends Error {
   statusCode: number
@@ -173,6 +180,7 @@ const serializeMovement = (movement: {
   clientId: string
   saleId: string | null
   type: string
+  paymentMethod?: string | null
   operationDate: Date
   description: string
   referenceItem: string | null
@@ -242,8 +250,9 @@ const toAppointmentDateTime = (appointment: { date: Date; startTime: string }) =
 }
 
 const buildCalendarSyncInput = (appointment: AppointmentRecord): AppointmentSyncInput => {
-  const clientName = `${appointment.client.firstName} ${appointment.client.lastName}`.trim()
-  const phoneLine = appointment.client.phone ? `\nTelefono: ${appointment.client.phone}` : ''
+  const clientName = getAppointmentDisplayName(appointment, 'Cliente')
+  const phone = getAppointmentDisplayPhone(appointment)
+  const phoneLine = phone ? `\nTelefono: ${phone}` : ''
 
   return {
     appointmentId: appointment.id,
@@ -253,7 +262,7 @@ const buildCalendarSyncInput = (appointment: AppointmentRecord): AppointmentSync
     date: appointment.date,
     startTime: appointment.startTime,
     endTime: appointment.endTime,
-    clientEmail: appointment.client.email,
+    clientEmail: getAppointmentDisplayEmail(appointment),
     clientName
   }
 }
@@ -584,11 +593,12 @@ export const createBonoAppointment = async (req: Request, res: Response) => {
     const appointment = await persistCalendarSyncResult(createdAppointment.id, syncResult)
 
     if (appointmentPayload.reminder) {
+      const appointmentName = getAppointmentDisplayName(appointment, 'Cliente')
       await prisma.notification.create({
         data: {
           type: 'APPOINTMENT',
           title: 'Nueva cita programada desde bono',
-          message: `Cita con ${appointment.client.firstName} ${appointment.client.lastName} el ${new Date(appointment.date).toLocaleDateString()}`,
+          message: `Cita con ${appointmentName} el ${new Date(appointment.date).toLocaleDateString()}`,
           priority: 'NORMAL'
         }
       })
@@ -727,20 +737,69 @@ export const getAccountBalanceHistory = async (req: Request, res: Response) => {
   }
 }
 
-export const createAccountBalanceTopUp = async (req: Request, res: Response) => {
+export const getGlobalAccountBalanceHistory = async (req: Request, res: Response) => {
+  try {
+    const parsedLimit = Number.parseInt(String(req.query.limit ?? '300'), 10)
+    const limit = Number.isFinite(parsedLimit) ? Math.min(500, Math.max(1, parsedLimit)) : 300
+
+    const movements = await prisma.accountBalanceMovement.findMany({
+      include: {
+        client: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true
+          }
+        },
+        sale: {
+          select: {
+            id: true,
+            saleNumber: true,
+            paymentMethod: true
+          }
+        }
+      },
+      orderBy: [{ operationDate: 'desc' }, { createdAt: 'desc' }],
+      take: limit
+    })
+
+    res.json({
+      movements: movements.map((movement) => ({
+        ...serializeMovement(movement),
+        client: movement.client,
+        sale: movement.sale
+      }))
+    })
+  } catch (error) {
+    console.error('Get global account balance history error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const createAccountBalanceTopUp = async (req: AuthRequest, res: Response) => {
   try {
     const { clientId } = req.params
-    const { description, amount, operationDate, notes } = req.body
+    const { description, amount, paymentMethod, operationDate, notes } = req.body
 
     const parsedAmount = Number(amount)
     if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
       throw new AccountBalanceError(400, 'Amount must be greater than zero')
     }
 
+    const normalizedPaymentMethod = normalizeTopUpPaymentMethod(paymentMethod)
+    if (!normalizedPaymentMethod) {
+      throw new AccountBalanceError(400, 'Invalid payment method for top-up')
+    }
+
+    if (!req.user?.id) {
+      throw new AccountBalanceError(401, 'Unauthorized')
+    }
+    const userId = req.user.id
+
     const response = await prisma.$transaction(async (tx) => {
       const client = await tx.client.findUnique({
         where: { id: clientId },
-        select: { id: true, accountBalance: true }
+        select: { id: true, firstName: true, lastName: true, accountBalance: true }
       })
 
       if (!client) {
@@ -749,6 +808,7 @@ export const createAccountBalanceTopUp = async (req: Request, res: Response) => 
 
       const currentBalance = toNumber(client.accountBalance)
       const nextBalance = normalizeMoney(currentBalance + parsedAmount)
+      const operationAt = operationDate ? new Date(operationDate) : new Date()
 
       await tx.client.update({
         where: { id: clientId },
@@ -759,14 +819,36 @@ export const createAccountBalanceTopUp = async (req: Request, res: Response) => 
         data: {
           clientId,
           type: 'TOP_UP',
-          operationDate: operationDate ? new Date(operationDate) : new Date(),
+          paymentMethod: normalizedPaymentMethod,
+          operationDate: operationAt,
           description: String(description).trim(),
           referenceItem: null,
           amount: parsedAmount,
           balanceAfter: nextBalance,
           notes: notes || null
-        }
+        } as Prisma.AccountBalanceMovementUncheckedCreateInput
       })
+
+      const openCashRegister = await tx.cashRegister.findFirst({
+        where: { status: 'OPEN' },
+        select: { id: true }
+      })
+
+      if (openCashRegister) {
+        await tx.cashMovement.create({
+          data: {
+            cashRegisterId: openCashRegister.id,
+            userId,
+            type: 'INCOME',
+            paymentMethod: normalizedPaymentMethod,
+            amount: parsedAmount,
+            category: 'Abonos',
+            description: `Recarga de abono · ${client.firstName} ${client.lastName}`.trim(),
+            reference: String(description).trim(),
+            date: operationAt
+          }
+        })
+      }
 
       return {
         currentBalance: nextBalance,

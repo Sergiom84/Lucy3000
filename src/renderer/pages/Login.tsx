@@ -91,7 +91,7 @@ export default function Login() {
           {/* Demo credentials */}
           <div className="mt-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
             <p className="text-xs text-gray-600 dark:text-gray-400 text-center">
-              Demo: admin@lucy3000.com / admin123
+              Demo: admin@lucy3000.com / lucy3000
             </p>
           </div>
         </div>

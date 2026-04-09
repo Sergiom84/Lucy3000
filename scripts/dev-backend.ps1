@@ -52,6 +52,13 @@ function Get-DatabaseHostPort {
     [string]$DatabaseUrl
   )
 
+  if ($DatabaseUrl -like "file:*") {
+    return @{
+      Host = "sqlite"
+      Port = 0
+    }
+  }
+
   try {
     $uri = [System.Uri]$DatabaseUrl
   } catch {
@@ -263,7 +270,11 @@ if ([string]::IsNullOrWhiteSpace($env:DATABASE_URL)) {
 
 $effectiveDbTarget = Get-DatabaseHostPort -DatabaseUrl $env:DATABASE_URL
 if ($null -ne $effectiveDbTarget) {
-  Write-Host "Using DATABASE_URL host '$($effectiveDbTarget.Host):$($effectiveDbTarget.Port)'."
+  if ($effectiveDbTarget.Host -eq "sqlite") {
+    Write-Host "Using SQLite DATABASE_URL '$($env:DATABASE_URL)'."
+  } else {
+    Write-Host "Using DATABASE_URL host '$($effectiveDbTarget.Host):$($effectiveDbTarget.Port)'."
+  }
 } else {
   throw "DATABASE_URL has invalid format. Check .env/.env.development."
 }

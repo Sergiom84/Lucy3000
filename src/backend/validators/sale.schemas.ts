@@ -2,7 +2,9 @@ import { z } from 'zod'
 import { dateQuerySchema, optionalNullableTextSchema, uuidParamSchema } from './common.schemas'
 
 const saleStatusSchema = z.enum(['PENDING', 'COMPLETED', 'CANCELLED', 'REFUNDED'])
-const paymentMethodSchema = z.enum(['CASH', 'CARD', 'BIZUM', 'OTHER'])
+const paymentMethodSchema = z.enum(['CASH', 'CARD', 'BIZUM', 'ABONO', 'OTHER'])
+const professionalSchema = z.enum(['LUCY', 'TAMARA', 'CHEMA', 'OTROS'])
+const createSaleStatusSchema = z.enum(['PENDING', 'COMPLETED']).default('COMPLETED')
 
 const moneySchema = z.coerce.number().finite().min(0, 'Value cannot be negative')
 const positiveMoneySchema = z.coerce.number().finite().positive('Value must be greater than zero')
@@ -11,6 +13,7 @@ const saleItemSchema = z
   .object({
     productId: z.string().uuid('Invalid productId').nullable().optional(),
     serviceId: z.string().uuid('Invalid serviceId').nullable().optional(),
+    bonoTemplateId: z.string().uuid('Invalid bonoTemplateId').nullable().optional(),
     description: z.string().trim().min(1, 'Description is required').max(250, 'Description is too long'),
     quantity: z.coerce.number().int('Quantity must be an integer').positive('Quantity must be positive'),
     price: moneySchema
@@ -57,6 +60,8 @@ export const createSaleBodySchema = z
     discount: moneySchema.optional().default(0),
     tax: moneySchema.optional().default(0),
     paymentMethod: paymentMethodSchema,
+    status: createSaleStatusSchema,
+    professional: professionalSchema.default('LUCY'),
     accountBalanceUsage: accountBalanceUsageSchema.optional(),
     showInOfficialCash: z.boolean().optional().default(true),
     notes: optionalNullableTextSchema(1000),

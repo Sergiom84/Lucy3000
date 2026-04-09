@@ -13,8 +13,10 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../utils/api'
+import { getAppointmentColorTheme, TREATMENT_CATEGORY_LABELS } from '../utils/appointmentColors'
 import Modal from './Modal'
 import AppointmentForm from './AppointmentForm'
+import { getAppointmentDisplayName, getNameInitials } from '../../shared/customerDisplay'
 
 moment.locale('es')
 
@@ -36,30 +38,20 @@ const messages = {
   showMore: (total: number) => `+${total}`
 }
 
-const statusColors: Record<string, string> = {
-  SCHEDULED: '#64748b',
-  CONFIRMED: '#2563eb',
-  IN_PROGRESS: '#f59e0b',
-  COMPLETED: '#10b981',
-  CANCELLED: '#ef4444',
-  NO_SHOW: '#b91c1c'
-}
-
-const statusLabels: Record<string, string> = {
-  SCHEDULED: 'Programada',
-  CONFIRMED: 'Confirmada',
-  IN_PROGRESS: 'En progreso',
-  COMPLETED: 'Completada',
-  CANCELLED: 'Cancelada',
-  NO_SHOW: 'No asistio'
-}
-
 const cabinResources = [
   { resourceId: 'LUCY', resourceTitle: 'Lucy' },
   { resourceId: 'TAMARA', resourceTitle: 'Tamara' },
   { resourceId: 'CABINA_1', resourceTitle: 'Cabina 1' },
   { resourceId: 'CABINA_2', resourceTitle: 'Cabina 2' }
 ]
+
+const professionalLabels: Record<string, string> = {
+  LUCY: 'Lucy',
+  TAMARA: 'Tamara',
+  CHEMA: 'Chema',
+  OTROS: 'Otros'
+}
+const INACTIVE_STATUSES = new Set(['COMPLETED', 'CANCELLED', 'NO_SHOW'])
 
 interface ClientCalendarDockProps {
   onClose: () => void
@@ -71,7 +63,7 @@ function AppointmentEvent({ event }: { event: any }) {
   const durationMinutes = event.durationMinutes ?? 0
   const isTiny = durationMinutes <= 30
   const isCompact = durationMinutes > 30 && durationMinutes <= 60
-  const clientName = `${event.appointment.client.firstName} ${event.appointment.client.lastName}`
+  const clientName = getAppointmentDisplayName(event.appointment)
   const serviceName = event.appointment.service.name
   const timeRange = `${event.appointment.startTime} - ${event.appointment.endTime}`
 
@@ -169,7 +161,7 @@ export default function ClientCalendarDock({
         end.setHours(parseInt(endHours, 10), parseInt(endMinutes, 10), 0, 0)
 
         return {
-          title: `${appointment.client.firstName} ${appointment.client.lastName}`,
+          title: getAppointmentDisplayName(appointment),
           start,
           end,
           resourceId: appointment.cabin,
@@ -199,21 +191,26 @@ export default function ClientCalendarDock({
 
   const eventStyleGetter = useCallback(
     (event: any) => {
-      const backgroundColor = statusColors[event.appointment.status] || '#64748b'
+      const theme = getAppointmentColorTheme(
+        event.appointment.service?.category,
+        event.appointment.service?.name
+      )
       const isHighlighted = event.isHighlighted
       const durationMinutes = event.durationMinutes ?? 0
       const isTiny = durationMinutes <= 30
       const isCompact = durationMinutes > 30 && durationMinutes <= 60
+      const isInactive = INACTIVE_STATUSES.has(String(event.appointment.status || '').toUpperCase())
 
       return {
         style: {
-          backgroundColor,
+          backgroundColor: theme.background,
           borderRadius: isHighlighted ? '12px' : '10px',
-          color: '#fff',
+          color: theme.text,
           border: isHighlighted ? '2px solid #22d3ee' : '0',
           boxShadow: isHighlighted
             ? '0 0 12px rgba(34, 211, 238, 0.5)'
-            : '0 10px 24px rgba(15, 23, 42, 0.16)',
+            : `inset 0 0 0 1px ${theme.border}33`,
+          opacity: isInactive ? 0.74 : 1,
           padding: isTiny ? '1px 6px' : isCompact ? '2px 6px' : '4px 6px',
           transform: isHighlighted ? 'scale(1.02)' : 'scale(1)',
           transition: 'all 0.2s ease',
@@ -477,20 +474,26 @@ export default function ClientCalendarDock({
           </div>
         </div>
 
-        {/* Leyenda de estados */}
+        {/* Leyenda de tratamientos */}
         <div className="border-t border-white/10 bg-slate-900/50 px-5 py-3">
-          <p className="mb-2 text-[10px] uppercase tracking-[0.2em] text-slate-500">Estados</p>
+          <p className="mb-2 text-[10px] uppercase tracking-[0.2em] text-slate-500">Tratamientos</p>
           <div className="flex flex-wrap gap-2">
-            {Object.entries(statusColors).map(([status, color]) => (
-              <div key={status} className="flex items-center gap-1.5">
+            {TREATMENT_CATEGORY_LABELS.map((item) => {
+              const theme = getAppointmentColorTheme(item.label, item.label)
+              return (
+                <div key={item.key} className="flex items-center gap-1.5">
                 <span
                   className="h-2.5 w-2.5 rounded-full"
-                  style={{ backgroundColor: color }}
+                  style={{ backgroundColor: theme.background }}
                 />
-                <span className="text-[11px] text-slate-400">{statusLabels[status]}</span>
+                <span className="text-[11px] text-slate-400">{item.label}</span>
               </div>
-            ))}
+              )
+            })}
           </div>
+          <p className="mt-3 text-[11px] text-slate-400">
+            Cada cita toma el color de la categoria del tratamiento.
+          </p>
         </div>
       </div>
 
@@ -503,23 +506,46 @@ export default function ClientCalendarDock({
       >
         <div className="space-y-4">
           {editingAppointment?.id && (
-            <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
+            <div
+              className="flex items-center justify-between rounded-lg p-4"
+              style={{
+                backgroundColor: getAppointmentColorTheme(editingAppointment.service?.category, editingAppointment.service?.name).softBackground,
+                border: `1px solid ${getAppointmentColorTheme(editingAppointment.service?.category, editingAppointment.service?.name).border}`
+              }}
+            >
               <div className="flex items-center gap-4">
+                {(() => {
+                  const appointmentName = getAppointmentDisplayName(editingAppointment)
+                  return (
+                    <>
                 <div
                   className="h-10 w-10 rounded-full flex items-center justify-center text-white font-semibold"
-                  style={{ backgroundColor: statusColors[editingAppointment.status] || '#64748b' }}
+                  style={{ backgroundColor: getAppointmentColorTheme(editingAppointment.service?.category, editingAppointment.service?.name).background }}
                 >
-                  {editingAppointment.client.firstName?.[0]}
-                  {editingAppointment.client.lastName?.[0]}
+                  {getNameInitials(appointmentName)}
                 </div>
                 <div>
                   <p className="font-medium text-slate-900 dark:text-white">
-                    {editingAppointment.client.firstName} {editingAppointment.client.lastName}
+                    {appointmentName}
                   </p>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">
-                    {editingAppointment.service.name} - {cabinResources.find(r => r.resourceId === editingAppointment.cabin)?.resourceTitle}
-                  </p>
+                  <div className="mt-2 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+                    <div>
+                      <p className="text-slate-500 dark:text-slate-400">Profesional</p>
+                      <p className="font-medium text-slate-900 dark:text-white">
+                        {professionalLabels[editingAppointment.professional] || editingAppointment.professional || 'Lucy'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-slate-500 dark:text-slate-400">Hora de inicio</p>
+                      <p className="font-medium text-slate-900 dark:text-white">
+                        {editingAppointment.startTime}
+                      </p>
+                    </div>
+                  </div>
                 </div>
+                    </>
+                  )
+                })()}
               </div>
               <button
                 onClick={() => handleDeleteAppointment(editingAppointment.id)}

@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react'
-import { Save, X } from 'lucide-react'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { ChevronDown, Clock, Save, X } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '../stores/authStore'
@@ -37,6 +37,12 @@ type ClientBonoSummary = {
   sessions: Array<{ status: 'AVAILABLE' | 'CONSUMED' }>
 }
 
+const TIME_STEP_MINUTES = 15
+const BUSINESS_START_MINUTES = 9 * 60
+const BUSINESS_END_MINUTES = 21 * 60
+const BUSINESS_BREAK_START_MINUTES = 14 * 60
+const BUSINESS_BREAK_END_MINUTES = 16 * 60
+
 const professionalOptions = [
   { value: 'LUCY', label: 'Lucy' },
   { value: 'TAMARA', label: 'Tamara' },
@@ -50,6 +56,106 @@ const normalizeText = (value: unknown) =>
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim()
+
+const padTime = (value: number) => String(value).padStart(2, '0')
+
+const timeToMinutes = (value: string) => {
+  const [hours, minutes] = value.split(':').map(Number)
+  return (Number.isFinite(hours) ? hours : 0) * 60 + (Number.isFinite(minutes) ? minutes : 0)
+}
+
+const minutesToTime = (value: number) => {
+  const safeMinutes = Math.max(0, Math.floor(value))
+  const hours = Math.floor(safeMinutes / 60)
+  const minutes = safeMinutes % 60
+  return `${padTime(hours)}:${padTime(minutes)}`
+}
+
+const buildTimeOptions = (startMinutes: number, endMinutes: number) => {
+  const options: string[] = []
+  for (let minutes = startMinutes; minutes <= endMinutes; minutes += TIME_STEP_MINUTES) {
+    options.push(minutesToTime(minutes))
+  }
+  return options
+}
+
+const roundUpToTimeStep = (value: string) => {
+  const minutes = timeToMinutes(value)
+  const rounded = Math.ceil(minutes / TIME_STEP_MINUTES) * TIME_STEP_MINUTES
+  return rounded <= BUSINESS_END_MINUTES ? minutesToTime(rounded) : ''
+}
+
+const getLocalDateInputValue = (value: Date) => {
+  const year = value.getFullYear()
+  const month = padTime(value.getMonth() + 1)
+  const day = padTime(value.getDate())
+  return `${year}-${month}-${day}`
+}
+
+function TimeSelect({
+  value,
+  options,
+  onChange,
+  placeholder
+}: {
+  value: string
+  options: string[]
+  onChange: (value: string) => void
+  placeholder: string
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (!containerRef.current || containerRef.current.contains(event.target as Node)) return
+      setIsOpen(false)
+    }
+
+    document.addEventListener('mousedown', handleOutsideClick)
+    return () => document.removeEventListener('mousedown', handleOutsideClick)
+  }, [])
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        className="input flex items-center justify-between gap-3 text-left disabled:cursor-not-allowed disabled:opacity-70"
+        onClick={() => setIsOpen((prev) => !prev)}
+        aria-expanded={isOpen}
+      >
+        <span className={value ? 'text-gray-900 dark:text-white' : 'text-gray-400 dark:text-gray-500'}>
+          {value || placeholder}
+        </span>
+        <span className="flex items-center gap-2 text-gray-400 dark:text-gray-500">
+          <Clock className="h-4 w-4" />
+          <ChevronDown className="h-4 w-4" />
+        </span>
+      </button>
+
+      {isOpen && (
+        <div className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800">
+          {options.map((option) => (
+            <button
+              key={option}
+              type="button"
+              onMouseDown={(event) => {
+                event.preventDefault()
+                onChange(option)
+                setIsOpen(false)
+              }}
+              className={`w-full border-b border-gray-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700 ${
+                option === value ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-200' : 'text-gray-900 dark:text-white'
+              }`}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function SearchableSelect({
   value,
@@ -175,6 +281,9 @@ const cabinOptions = [
   { value: 'CABINA_2', label: 'Cabina 2' }
 ]
 
+const startTimeOptions = buildTimeOptions(BUSINESS_START_MINUTES, BUSINESS_END_MINUTES - TIME_STEP_MINUTES)
+const endTimeOptions = buildTimeOptions(BUSINESS_START_MINUTES + TIME_STEP_MINUTES, BUSINESS_END_MINUTES)
+
 const getRemainingSessions = (bonoPack: ClientBonoSummary) => {
   const consumed = bonoPack.sessions.filter((session) => session.status === 'CONSUMED').length
   return Math.max(Number(bonoPack.totalSessions || 0) - consumed, 0)
@@ -196,11 +305,16 @@ export default function AppointmentForm({
   const [clientBonos, setClientBonos] = useState<ClientBonoSummary[]>([])
 
   const isCreatingFromBono = !appointment && Boolean(fromBono?.bonoPackId)
+  const isEditingGuestAppointment = Boolean(appointment?.id) && !appointment?.clientId
   const lockClient = isCreatingFromBono && Boolean(fromBono?.lockClient)
   const lockService = isCreatingFromBono && Boolean(fromBono?.lockService)
+  const canToggleGuestMode = !appointment && !isCreatingFromBono
+  const [guestMode, setGuestMode] = useState(isEditingGuestAppointment)
 
   const [formData, setFormData] = useState({
     clientId: fromBono?.clientId || '',
+    guestName: '',
+    guestPhone: '',
     serviceId: fromBono?.serviceId || '',
     userId: user?.id || '',
     cabin: initialCabin,
@@ -213,6 +327,14 @@ export default function AppointmentForm({
     reminder: true
   })
 
+  const timeSelectStartOptions = useMemo(() => startTimeOptions, [])
+
+  const timeSelectEndOptions = useMemo(() => {
+    return formData.startTime
+      ? endTimeOptions.filter((option) => option > formData.startTime)
+      : endTimeOptions
+  }, [formData.startTime])
+
   useEffect(() => {
     fetchClients()
     fetchServices()
@@ -221,13 +343,16 @@ export default function AppointmentForm({
   useEffect(() => {
     if (appointment) {
       const appointmentDate = new Date(appointment.date)
+      setGuestMode(!appointment.clientId)
       setFormData({
         clientId: appointment.clientId || '',
+        guestName: appointment.guestName || '',
+        guestPhone: appointment.guestPhone || '',
         serviceId: appointment.serviceId || '',
         userId: appointment.userId || user?.id || '',
         cabin: appointment.cabin || initialCabin,
         professional: appointment.professional || 'LUCY',
-        date: appointmentDate.toISOString().split('T')[0],
+        date: getLocalDateInputValue(appointmentDate),
         startTime: appointment.startTime || '',
         endTime: appointment.endTime || '',
         status: appointment.status || 'SCHEDULED',
@@ -240,16 +365,22 @@ export default function AppointmentForm({
       return
     }
 
+    if (isCreatingFromBono) {
+      setGuestMode(false)
+    }
+
     setFormData((prev) => ({
       ...prev,
       clientId: fromBono?.clientId || prev.clientId,
+      guestName: isCreatingFromBono ? '' : prev.guestName,
+      guestPhone: isCreatingFromBono ? '' : prev.guestPhone,
       serviceId: fromBono?.serviceId || prev.serviceId,
       userId: user?.id || prev.userId || '',
       cabin: initialCabin,
       professional: prev.professional || 'LUCY',
-      date: preselectedDate ? preselectedDate.toISOString().split('T')[0] : prev.date
+      date: preselectedDate ? getLocalDateInputValue(preselectedDate) : prev.date
     }))
-  }, [appointment, preselectedDate, user, initialCabin, fromBono])
+  }, [appointment, preselectedDate, user, initialCabin, fromBono, isCreatingFromBono])
 
   useEffect(() => {
     if (!formData.clientId) {
@@ -330,7 +461,8 @@ export default function AppointmentForm({
       .filter((bonoPack) => bonoPack.status === 'ACTIVE' && bonoPack.remainingSessions > 0)
   }, [clientBonos])
 
-  const showClientFinancialSummary = Boolean(formData.clientId) && (accountBalance > 0 || activeBonos.length > 0)
+  const showClientFinancialSummary =
+    !guestMode && Boolean(formData.clientId) && (accountBalance > 0 || activeBonos.length > 0)
 
   const clientOptions = useMemo<SearchableOption[]>(() => {
     return clients.map((client) => {
@@ -371,11 +503,48 @@ export default function AppointmentForm({
     return `${startDate.getHours().toString().padStart(2, '0')}:${startDate.getMinutes().toString().padStart(2, '0')}`
   }
 
+  const getServiceEndTime = (startTime: string, duration: number) => {
+    const roundedEndTime = roundUpToTimeStep(calculateEndTime(startTime, duration))
+    return timeToMinutes(roundedEndTime) > BUSINESS_END_MINUTES ? '' : roundedEndTime
+  }
+
+  const getSuggestedEndTime = (startTime: string) => {
+    if (!startTime) return ''
+
+    if (selectedService?.duration) {
+      return getServiceEndTime(startTime, selectedService.duration)
+    }
+
+    const startMinutes = timeToMinutes(startTime)
+    return minutesToTime(Math.min(startMinutes + TIME_STEP_MINUTES, BUSINESS_END_MINUTES))
+  }
+
   const handleClientSelect = (clientId: string) => {
     if (lockClient) return
     setFormData((prev) => ({
       ...prev,
-      clientId
+      clientId,
+      guestName: '',
+      guestPhone: ''
+    }))
+  }
+
+  const handleGuestModeToggle = () => {
+    if (!canToggleGuestMode) return
+    setGuestMode(true)
+    setFormData((prev) => ({
+      ...prev,
+      clientId: ''
+    }))
+  }
+
+  const handleRegisteredModeToggle = () => {
+    if (!canToggleGuestMode) return
+    setGuestMode(false)
+    setFormData((prev) => ({
+      ...prev,
+      guestName: '',
+      guestPhone: ''
     }))
   }
 
@@ -387,7 +556,7 @@ export default function AppointmentForm({
     setFormData((prev) => ({
       ...prev,
       serviceId,
-      endTime: service && prev.startTime ? calculateEndTime(prev.startTime, service.duration) : prev.endTime
+      endTime: service && prev.startTime ? getServiceEndTime(prev.startTime, service.duration) : prev.endTime
     }))
   }
 
@@ -397,11 +566,33 @@ export default function AppointmentForm({
       ...prev,
       [name]: type === 'checkbox' ? (e.target as HTMLInputElement).checked : value
     }))
+  }
 
-    if (name === 'startTime' && selectedService) {
-      const endTime = calculateEndTime(value, selectedService.duration)
-      setFormData((prev) => ({ ...prev, endTime }))
+  const handleStartTimeSelect = (value: string) => {
+    const nextEndTime = getSuggestedEndTime(value)
+    setFormData((prev) => ({
+      ...prev,
+      startTime: value,
+      endTime: selectedService ? nextEndTime : (!prev.endTime || prev.endTime <= value ? nextEndTime : prev.endTime)
+    }))
+  }
+
+  const handleEndTimeSelect = (value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      endTime: value
+    }))
+  }
+
+  const showCalendarSyncWarning = (savedAppointment: any, successMessage: string) => {
+    const syncError = String(savedAppointment?.googleCalendarSyncError || '').trim()
+    if (savedAppointment?.googleCalendarSyncStatus !== 'ERROR' || !syncError) {
+      toast.success(successMessage)
+      return
     }
+
+    toast.success(successMessage)
+    toast(`${successMessage}, pero Google Calendar no se pudo sincronizar. ${syncError}`)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -410,8 +601,20 @@ export default function AppointmentForm({
     let requestPayload: Record<string, unknown> | null = null
 
     try {
-      if (!formData.clientId) {
+      if (!guestMode && !formData.clientId) {
         toast.error('Debe seleccionar un cliente')
+        setLoading(false)
+        return
+      }
+
+      if (guestMode && !formData.guestName.trim()) {
+        toast.error('Debe indicar el nombre del cliente puntual')
+        setLoading(false)
+        return
+      }
+
+      if (guestMode && !formData.guestPhone.trim()) {
+        toast.error('Debe indicar el telefono del cliente puntual')
         setLoading(false)
         return
       }
@@ -441,8 +644,16 @@ export default function AppointmentForm({
         return
       }
 
+      const startMinutes = timeToMinutes(formData.startTime)
+      const endMinutes = timeToMinutes(formData.endTime)
+      if (startMinutes < BUSINESS_START_MINUTES || endMinutes > BUSINESS_END_MINUTES) {
+        toast.error('El horario debe estar entre 09:00 y 21:00')
+        setLoading(false)
+        return
+      }
+
       // Validate not in the past
-      const todayStr = new Date().toISOString().split('T')[0]
+      const todayStr = getLocalDateInputValue(new Date())
       if (formData.date < todayStr) {
         toast.error('No se puede crear una cita en el pasado')
         setLoading(false)
@@ -451,16 +662,19 @@ export default function AppointmentForm({
       if (formData.date === todayStr) {
         const now = new Date()
         const nowMinutes = now.getHours() * 60 + now.getMinutes()
-        const [sh, sm] = formData.startTime.split(':').map(Number)
-        if (sh * 60 + sm < nowMinutes) {
-          toast.error('No se puede crear una cita en una hora que ya ha pasado')
+        if (startMinutes < nowMinutes) {
+          toast.error('No se puede crear una cita en el pasado')
           setLoading(false)
           return
         }
       }
 
+      const normalizedGuestName = formData.guestName.trim()
+      const normalizedGuestPhone = formData.guestPhone.trim()
       const dataToSend: Record<string, unknown> = {
-        clientId: formData.clientId,
+        clientId: guestMode ? null : formData.clientId,
+        guestName: guestMode ? normalizedGuestName : null,
+        guestPhone: guestMode ? normalizedGuestPhone : null,
         serviceId: formData.serviceId,
         userId: formData.userId || user?.id,
         cabin: formData.cabin,
@@ -475,8 +689,8 @@ export default function AppointmentForm({
       requestPayload = dataToSend
 
       if (appointment) {
-        await api.put(`/appointments/${appointment.id}`, dataToSend)
-        toast.success('Cita actualizada exitosamente')
+        const response = await api.put(`/appointments/${appointment.id}`, dataToSend)
+        showCalendarSyncWarning(response.data, 'Cita actualizada exitosamente')
       } else if (isCreatingFromBono && fromBono?.bonoPackId) {
         const bonoPayload = {
           userId: dataToSend.userId,
@@ -490,11 +704,11 @@ export default function AppointmentForm({
           notes: dataToSend.notes,
           reminder: dataToSend.reminder
         }
-        await api.post(`/bonos/${fromBono.bonoPackId}/appointments`, bonoPayload)
-        toast.success('Cita creada y sesion reservada')
+        const response = await api.post(`/bonos/${fromBono.bonoPackId}/appointments`, bonoPayload)
+        showCalendarSyncWarning(response.data, 'Cita creada y sesion reservada')
       } else {
-        await api.post('/appointments', dataToSend)
-        toast.success('Cita creada exitosamente')
+        const response = await api.post('/appointments', dataToSend)
+        showCalendarSyncWarning(response.data, 'Cita creada exitosamente')
       }
 
       onSuccess()
@@ -519,21 +733,76 @@ export default function AppointmentForm({
         </h3>
         <div className="space-y-4">
           <div>
-            <label className="label">
-              Cliente <span className="text-red-500">*</span>
-            </label>
-            <SearchableSelect
-              value={formData.clientId}
-              options={clientOptions}
-              onSelect={handleClientSelect}
-              placeholder="Buscar cliente por nombre, telefono o email..."
-              emptyText="No se encontraron clientes"
-              disabled={lockClient}
-            />
-            {lockClient && (
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Cliente fijado por el bono seleccionado.
-              </p>
+            <div className="flex items-center justify-between gap-3">
+              <label className="label">
+                Cliente <span className="text-red-500">*</span>
+              </label>
+              {canToggleGuestMode && !guestMode && (
+                <button
+                  type="button"
+                  onClick={handleGuestModeToggle}
+                  className="text-xs font-medium text-gray-500 transition hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-300"
+                >
+                  Cliente puntual
+                </button>
+              )}
+              {canToggleGuestMode && guestMode && (
+                <button
+                  type="button"
+                  onClick={handleRegisteredModeToggle}
+                  className="text-xs font-medium text-gray-500 transition hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-300"
+                >
+                  Usar cliente registrado
+                </button>
+              )}
+            </div>
+
+            {guestMode ? (
+              <div className="space-y-3 rounded-lg border border-dashed border-gray-200 bg-gray-50/70 p-3 dark:border-gray-700 dark:bg-gray-800/40">
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Cita para cliente puntual. No se creará ficha en el registro.
+                </p>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div>
+                    <label className="label">Nombre</label>
+                    <input
+                      type="text"
+                      name="guestName"
+                      value={formData.guestName}
+                      onChange={handleChange}
+                      className="input"
+                      placeholder="Nombre del cliente puntual"
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Telefono</label>
+                    <input
+                      type="text"
+                      name="guestPhone"
+                      value={formData.guestPhone}
+                      onChange={handleChange}
+                      className="input"
+                      placeholder="Telefono de contacto"
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                <SearchableSelect
+                  value={formData.clientId}
+                  options={clientOptions}
+                  onSelect={handleClientSelect}
+                  placeholder="Buscar cliente por nombre, telefono o email..."
+                  emptyText="No se encontraron clientes"
+                  disabled={lockClient}
+                />
+                {lockClient && (
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Cliente fijado por el bono seleccionado.
+                  </p>
+                )}
+              </>
             )}
           </div>
 
@@ -610,7 +879,7 @@ export default function AppointmentForm({
               value={formData.date}
               onChange={handleChange}
               className="input"
-              min={new Date().toISOString().split('T')[0]}
+              min={getLocalDateInputValue(new Date())}
               required
             />
           </div>
@@ -619,16 +888,11 @@ export default function AppointmentForm({
             <label className="label">
               Hora Inicio <span className="text-red-500">*</span>
             </label>
-            <input
-              type="time"
-              name="startTime"
+            <TimeSelect
               value={formData.startTime}
-              onChange={handleChange}
-              className="input"
-              min="09:00"
-              max="20:30"
-              step="900"
-              required
+              options={timeSelectStartOptions}
+              onChange={handleStartTimeSelect}
+              placeholder="09:00"
             />
           </div>
 
@@ -636,16 +900,11 @@ export default function AppointmentForm({
             <label className="label">
               Hora Fin <span className="text-red-500">*</span>
             </label>
-            <input
-              type="time"
-              name="endTime"
+            <TimeSelect
               value={formData.endTime}
-              onChange={handleChange}
-              className="input"
-              min="09:00"
-              max="21:00"
-              step="900"
-              required
+              options={timeSelectEndOptions}
+              onChange={handleEndTimeSelect}
+              placeholder="09:15"
             />
           </div>
           <div>
@@ -668,17 +927,21 @@ export default function AppointmentForm({
           </div>
         </div>
         {formData.startTime && (() => {
-          const [h, m] = formData.startTime.split(':').map(Number)
-          const mins = h * 60 + m
-          if (mins >= 840 && mins < 960) {
+          const mins = timeToMinutes(formData.startTime)
+          if (mins >= BUSINESS_BREAK_START_MINUTES && mins < BUSINESS_BREAK_END_MINUTES) {
             return (
-              <p className="text-sm text-amber-600 dark:text-amber-400 mt-2">
+              <p className="mt-2 text-sm text-amber-600 dark:text-amber-400">
                 Aviso: Esta hora esta fuera del horario habitual (descanso 14:00-16:00)
               </p>
             )
           }
           return null
         })()}
+        {selectedService?.duration && formData.startTime && !formData.endTime && (
+          <p className="mt-2 text-sm text-red-600 dark:text-red-400">
+            La duracion del servicio supera el horario de cierre. Elige una hora de inicio anterior.
+          </p>
+        )}
       </div>
 
       <div>

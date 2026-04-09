@@ -1,6 +1,25 @@
 import { PrismaClient } from '@prisma/client'
 
-const ACTIVE_STATUSES = ['SCHEDULED', 'CONFIRMED', 'IN_PROGRESS']
+export const ACTIVE_APPOINTMENT_STATUSES = ['SCHEDULED', 'CONFIRMED', 'IN_PROGRESS'] as const
+
+const BUSINESS_DAY_START_MINUTES = 9 * 60
+const BUSINESS_DAY_END_MINUTES = 21 * 60
+const BREAK_START_MINUTES = 14 * 60
+const BREAK_END_MINUTES = 16 * 60
+
+const PROFESSIONAL_LABELS: Record<string, string> = {
+  LUCY: 'Lucy',
+  TAMARA: 'Tamara',
+  CHEMA: 'Chema',
+  OTROS: 'Otros'
+}
+
+const CABIN_LABELS: Record<string, string> = {
+  LUCY: 'Lucy',
+  TAMARA: 'Tamara',
+  CABINA_1: 'Cabina 1',
+  CABINA_2: 'Cabina 2'
+}
 
 interface AppointmentSlotInput {
   date: Date
@@ -22,9 +41,31 @@ interface ValidationResult {
 }
 
 const timeToMinutes = (time: string): number => {
-  const [h, m] = time.split(':').map(Number)
-  return h * 60 + m
+  const [hours, minutes] = time.split(':').map(Number)
+  return hours * 60 + minutes
 }
+
+const startOfDay = (value: Date) => {
+  const date = new Date(value)
+  date.setHours(0, 0, 0, 0)
+  return date
+}
+
+const endOfDay = (value: Date) => {
+  const date = new Date(value)
+  date.setHours(23, 59, 59, 999)
+  return date
+}
+
+const formatProfessionalLabel = (professional: string) =>
+  PROFESSIONAL_LABELS[professional] || professional
+
+const formatCabinLabel = (cabin: string) => CABIN_LABELS[cabin] || cabin
+
+export const isActiveAppointmentStatus = (status: string | null | undefined) =>
+  ACTIVE_APPOINTMENT_STATUSES.includes(
+    String(status || '').toUpperCase() as (typeof ACTIVE_APPOINTMENT_STATUSES)[number]
+  )
 
 export async function validateAppointmentSlot(
   input: AppointmentSlotInput,
@@ -34,9 +75,10 @@ export async function validateAppointmentSlot(
   const warnings: ValidationIssue[] = []
 
   const { date, startTime, endTime, professional, cabin, excludeAppointmentId } = input
+  const startMinutes = timeToMinutes(startTime)
+  const endMinutes = timeToMinutes(endTime)
 
-  // 1. startTime must be before endTime
-  if (startTime >= endTime) {
+  if (startMinutes >= endMinutes) {
     errors.push({
       code: 'INVALID_TIME_RANGE',
       message: 'La hora de inicio debe ser anterior a la hora de fin'
@@ -44,21 +86,16 @@ export async function validateAppointmentSlot(
     return { errors, warnings }
   }
 
-  // 2. Hours must be within 09:00 - 21:00
-  if (startTime < '09:00' || endTime > '21:00') {
+  if (startMinutes < BUSINESS_DAY_START_MINUTES || endMinutes > BUSINESS_DAY_END_MINUTES) {
     errors.push({
       code: 'INVALID_HOURS',
-      message: 'El horario debe estar entre las 09:00 y las 21:00'
+      message: 'El horario debe estar entre 09:00 y 21:00'
     })
   }
 
-  // 3. Past date/time check
   const now = new Date()
-  const appointmentDate = new Date(date)
-  appointmentDate.setHours(0, 0, 0, 0)
-
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
+  const appointmentDate = startOfDay(date)
+  const today = startOfDay(now)
 
   if (appointmentDate < today) {
     errors.push({
@@ -67,38 +104,31 @@ export async function validateAppointmentSlot(
     })
   } else if (appointmentDate.getTime() === today.getTime()) {
     const nowMinutes = now.getHours() * 60 + now.getMinutes()
-    const startMinutes = timeToMinutes(startTime)
     if (startMinutes < nowMinutes) {
       errors.push({
         code: 'PAST_DATETIME',
-        message: 'No se puede crear una cita en una hora que ya ha pasado'
+        message: 'No se puede crear una cita en el pasado'
       })
     }
   }
 
-  // If we already have hard errors, skip DB queries
   if (errors.length > 0) {
     return { errors, warnings }
   }
 
-  // 4. Business hours warning (lunch gap 14:00-16:00)
-  const startMinutes = timeToMinutes(startTime)
-  if (startMinutes >= 840 && startMinutes < 960) {
+  if (startMinutes >= BREAK_START_MINUTES && startMinutes < BREAK_END_MINUTES) {
     warnings.push({
       code: 'OUTSIDE_BUSINESS_HOURS',
-      message: 'La hora seleccionada esta fuera del horario habitual (descanso 14:00-16:00)'
+      message: 'La hora seleccionada esta fuera del horario habitual (09:30-14:00 y 16:00-20:00)'
     })
   }
 
-  // 5. Professional and cabin conflict checks
-  const startOfDay = new Date(date)
-  startOfDay.setHours(0, 0, 0, 0)
-  const endOfDay = new Date(date)
-  endOfDay.setHours(23, 59, 59, 999)
+  const slotStart = startOfDay(date)
+  const slotEnd = endOfDay(date)
 
   const baseWhere = {
-    date: { gte: startOfDay, lte: endOfDay },
-    status: { in: ACTIVE_STATUSES },
+    date: { gte: slotStart, lte: slotEnd },
+    status: { in: [...ACTIVE_APPOINTMENT_STATUSES] },
     startTime: { lt: endTime },
     endTime: { gt: startTime },
     ...(excludeAppointmentId ? { id: { not: excludeAppointmentId } } : {})
@@ -107,25 +137,25 @@ export async function validateAppointmentSlot(
   const [professionalConflicts, cabinConflicts] = await Promise.all([
     prisma.appointment.findMany({
       where: { ...baseWhere, professional },
-      select: { startTime: true, endTime: true, service: { select: { name: true } }, client: { select: { firstName: true } } }
+      select: { startTime: true, endTime: true }
     }),
     prisma.appointment.findMany({
       where: { ...baseWhere, cabin },
-      select: { startTime: true, endTime: true, service: { select: { name: true } }, client: { select: { firstName: true } } }
+      select: { startTime: true, endTime: true }
     })
   ])
 
   for (const conflict of professionalConflicts) {
     errors.push({
       code: 'PROFESSIONAL_CONFLICT',
-      message: `${professional} ya tiene una cita de ${conflict.startTime} a ${conflict.endTime} (${conflict.service?.name || 'servicio'})`
+      message: `${formatProfessionalLabel(professional)} ya tiene una cita de ${conflict.startTime} a ${conflict.endTime}`
     })
   }
 
   for (const conflict of cabinConflicts) {
     errors.push({
       code: 'CABIN_CONFLICT',
-      message: `La cabina ${cabin} ya esta ocupada de ${conflict.startTime} a ${conflict.endTime} (${conflict.client?.firstName || 'cliente'})`
+      message: `La cabina ${formatCabinLabel(cabin)} ya esta ocupada de ${conflict.startTime} a ${conflict.endTime}`
     })
   }
 

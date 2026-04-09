@@ -12,6 +12,18 @@ type RetryableAxiosConfig = {
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+const serializeAxiosError = (error: any) => ({
+  code: error?.code ?? null,
+  message: error?.message ?? null,
+  status: error?.response?.status ?? null,
+  method: error?.config?.method ?? null,
+  url: error?.config?.url ?? null,
+  baseURL: error?.config?.baseURL ?? null,
+  params: error?.config?.params ?? null,
+  requestData: error?.config?.data ?? null,
+  responseData: error?.response?.data ?? null
+})
+
 const api = axios.create({
   baseURL: API_URL,
   headers: {
@@ -43,9 +55,15 @@ api.interceptors.response.use(
 
     if (error.code === 'ERR_NETWORK' && method === 'get' && config && retryCount < MAX_NETWORK_RETRIES) {
       config._networkRetryCount = retryCount + 1
+      console.warn('[api] Network error, retrying request', {
+        ...serializeAxiosError(error),
+        retryCount: config._networkRetryCount
+      })
       await wait(NETWORK_RETRY_DELAY_MS * config._networkRetryCount)
       return api.request(config)
     }
+
+    console.error('[api] Request failed', serializeAxiosError(error))
 
     if (error.response?.status === 401) {
       useAuthStore.getState().logout()

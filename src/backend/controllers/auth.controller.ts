@@ -1,12 +1,11 @@
 import { Request, Response } from 'express'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { UserRole } from '@prisma/client'
 import { prisma } from '../db'
 import { AuthRequest } from '../middleware/auth.middleware'
 import { getJwtSecret } from '../utils/jwt'
 
-const USER_ROLES: UserRole[] = ['ADMIN', 'MANAGER', 'EMPLOYEE']
+const USER_ROLES: string[] = ['ADMIN', 'MANAGER', 'EMPLOYEE']
 
 export const login = async (req: Request, res: Response) => {
   try {
@@ -70,8 +69,8 @@ export const register = async (req: Request, res: Response) => {
     }
 
     const normalizedEmail = String(email).trim().toLowerCase()
-    const sanitizedRole: UserRole =
-      USER_ROLES.includes(role as UserRole) ? (role as UserRole) : 'EMPLOYEE'
+    const sanitizedRole: string =
+      USER_ROLES.includes(role as string) ? (role as string) : 'EMPLOYEE'
 
     const existingUser = await prisma.user.findUnique({
       where: { email: normalizedEmail }

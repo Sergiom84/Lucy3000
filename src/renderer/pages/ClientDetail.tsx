@@ -22,7 +22,9 @@ import {
   FileText,
   FolderOpen,
   Printer,
-  StickyNote
+  StickyNote,
+  Plus,
+  Trash2
 } from 'lucide-react'
 import api from '../utils/api'
 import { formatCurrency, formatDate, formatPhone, formatDateTime, getInitials } from '../utils/format'
@@ -34,7 +36,7 @@ import {
   normalizeDesktopAssetUrl,
   printTicket
 } from '../utils/desktop'
-import { buildSaleTicketPayload, paymentMethodLabel } from '../utils/tickets'
+import { buildSaleTicketPayload, buildQuoteHtml, paymentMethodLabel } from '../utils/tickets'
 import toast from 'react-hot-toast'
 import Modal from '../components/Modal'
 import ClientForm from '../components/ClientForm'
@@ -46,16 +48,17 @@ import ClientAssetExplorer from '../components/ClientAssetExplorer'
 const toolbarItems = [
   { icon: CreditCard, label: 'Abonos', tab: 'abonos' as const },
   { icon: Ticket, label: 'Bonos', tab: 'bonos' as const },
+  { icon: FileText, label: 'Presupuestos', tab: 'quotes' as const },
   { icon: BarChart3, label: 'Análisis' },
   { icon: Scale, label: 'Control Peso' },
   { icon: ClipboardList, label: 'Ficha Bio' },
-  { icon: FileText, label: 'Plantillas' },
   { icon: FolderOpen, label: 'Documentos' }
 ]
 
 type AccountBalanceMovement = {
   id: string
   type: 'TOP_UP' | 'CONSUMPTION' | 'ADJUSTMENT'
+  paymentMethod?: 'CASH' | 'CARD' | 'BIZUM' | null
   operationDate: string
   description: string
   referenceItem?: string | null
@@ -86,21 +89,37 @@ const getSaleTreatmentLabel = (sale: any) => {
   return uniqueLabels.length > 0 ? uniqueLabels.join(', ') : 'Sin tratamiento'
 }
 
+const parseClientNotes = (notes: unknown) =>
+  String(notes || '')
+    .split(/\r?\n\s*\r?\n+/)
+    .map((note) => note.trim())
+    .filter(Boolean)
+
+const serializeClientNotes = (notes: string[]) => {
+  const normalizedNotes = notes.map((note) => note.trim()).filter(Boolean)
+  return normalizedNotes.length > 0 ? normalizedNotes.join('\n\n') : null
+}
+
 export default function ClientDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [client, setClient] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [showEditModal, setShowEditModal] = useState(false)
-  const [activeTab, setActiveTab] = useState<'overview' | 'appointments' | 'sales' | 'history' | 'bonos' | 'abonos'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'appointments' | 'sales' | 'history' | 'bonos' | 'abonos' | 'quotes'>('overview')
+  const [clientQuotes, setClientQuotes] = useState<any[]>([])
+  const [quotesLoading, setQuotesLoading] = useState(false)
   const [clientAssets, setClientAssets] = useState<ClientAssetsResponse | null>(null)
   const [assetsLoading, setAssetsLoading] = useState(false)
   const [accountBalanceHistory, setAccountBalanceHistory] = useState<AccountBalanceMovement[]>([])
   const [accountBalanceLoading, setAccountBalanceLoading] = useState(false)
   const [accountBalanceSaving, setAccountBalanceSaving] = useState(false)
+  const [noteDraft, setNoteDraft] = useState('')
+  const [noteSaving, setNoteSaving] = useState(false)
   const [accountBalanceDraft, setAccountBalanceDraft] = useState({
     description: '',
     amount: '',
+    paymentMethod: 'CASH' as 'CASH' | 'CARD' | 'BIZUM',
     operationDate: accountBalanceDateInput(),
     notes: ''
   })
@@ -119,6 +138,7 @@ export default function ClientDetail() {
       const response = await api.get(`/clients/${id}`)
       setClient(response.data)
       void fetchAccountBalanceHistory(response.data.id)
+      void fetchClientQuotes(response.data.id)
       if (isDesktop()) {
         setAssetsLoading(true)
         try {
@@ -153,6 +173,43 @@ export default function ClientDetail() {
       setAccountBalanceHistory([])
     } finally {
       setAccountBalanceLoading(false)
+    }
+  }
+
+  const fetchClientQuotes = async (clientId: string) => {
+    try {
+      setQuotesLoading(true)
+      const response = await api.get(`/quotes/client/${clientId}`)
+      setClientQuotes(Array.isArray(response.data) ? response.data : [])
+    } catch (error) {
+      console.error('Error loading quotes:', error)
+      toast.error('No se pudieron cargar los presupuestos')
+      setClientQuotes([])
+    } finally {
+      setQuotesLoading(false)
+    }
+  }
+
+  const handlePrintQuote = (quote: any) => {
+    const quoteHtml = buildQuoteHtml(quote)
+    const printWindow = window.open('', '_blank', 'width=800,height=600')
+    if (printWindow) {
+      printWindow.document.write(quoteHtml)
+      printWindow.document.close()
+      printWindow.focus()
+      printWindow.print()
+    }
+  }
+
+  const handleDeleteQuote = async (quoteId: string) => {
+    if (!confirm('¿Eliminar este presupuesto?')) return
+    try {
+      await api.delete(`/quotes/${quoteId}`)
+      toast.success('Presupuesto eliminado')
+      if (client?.id) await fetchClientQuotes(client.id)
+    } catch (error: any) {
+      console.error('Error deleting quote:', error)
+      toast.error(error.response?.data?.error || 'No se pudo eliminar el presupuesto')
     }
   }
 
@@ -201,6 +258,8 @@ export default function ClientDetail() {
     return normalizeDesktopAssetUrl(client?.photoUrl) || null
   }, [clientAssets, client?.photoUrl])
 
+  const clientNotes = useMemo(() => parseClientNotes(client?.notes), [client?.notes])
+
   const handleConsumeBonoSession = async (bonoPackId: string) => {
     try {
       await api.put(`/bonos/${bonoPackId}/consume`)
@@ -221,6 +280,59 @@ export default function ClientDetail() {
     } catch (error: any) {
       console.error('Error deleting bono:', error)
       toast.error(error.response?.data?.error || 'No se pudo eliminar el bono')
+    }
+  }
+
+  const persistClientNotes = async (nextNotes: string[]) => {
+    if (!client?.id) return false
+
+    try {
+      setNoteSaving(true)
+      const response = await api.put(`/clients/${client.id}`, {
+        notes: serializeClientNotes(nextNotes)
+      })
+
+      setClient((current: any) =>
+        current
+          ? {
+              ...current,
+              notes: response.data?.notes ?? null,
+              updatedAt: response.data?.updatedAt ?? current.updatedAt
+            }
+          : current
+      )
+
+      return true
+    } catch (error: any) {
+      console.error('Error saving client notes:', error)
+      toast.error(error.response?.data?.error || 'No se pudieron guardar las notas')
+      return false
+    } finally {
+      setNoteSaving(false)
+    }
+  }
+
+  const handleAddClientNote = async () => {
+    const nextNote = noteDraft.trim()
+    if (!nextNote) {
+      toast.error('Escribe una nota antes de añadirla')
+      return
+    }
+
+    const saved = await persistClientNotes([...clientNotes, nextNote])
+    if (!saved) return
+
+    setNoteDraft('')
+    toast.success('Nota añadida')
+  }
+
+  const handleDeleteClientNote = async (noteIndex: number) => {
+    if (!clientNotes[noteIndex]) return
+    if (!confirm('¿Eliminar esta nota?')) return
+
+    const saved = await persistClientNotes(clientNotes.filter((_, index) => index !== noteIndex))
+    if (saved) {
+      toast.success('Nota eliminada')
     }
   }
 
@@ -248,6 +360,7 @@ export default function ClientDetail() {
       await api.post(`/bonos/account-balance/${client.id}/top-up`, {
         description: accountBalanceDraft.description.trim(),
         amount: parsedAmount,
+        paymentMethod: accountBalanceDraft.paymentMethod,
         operationDate: accountBalanceDraft.operationDate,
         notes: accountBalanceDraft.notes.trim() || null
       })
@@ -255,6 +368,7 @@ export default function ClientDetail() {
       setAccountBalanceDraft({
         description: '',
         amount: '',
+        paymentMethod: 'CASH',
         operationDate: accountBalanceDateInput(),
         notes: ''
       })
@@ -329,6 +443,7 @@ export default function ClientDetail() {
     { id: 'sales', label: 'Ventas', icon: ShoppingBag, count: client.sales?.length || 0 },
     { id: 'abonos', label: 'Abonos', icon: CreditCard, count: accountBalanceHistory.length },
     { id: 'bonos', label: 'Bonos', icon: Ticket, count: clientBonoPacks.length },
+    { id: 'quotes', label: 'Presupuestos', icon: FileText, count: clientQuotes.length },
     { id: 'history', label: 'Historial', icon: History, count: client.clientHistory?.length || 0 }
   ]
 
@@ -431,25 +546,45 @@ export default function ClientDetail() {
             </div>
 
             {/* Allergies */}
-            {client.allergies && (
-              <div className="mb-3 p-2.5 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-                <div className="flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
-                  <div>
-                    <span className="text-sm font-semibold text-red-700 dark:text-red-400">ALERGIAS: </span>
-                    <span className="text-sm text-red-700 dark:text-red-300">{client.allergies}</span>
-                  </div>
+            <div
+              className={`mb-3 rounded-xl border px-4 py-3 ${
+                client.allergies
+                  ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
+                  : 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800/60'
+              }`}
+            >
+              <div className="flex items-start gap-3">
+                <div
+                  className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${
+                    client.allergies
+                      ? 'bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400'
+                      : 'bg-gray-200 text-gray-500 dark:bg-gray-700 dark:text-gray-300'
+                  }`}
+                >
+                  <AlertTriangle className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <p
+                    className={`text-xs font-semibold uppercase tracking-[0.18em] ${
+                      client.allergies
+                        ? 'text-red-700 dark:text-red-400'
+                        : 'text-gray-500 dark:text-gray-400'
+                    }`}
+                  >
+                    Alergias
+                  </p>
+                  <p
+                    className={`mt-1 text-sm whitespace-pre-wrap ${
+                      client.allergies
+                        ? 'text-red-700 dark:text-red-200'
+                        : 'text-gray-600 dark:text-gray-300'
+                    }`}
+                  >
+                    {client.allergies || 'Sin alergias registradas'}
+                  </p>
                 </div>
               </div>
-            )}
-
-            {/* Notes */}
-            {client.notes && (
-              <div className="mb-3 flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400">
-                <StickyNote className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                <p className="line-clamp-2">{client.notes}</p>
-              </div>
-            )}
+            </div>
 
             {/* Stats row */}
             <div className="border-t border-gray-200 dark:border-gray-700 pt-3 mt-3">
@@ -546,7 +681,7 @@ export default function ClientDetail() {
       {/* Tab Content */}
       <div>
         {activeTab === 'overview' && (
-          <div className="grid gap-6 xl:grid-cols-[minmax(280px,0.78fr)_minmax(0,1.22fr)]">
+          <div className="grid gap-6 xl:grid-cols-[minmax(260px,0.6fr)_minmax(0,1.4fr)]">
             <div className="card">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                 Resumen General
@@ -592,6 +727,73 @@ export default function ClientDetail() {
                     </p>
                   </div>
                 )}
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <div className="flex items-center gap-2">
+                      <StickyNote className="w-4 h-4 text-primary-600" />
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white">Notas</p>
+                    </div>
+                    <span className="badge badge-secondary">{clientNotes.length}</span>
+                  </div>
+
+                  <div className="space-y-3">
+                    <textarea
+                      value={noteDraft}
+                      onChange={(event) => setNoteDraft(event.target.value)}
+                      className="input resize-none min-h-[96px]"
+                      rows={4}
+                      placeholder="Escribe una nueva nota del cliente..."
+                      disabled={noteSaving}
+                    />
+
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Pulsa una nota guardada para eliminarla.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => void handleAddClientNote()}
+                        className="btn btn-primary btn-sm"
+                        disabled={noteSaving || !noteDraft.trim()}
+                      >
+                        <Plus className="w-4 h-4 mr-2" />
+                        {noteSaving ? 'Guardando...' : 'Añadir nota'}
+                      </button>
+                    </div>
+
+                    {clientNotes.length > 0 ? (
+                      <div className="space-y-2">
+                        {clientNotes.map((note, index) => (
+                          <button
+                            key={`${note}-${index}`}
+                            type="button"
+                            onClick={() => void handleDeleteClientNote(index)}
+                            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-left transition hover:border-red-200 hover:bg-red-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:border-red-900 dark:hover:bg-red-950/20"
+                            disabled={noteSaving}
+                            title="Eliminar nota"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-start gap-3">
+                                <StickyNote className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary-600" />
+                                <p className="text-sm text-gray-700 dark:text-gray-200 whitespace-pre-wrap">
+                                  {note}
+                                </p>
+                              </div>
+                              <span className="inline-flex items-center gap-1 text-xs font-medium text-red-600 dark:text-red-400">
+                                <Trash2 className="h-3.5 w-3.5" />
+                                Eliminar
+                              </span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-gray-300 px-4 py-5 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                        Todavía no hay notas guardadas para este cliente.
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -807,8 +1009,8 @@ export default function ClientDetail() {
                 </span>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="md:col-span-2">
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="md:col-span-3">
                   <label className="label">Descripción</label>
                   <input
                     type="text"
@@ -843,7 +1045,24 @@ export default function ClientDetail() {
                     className="input"
                   />
                 </div>
-                <div className="md:col-span-2">
+                <div>
+                  <label className="label">Cobrado mediante</label>
+                  <select
+                    value={accountBalanceDraft.paymentMethod}
+                    onChange={(event) =>
+                      setAccountBalanceDraft((current) => ({
+                        ...current,
+                        paymentMethod: event.target.value as 'CASH' | 'CARD' | 'BIZUM'
+                      }))
+                    }
+                    className="input"
+                  >
+                    <option value="CASH">Efectivo</option>
+                    <option value="CARD">Tarjeta</option>
+                    <option value="BIZUM">Bizum</option>
+                  </select>
+                </div>
+                <div className="md:col-span-3">
                   <label className="label">Notas</label>
                   <textarea
                     value={accountBalanceDraft.notes}
@@ -916,6 +1135,11 @@ export default function ClientDetail() {
                                 Tratamiento / Producto: {movement.referenceItem}
                               </p>
                             )}
+                            {movement.type === 'TOP_UP' && movement.paymentMethod && (
+                              <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                                Cobrado mediante: {paymentMethodLabel(movement.paymentMethod)}
+                              </p>
+                            )}
                             {movement.notes && (
                               <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
                                 Notas: {movement.notes}
@@ -974,6 +1198,91 @@ export default function ClientDetail() {
               ) : (
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   Este cliente todavía no tiene bonos asignados.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'quotes' && (
+          <div className="space-y-6">
+            <div className="card">
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Presupuestos emitidos</h3>
+                <span className="badge badge-secondary">{clientQuotes.length}</span>
+              </div>
+
+              {quotesLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+                </div>
+              ) : clientQuotes.length > 0 ? (
+                <div className="space-y-3">
+                  {clientQuotes.map((quote: any) => {
+                    const isExpired = new Date(quote.validUntil) < new Date() && quote.status === 'ISSUED'
+                    const statusLabel: Record<string, string> = {
+                      ISSUED: isExpired ? 'Expirado' : 'Emitido',
+                      ACCEPTED: 'Aceptado',
+                      EXPIRED: 'Expirado',
+                      CANCELLED: 'Cancelado'
+                    }
+                    const statusColor: Record<string, string> = {
+                      ISSUED: isExpired ? 'text-red-600' : 'text-blue-600',
+                      ACCEPTED: 'text-green-600',
+                      EXPIRED: 'text-red-600',
+                      CANCELLED: 'text-gray-500'
+                    }
+                    const itemLabels = (quote.items || [])
+                      .map((item: any) => String(item.service?.name || item.product?.name || item.description || '').trim())
+                      .filter(Boolean)
+                      .join(', ')
+
+                    return (
+                      <div key={quote.id} className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                        <div className="flex items-start justify-between mb-2">
+                          <div>
+                            <p className="font-semibold text-gray-900 dark:text-white">
+                              {quote.quoteNumber}
+                            </p>
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                              {itemLabels || 'Sin detalle'}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                              {formatDate(quote.date)} — Válido hasta: {formatDate(quote.validUntil)}
+                            </p>
+                            <p className="text-xs mt-1">
+                              Profesional: <strong>{quote.professional}</strong>
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-bold text-primary-600">{formatCurrency(Number(quote.total))}</p>
+                            <p className={`text-xs font-medium ${statusColor[quote.status] || 'text-gray-500'}`}>
+                              {statusLabel[quote.status] || quote.status}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2 mt-3">
+                          <button
+                            onClick={() => handlePrintQuote(quote)}
+                            className="btn btn-sm btn-primary"
+                          >
+                            <Printer className="w-3 h-3 mr-1" />
+                            Imprimir
+                          </button>
+                          <button
+                            onClick={() => void handleDeleteQuote(quote.id)}
+                            className="btn btn-sm btn-secondary text-red-600"
+                          >
+                            Eliminar
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Este cliente no tiene presupuestos emitidos.
                 </p>
               )}
             </div>

@@ -98,11 +98,12 @@ describe('API smoke tests', () => {
 
   it('POST /api/appointments accepts cabin payload and creates appointment', async () => {
     prismaMock.googleCalendarConfig.findFirst.mockResolvedValue(null)
+    prismaMock.appointment.findMany.mockResolvedValue([])
     prismaMock.appointment.create.mockResolvedValue({
       id: 'appointment-1',
       cabin: 'TAMARA',
       reminder: false,
-      date: new Date('2026-03-07T10:00:00.000Z'),
+      date: new Date('2099-03-07T10:00:00.000Z'),
       client: { firstName: 'Ana', lastName: 'Lopez', phone: '600000000', email: null },
       user: { id: 'user-1', name: 'Lucy', email: 'admin@lucy3000.com' },
       service: { id: 'service-1', name: 'Limpieza facial' },
@@ -113,7 +114,7 @@ describe('API smoke tests', () => {
       id: 'appointment-1',
       cabin: 'TAMARA',
       reminder: false,
-      date: new Date('2026-03-07T10:00:00.000Z'),
+      date: new Date('2099-03-07T10:00:00.000Z'),
       client: { firstName: 'Ana', lastName: 'Lopez', phone: '600000000', email: null },
       user: { id: 'user-1', name: 'Lucy', email: 'admin@lucy3000.com' },
       service: { id: 'service-1', name: 'Limpieza facial' },
@@ -131,7 +132,7 @@ describe('API smoke tests', () => {
         userId: '4adf3ca8-c749-4f40-9f2e-54a8ff0f8f58',
         serviceId: '3adf3ca8-c749-4f40-9f2e-54a8ff0f8f59',
         cabin: 'TAMARA',
-        date: '2026-03-07T10:00:00.000Z',
+        date: '2099-03-07T10:00:00.000Z',
         startTime: '10:00',
         endTime: '10:30',
         status: 'SCHEDULED',
@@ -142,8 +143,67 @@ describe('API smoke tests', () => {
     expect(response.body).toEqual(expect.objectContaining({ id: 'appointment-1', cabin: 'TAMARA' }))
   })
 
+  it('POST /api/appointments accepts guest payload and creates appointment', async () => {
+    prismaMock.googleCalendarConfig.findFirst.mockResolvedValue(null)
+    prismaMock.appointment.findMany.mockResolvedValue([])
+    prismaMock.appointment.create.mockResolvedValue({
+      id: 'appointment-guest-1',
+      clientId: null,
+      guestName: 'Cliente puntual',
+      guestPhone: '600123123',
+      cabin: 'LUCY',
+      reminder: true,
+      date: new Date('2099-03-07T10:00:00.000Z'),
+      client: null,
+      user: { id: 'user-1', name: 'Lucy', email: 'admin@lucy3000.com' },
+      service: { id: 'service-1', name: 'Limpieza facial' },
+      sale: null,
+      googleCalendarEventId: null
+    })
+    prismaMock.appointment.update.mockResolvedValue({
+      id: 'appointment-guest-1',
+      clientId: null,
+      guestName: 'Cliente puntual',
+      guestPhone: '600123123',
+      cabin: 'LUCY',
+      reminder: true,
+      date: new Date('2099-03-07T10:00:00.000Z'),
+      client: null,
+      user: { id: 'user-1', name: 'Lucy', email: 'admin@lucy3000.com' },
+      service: { id: 'service-1', name: 'Limpieza facial' },
+      sale: null,
+      googleCalendarEventId: null,
+      googleCalendarSyncStatus: 'DISABLED',
+      googleCalendarSyncError: null
+    })
+    prismaMock.notification.create.mockResolvedValue(undefined)
+
+    const response = await request(app)
+      .post('/api/appointments')
+      .set('Authorization', createAuthHeader())
+      .send({
+        clientId: null,
+        guestName: 'Cliente puntual',
+        guestPhone: '600123123',
+        userId: '4adf3ca8-c749-4f40-9f2e-54a8ff0f8f58',
+        serviceId: '3adf3ca8-c749-4f40-9f2e-54a8ff0f8f59',
+        cabin: 'LUCY',
+        date: '2099-03-07T10:00:00.000Z',
+        startTime: '10:00',
+        endTime: '10:30',
+        status: 'SCHEDULED',
+        reminder: true
+      })
+
+    expect(response.status).toBe(201)
+    expect(response.body).toEqual(
+      expect.objectContaining({ id: 'appointment-guest-1', guestName: 'Cliente puntual' })
+    )
+  })
+
   it('POST /api/bonos/:bonoPackId/appointments reserves a bono session and creates appointment', async () => {
     prismaMock.googleCalendarConfig.findFirst.mockResolvedValue(null)
+    prismaMock.appointment.findMany.mockResolvedValue([])
     prismaMock.bonoPack.findUnique.mockResolvedValue({
       id: '3adf3ca8-c749-4f40-9f2e-54a8ff0f8f57',
       clientId: '3adf3ca8-c749-4f40-9f2e-54a8ff0f8f56',
@@ -162,7 +222,7 @@ describe('API smoke tests', () => {
           id: 'appointment-from-bono-1',
           cabin: 'LUCY',
           reminder: true,
-          date: new Date('2026-03-20T10:00:00.000Z'),
+          date: new Date('2099-03-20T10:00:00.000Z'),
           startTime: '10:00',
           endTime: '10:30',
           status: 'SCHEDULED',
@@ -184,7 +244,7 @@ describe('API smoke tests', () => {
       id: 'appointment-from-bono-1',
       cabin: 'LUCY',
       reminder: true,
-      date: new Date('2026-03-20T10:00:00.000Z'),
+      date: new Date('2099-03-20T10:00:00.000Z'),
       startTime: '10:00',
       endTime: '10:30',
       status: 'SCHEDULED',
@@ -205,7 +265,7 @@ describe('API smoke tests', () => {
       .send({
         userId: '4adf3ca8-c749-4f40-9f2e-54a8ff0f8f58',
         cabin: 'LUCY',
-        date: '2026-03-20T10:00:00.000Z',
+        date: '2099-03-20T10:00:00.000Z',
         startTime: '10:00',
         endTime: '10:30',
         status: 'SCHEDULED',
@@ -214,6 +274,109 @@ describe('API smoke tests', () => {
 
     expect(response.status).toBe(201)
     expect(response.body).toEqual(expect.objectContaining({ id: 'appointment-from-bono-1' }))
+  })
+
+  it('POST /api/sales accepts guest appointment charge with null clientId', async () => {
+    const tx: any = {
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      appointment: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'appointment-guest-1',
+          clientId: null,
+          guestName: 'Cliente puntual',
+          client: null,
+          sale: null
+        }),
+        update: vi.fn().mockResolvedValue(undefined)
+      },
+      sale: {
+        findFirst: vi.fn().mockResolvedValue({ saleNumber: 'V-000009' }),
+        create: vi.fn().mockResolvedValue({
+          id: 'sale-guest-1',
+          clientId: null,
+          appointmentId: 'appointment-guest-1',
+          saleNumber: 'V-000010',
+          total: 35,
+          paymentMethod: 'CASH',
+          showInOfficialCash: true,
+          client: null,
+          items: []
+        }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'sale-guest-1',
+          clientId: null,
+          appointmentId: 'appointment-guest-1',
+          saleNumber: 'V-000010',
+          total: 35,
+          paymentMethod: 'CASH',
+          showInOfficialCash: true,
+          client: null,
+          appointment: {
+            guestName: 'Cliente puntual',
+            service: { id: 'service-1', name: 'Limpieza facial' },
+            client: null
+          },
+          user: { id: 'user-1', name: 'Lucy' },
+          items: [],
+          accountBalanceMovements: [],
+          cashMovement: null
+        })
+      },
+      cashRegister: {
+        findFirst: vi.fn().mockResolvedValue(null)
+      },
+      cashMovement: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue(undefined),
+        delete: vi.fn().mockResolvedValue(undefined),
+        update: vi.fn().mockResolvedValue(undefined)
+      },
+      product: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockResolvedValue(undefined)
+      },
+      stockMovement: {
+        create: vi.fn().mockResolvedValue(undefined)
+      },
+      client: {
+        update: vi.fn().mockResolvedValue(undefined),
+        findUnique: vi.fn().mockResolvedValue(null)
+      },
+      bonoPack: {
+        create: vi.fn().mockResolvedValue(undefined),
+        findMany: vi.fn().mockResolvedValue([])
+      },
+      accountBalanceMovement: {
+        create: vi.fn().mockResolvedValue(undefined)
+      }
+    }
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx))
+    prismaMock.setting.findUnique.mockResolvedValue(null)
+
+    const response = await request(app)
+      .post('/api/sales')
+      .set('Authorization', createAuthHeader())
+      .send({
+        clientId: null,
+        appointmentId: '3adf3ca8-c749-4f40-9f2e-54a8ff0f8f57',
+        items: [
+          {
+            serviceId: '3adf3ca8-c749-4f40-9f2e-54a8ff0f8f59',
+            description: 'Limpieza facial',
+            quantity: 1,
+            price: 35
+          }
+        ],
+        paymentMethod: 'CASH',
+        status: 'COMPLETED',
+        professional: 'LUCY',
+        discount: 0,
+        tax: 0,
+        showInOfficialCash: true
+      })
+
+    expect(response.status).toBe(201)
+    expect(response.body).toEqual(expect.objectContaining({ id: 'sale-guest-1', clientId: null }))
   })
 
   it('GET /api/calendar/config rejects non-admin users', async () => {

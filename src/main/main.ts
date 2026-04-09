@@ -1,9 +1,18 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from 'electron'
 import path from 'path'
 import fs from 'fs'
+import crypto from 'crypto'
 import { promises as fsPromises } from 'fs'
 import { ChildProcess, spawn } from 'child_process'
 import { printNetworkTicket } from './escpos'
+import {
+  getMainLogFilePath,
+  initializeMainLogging,
+  installMainProcessErrorLogging,
+  rendererConsoleLevelToLogLevel,
+  sanitizeLogValue,
+  writeMainLog
+} from './logging'
 import {
   CLIENT_ASSET_PROTOCOL,
   createClientAssetManager,
@@ -173,37 +182,203 @@ const waitForBackendReady = async (
   return false
 }
 
-const startBackendInProduction = async () => {
-  if (isDevelopment || backendProcess) return
+const loadProductionEnv = (): Record<string, string> => {
+  const envPaths = [
+    path.join(path.dirname(process.execPath), '.env'),
+    path.join(path.dirname(process.execPath), 'resources', '.env'),
+    path.join(app.getPath('userData'), '.env')
+  ]
 
-  const backendEntry = path.join(__dirname, '../backend/server.js')
-  if (!fs.existsSync(backendEntry)) {
-    console.error(`[backend] Backend entry not found: ${backendEntry}`)
+  for (const envPath of envPaths) {
+    if (fs.existsSync(envPath)) {
+      writeMainLog('info', 'Loading production .env file', { envPath })
+      const content = fs.readFileSync(envPath, 'utf-8')
+      const vars: Record<string, string> = {}
+      for (const line of content.split('\n')) {
+        const trimmed = line.trim()
+        if (!trimmed || trimmed.startsWith('#')) continue
+        const eqIndex = trimmed.indexOf('=')
+        if (eqIndex === -1) continue
+        const key = trimmed.slice(0, eqIndex).trim()
+        const value = trimmed.slice(eqIndex + 1).trim().replace(/^["']|["']$/g, '')
+        vars[key] = value
+      }
+      return vars
+    }
+  }
+
+  writeMainLog('warn', 'No .env file found for production')
+  return {}
+}
+
+const getRuntimeJwtSecretPath = () => path.join(app.getPath('userData'), 'jwt-secret.txt')
+
+const ensureRuntimeJwtSecret = async (existingSecret?: string) => {
+  if (existingSecret) {
+    return existingSecret
+  }
+
+  const secretPath = getRuntimeJwtSecretPath()
+
+  try {
+    const currentSecret = await fsPromises.readFile(secretPath, 'utf-8')
+    const normalizedSecret = currentSecret.trim()
+    if (normalizedSecret) {
+      return normalizedSecret
+    }
+  } catch {
+    // Secret file does not exist yet.
+  }
+
+  const generatedSecret = crypto.randomBytes(48).toString('hex')
+  await ensureDir(path.dirname(secretPath))
+  await fsPromises.writeFile(secretPath, generatedSecret, 'utf-8')
+  writeMainLog('info', 'Generated runtime JWT secret', { secretPath })
+  return generatedSecret
+}
+
+const resolveFileDatabasePath = (databaseUrl: string | undefined, schemaDir: string) => {
+  if (!databaseUrl || !databaseUrl.startsWith('file:')) {
+    return null
+  }
+
+  const filePath = databaseUrl.slice('file:'.length)
+  if (!filePath) {
+    return null
+  }
+
+  if (path.isAbsolute(filePath)) {
+    return filePath
+  }
+
+  return path.resolve(schemaDir, filePath)
+}
+
+const findExistingPath = (candidates: Array<string | null | undefined>) => {
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) {
+      return candidate
+    }
+  }
+
+  return null
+}
+
+const getPackagedBackendEntry = () =>
+  findExistingPath([
+    path.join(process.resourcesPath, 'app.asar.unpacked', 'dist', 'backend', 'server.js'),
+    path.join(__dirname, '../backend/server.js')
+  ])
+
+const getPackagedNodePath = () => {
+  const candidates = [
+    path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules'),
+    path.join(process.resourcesPath, 'app.asar', 'node_modules'),
+    process.env.NODE_PATH
+  ].filter((candidate): candidate is string => Boolean(candidate))
+
+  return Array.from(new Set(candidates)).join(path.delimiter)
+}
+
+const getProductionDbPath = () => {
+  const userDataDir = app.getPath('userData')
+  return path.join(userDataDir, 'lucy3000.db')
+}
+
+const getBundledSeedDbPath = () =>
+  findExistingPath([
+    path.join(process.resourcesPath, 'app.asar.unpacked', 'prisma', 'prisma', 'lucy3000.db'),
+    path.join(process.resourcesPath, 'app.asar.unpacked', 'prisma', 'lucy3000.db'),
+    path.join(process.resourcesPath, 'prisma', 'prisma', 'lucy3000.db'),
+    path.join(process.resourcesPath, 'prisma', 'lucy3000.db')
+  ])
+
+const ensureProductionDatabaseInitialized = async (dbPath: string) => {
+  await ensureDir(path.dirname(dbPath))
+
+  if (fs.existsSync(dbPath)) {
     return
   }
 
-  backendProcess = spawn(process.execPath, [backendEntry], {
+  const bundledSeedDbPath = getBundledSeedDbPath()
+  if (!bundledSeedDbPath) {
+    writeMainLog('warn', 'Bundled SQLite database not found, continuing with a fresh database')
+    return
+  }
+
+  await fsPromises.copyFile(bundledSeedDbPath, dbPath)
+  writeMainLog('info', 'Copied bundled database to production location', { dbPath, bundledSeedDbPath })
+}
+
+const startBackendInProduction = async () => {
+  if (isDevelopment || backendProcess) return
+
+  const backendEntry = getPackagedBackendEntry()
+  if (!backendEntry || !fs.existsSync(backendEntry)) {
+    throw new Error(`Packaged backend entry not found: ${backendEntry}`)
+  }
+
+  const productionEnv = loadProductionEnv()
+  const dbPath = getProductionDbPath()
+  const jwtSecret = await ensureRuntimeJwtSecret(productionEnv.JWT_SECRET)
+
+  await ensureProductionDatabaseInitialized(dbPath)
+  writeMainLog('info', 'Starting packaged backend process', {
+    backendEntry,
+    backendPort,
+    dbPath
+  })
+
+  const child = spawn(process.execPath, [backendEntry], {
     env: {
       ...process.env,
+      ...productionEnv,
+      ELECTRON_RUN_AS_NODE: '1',
       NODE_ENV: 'production',
-      PORT: backendPort
+      NODE_PATH: getPackagedNodePath(),
+      PORT: backendPort,
+      JWT_SECRET: jwtSecret,
+      DATABASE_URL: `file:${dbPath}`
+    },
+    windowsHide: true
+  })
+
+  backendProcess = child
+
+  child.stdout?.on('data', (chunk) => {
+    const lines = chunk
+      .toString()
+      .split(/\r?\n/)
+      .map((line: string) => line.trim())
+      .filter(Boolean)
+
+    for (const line of lines) {
+      writeMainLog('info', 'Backend stdout', { line })
     }
   })
 
-  backendProcess.stdout?.on('data', (chunk) => {
-    console.log(`[backend] ${chunk.toString().trim()}`)
+  child.stderr?.on('data', (chunk) => {
+    const lines = chunk
+      .toString()
+      .split(/\r?\n/)
+      .map((line: string) => line.trim())
+      .filter(Boolean)
+
+    for (const line of lines) {
+      writeMainLog('error', 'Backend stderr', { line })
+    }
   })
 
-  backendProcess.stderr?.on('data', (chunk) => {
-    console.error(`[backend] ${chunk.toString().trim()}`)
-  })
-
-  backendProcess.on('exit', (code) => {
-    console.error(`[backend] Process exited with code ${code}`)
+  child.on('exit', (code) => {
+    writeMainLog('error', 'Backend process exited', { code })
     backendProcess = null
   })
 
-  await waitForBackendReady(20, 500, ['localhost', '127.0.0.1'])
+  const ready = await waitForBackendReady(40, 500, ['localhost', '127.0.0.1'])
+  if (!ready) {
+    stopBackend()
+    throw new Error(`Packaged backend did not respond on http://localhost:${backendPort}/health`)
+  }
 }
 
 const ensureBackendReady = async () => {
@@ -251,6 +426,35 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../index.html'))
   }
 
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    if (level < 2) {
+      return
+    }
+
+    writeMainLog(rendererConsoleLevelToLogLevel(level), 'Renderer console message', {
+      message,
+      line,
+      sourceId
+    })
+  })
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    writeMainLog('error', 'Renderer process gone', sanitizeLogValue(details))
+  })
+
+  mainWindow.webContents.on('unresponsive', () => {
+    writeMainLog('warn', 'Main window became unresponsive')
+  })
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    writeMainLog('error', 'Renderer failed to load', {
+      errorCode,
+      errorDescription,
+      validatedURL,
+      isMainFrame
+    })
+  })
+
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show()
   })
@@ -261,19 +465,34 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  app.setAppLogsPath()
+  initializeMainLogging()
+  installMainProcessErrorLogging()
+  writeMainLog('info', 'Electron app ready', {
+    appVersion: app.getVersion(),
+    logFilePath: getMainLogFilePath()
+  })
+
   protocol.handle(CLIENT_ASSET_PROTOCOL, handleClientAssetProtocol)
 
   try {
     await ensureBackendReady()
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Backend startup failed'
-    console.error(`[backend] ${message}`)
+    writeMainLog('error', 'Backend unavailable during startup', error)
     dialog.showErrorBox('Backend unavailable', message)
     app.quit()
     return
   }
 
   createWindow()
+
+  // Initialize auto-backup
+  getBackupConfig()
+    .then(setupAutoBackup)
+    .catch((error) => {
+      writeMainLog('error', 'Failed to initialize auto-backup', error)
+    })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -283,13 +502,19 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
+  writeMainLog('info', 'All windows closed')
   if (process.platform !== 'darwin') {
     app.quit()
   }
 })
 
 app.on('before-quit', () => {
+  writeMainLog('info', 'Application quitting')
   stopBackend()
+})
+
+app.on('child-process-gone', (_event, details) => {
+  writeMainLog('error', 'Child process gone', sanitizeLogValue(details))
 })
 
 ipcMain.handle('app:getVersion', () => app.getVersion())
@@ -297,14 +522,196 @@ ipcMain.handle('app:getPath', (_, name: string) => app.getPath(name as AppPathNa
 ipcMain.handle('app:quit', () => {
   app.quit()
 })
+ipcMain.handle('logs:getFilePath', () => getMainLogFilePath())
+ipcMain.handle('logs:openFolder', async () => {
+  const logsDir = path.dirname(getMainLogFilePath())
+  const result = await shell.openPath(logsDir)
 
-ipcMain.handle('backup:create', async () => {
+  if (result) {
+    writeMainLog('error', 'Failed to open logs folder', { logsDir, result })
+    return { success: false, error: result, path: logsDir }
+  }
+
+  return { success: true, path: logsDir }
+})
+
+const getBackupConfigPath = () => path.join(getUserDataDir(), 'backup-config.json')
+const getDefaultBackupDir = () => path.join(getUserDataDir(), 'backups')
+const getDevelopmentDbPath = () => {
+  const projectSchemaDir = path.join(process.cwd(), 'prisma')
+
+  return (
+    findExistingPath([
+      resolveFileDatabasePath(process.env.DATABASE_URL, projectSchemaDir),
+      path.join(projectSchemaDir, 'prisma', 'lucy3000.db'),
+      path.join(projectSchemaDir, 'lucy3000.db')
+    ]) || path.join(projectSchemaDir, 'prisma', 'lucy3000.db')
+  )
+}
+const getDbPath = () => isDevelopment
+  ? getDevelopmentDbPath()
+  : getProductionDbPath()
+
+const getBackupConfig = async () => {
+  const defaults = { folder: getDefaultBackupDir(), autoEnabled: true, cronExpression: '0 3 * * 0' }
+  return readJsonFile(getBackupConfigPath(), defaults)
+}
+
+const saveBackupConfig = async (config: { folder: string; autoEnabled: boolean; cronExpression: string }) => {
+  await writeJsonFile(getBackupConfigPath(), config)
+  return config
+}
+
+ipcMain.handle('backup:create', async (_, destFolder?: string) => {
   try {
-    return { success: true, message: 'Backup creado exitosamente' }
+    const config = await getBackupConfig()
+    const targetDir = destFolder || config.folder
+    await ensureDir(targetDir)
+
+    const dbPath = getDbPath()
+    if (!fs.existsSync(dbPath)) {
+      return { success: false, message: 'Base de datos no encontrada' }
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    const backupName = `lucy3000-backup-${timestamp}.db`
+    const backupPath = path.join(targetDir, backupName)
+
+    await fsPromises.copyFile(dbPath, backupPath)
+
+    // Keep only last 10 backups
+    const files = await fsPromises.readdir(targetDir)
+    const backupFiles = files
+      .filter(f => f.startsWith('lucy3000-backup-') && f.endsWith('.db'))
+      .sort()
+    if (backupFiles.length > 10) {
+      for (const old of backupFiles.slice(0, backupFiles.length - 10)) {
+        await fsPromises.unlink(path.join(targetDir, old)).catch(() => {})
+      }
+    }
+
+    return { success: true, message: `Backup creado: ${backupName}`, path: backupPath }
   } catch (error) {
-    return { success: false, message: 'Error al crear backup' }
+    return { success: false, message: `Error al crear backup: ${error instanceof Error ? error.message : error}` }
   }
 })
+
+ipcMain.handle('backup:restore', async () => {
+  try {
+    const dialogResult = await dialog.showOpenDialog(mainWindow!, {
+      title: 'Seleccionar backup para restaurar',
+      properties: ['openFile'],
+      filters: [{ name: 'Base de datos SQLite', extensions: ['db'] }]
+    })
+
+    if (dialogResult.canceled || dialogResult.filePaths.length === 0) {
+      return { success: false, message: 'Restauracion cancelada' }
+    }
+
+    const sourcePath = dialogResult.filePaths[0]
+    const dbPath = getDbPath()
+
+    // Create a safety backup before restoring
+    const safetyPath = dbPath + '.pre-restore'
+    if (fs.existsSync(dbPath)) {
+      await fsPromises.copyFile(dbPath, safetyPath)
+    }
+
+    await fsPromises.copyFile(sourcePath, dbPath)
+
+    return { success: true, message: 'Backup restaurado. Reinicia la aplicacion para aplicar los cambios.' }
+  } catch (error) {
+    return { success: false, message: `Error al restaurar: ${error instanceof Error ? error.message : error}` }
+  }
+})
+
+ipcMain.handle('backup:list', async () => {
+  try {
+    const config = await getBackupConfig()
+    await ensureDir(config.folder)
+
+    const files = await fsPromises.readdir(config.folder)
+    const backups = []
+
+    for (const file of files) {
+      if (!file.startsWith('lucy3000-backup-') || !file.endsWith('.db')) continue
+      const filePath = path.join(config.folder, file)
+      const stats = await fsPromises.stat(filePath)
+      backups.push({
+        name: file,
+        date: stats.mtime.toISOString(),
+        size: stats.size
+      })
+    }
+
+    backups.sort((a, b) => b.date.localeCompare(a.date))
+
+    return { success: true, backups }
+  } catch (error) {
+    return { success: true, backups: [] }
+  }
+})
+
+ipcMain.handle('backup:selectFolder', async () => {
+  const dialogResult = await dialog.showOpenDialog(mainWindow!, {
+    title: 'Seleccionar carpeta de backups',
+    properties: ['openDirectory']
+  })
+
+  if (dialogResult.canceled || dialogResult.filePaths.length === 0) {
+    return { canceled: true }
+  }
+
+  return { canceled: false, folder: dialogResult.filePaths[0] }
+})
+
+ipcMain.handle('backup:getConfig', async () => {
+  return getBackupConfig()
+})
+
+ipcMain.handle('backup:setConfig', async (_, config: { folder: string; autoEnabled: boolean; cronExpression: string }) => {
+  await saveBackupConfig(config)
+  setupAutoBackup(config)
+  return { success: true }
+})
+
+let autoBackupTimer: ReturnType<typeof setInterval> | null = null
+
+const setupAutoBackup = (config: { folder: string; autoEnabled: boolean; cronExpression: string }) => {
+  if (autoBackupTimer) {
+    clearInterval(autoBackupTimer)
+    autoBackupTimer = null
+  }
+
+  if (!config.autoEnabled) return
+
+  // Simple weekly interval (every 7 days) — cron expression is stored for display but we use setInterval
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000
+  autoBackupTimer = setInterval(async () => {
+    try {
+      const dbPath = getDbPath()
+      if (!fs.existsSync(dbPath)) return
+
+      await ensureDir(config.folder)
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      const backupName = `lucy3000-auto-backup-${timestamp}.db`
+      await fsPromises.copyFile(dbPath, path.join(config.folder, backupName))
+
+      // Keep only last 4 auto backups
+      const files = await fsPromises.readdir(config.folder)
+      const autoBackups = files.filter(f => f.startsWith('lucy3000-auto-backup-') && f.endsWith('.db')).sort()
+      if (autoBackups.length > 4) {
+        for (const old of autoBackups.slice(0, autoBackups.length - 4)) {
+          await fsPromises.unlink(path.join(config.folder, old)).catch(() => {})
+        }
+      }
+
+      writeMainLog('info', 'Automatic backup created', { backupName, folder: config.folder })
+    } catch (error) {
+      writeMainLog('error', 'Automatic backup failed', error)
+    }
+  }, WEEK_MS)
+}
 
 ipcMain.handle('clientAssets:list', async (_, payload: { clientId: string; clientName: string }) => {
   return clientAssetManager.buildAssetResponse(payload.clientId, payload.clientName)

@@ -3,7 +3,7 @@
 Estado actualizado: 2026-02-17
 
 ## Objetivo
-Consolidar Lucy3000 como herramienta de operación diaria para estética: clientes, servicios, ventas, caja, inventario y reportes, con base de datos en Supabase y app de escritorio estable.
+Consolidar Lucy3000 como herramienta de operación diaria para estética: clientes, servicios, ventas, caja, inventario y reportes, con app de escritorio estable y base de datos local SQLite en el runtime actual.
 
 ## Hecho
 - Build TypeScript estabilizado (frontend + backend).
@@ -18,7 +18,7 @@ Consolidar Lucy3000 como herramienta de operación diaria para estética: client
 - Suite inicial de tests automáticos:
 - Unit tests backend para `sales`, `cash` y `products`.
 - Smoke tests API para salud, validación y flujos críticos de alta.
-- Auditoría del backup Supabase (`db_cluster-08-11-2025@00-27-55.backup`) con inventario de esquema y conteo estimado de filas.
+- Auditoría del backup Supabase histórico (`db_cluster-08-11-2025@00-27-55.backup`) con inventario de esquema y conteo estimado de filas.
 - Scripts de recuperación añadidos:
 - `scripts/analyze-backup.ps1` (auditoría/inventario).
 - `scripts/restore-backup.ps1` (restauración adaptable `pg_restore`/`psql`).
@@ -67,8 +67,8 @@ Consolidar Lucy3000 como herramienta de operación diaria para estética: client
 
 ## Propuesta Técnica (sin romper continuidad)
 1. Mantener stack actual en Fase 1:
-- Prisma + Supabase Postgres + Electron + React.
-- Motivo: ya está implementado y acelerar entrega operativa para tu hermana.
+- Prisma + SQLite local + Electron + React.
+- Motivo: es el runtime que usa hoy este repo para desarrollo y escritorio.
 2. Endurecer backend en Fase 2:
 - Capa de validación (Zod), capa de servicios y transacciones más explícitas.
 3. Evaluar alternativa a medio plazo (solo si el negocio escala):
@@ -76,4 +76,4 @@ Consolidar Lucy3000 como herramienta de operación diaria para estética: client
 - Opción B: App web + PWA + acceso privado (si se prioriza movilidad).
 - Opción C: Prisma -> Drizzle/SQL nativo solo si se necesita control SQL fino.
 
-Recomendación actual: no cambiar Prisma ni Electron todavía. Primero consolidar operación y calidad sobre la base existente.
+Recomendación actual: no cambiar Prisma ni Electron todavía. Primero consolidar operación y calidad sobre la base SQLite local existente.

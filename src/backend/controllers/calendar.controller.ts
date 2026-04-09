@@ -1,6 +1,7 @@
 import { Request, Response } from 'express'
 import { AuthRequest } from '../middleware/auth.middleware'
 import { googleCalendarService } from '../services/googleCalendar.service'
+import { logError, logWarn } from '../utils/logger'
 
 const CALLBACK_MESSAGE_SOURCE = 'lucy3000-google-calendar-oauth'
 
@@ -85,6 +86,19 @@ export const getAuthUrl = async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Usuario no autenticado' })
     }
 
+    const setupStatus = googleCalendarService.getOAuthSetupStatus()
+    if (!setupStatus.configured) {
+      logWarn('Google Calendar auth requested without required environment variables', {
+        missingEnvVars: setupStatus.missingEnvVars,
+        userId: authReq.user.id
+      })
+
+      return res.status(400).json({
+        error: `Google Calendar no está configurado. Faltan variables: ${setupStatus.missingEnvVars.join(', ')}`,
+        missingEnvVars: setupStatus.missingEnvVars
+      })
+    }
+
     const authUrl = googleCalendarService.buildAuthUrl({
       id: authReq.user.id,
       role: authReq.user.role
@@ -92,8 +106,9 @@ export const getAuthUrl = async (req: Request, res: Response) => {
 
     res.json({ authUrl })
   } catch (error: any) {
-    console.error('Get auth URL error:', error)
-    res.status(500).json({ error: error.message || 'Error generando URL de autorización' })
+    logError('Get auth URL error', error)
+    const statusCode = error?.message?.includes('no está configurado') ? 400 : 500
+    res.status(statusCode).json({ error: error.message || 'Error generando URL de autorización' })
   }
 }
 
@@ -122,7 +137,7 @@ export const handleCallback = async (req: Request, res: Response) => {
 
     res.type('html').send(renderCallbackPage(true, 'La cuenta ha quedado conectada y ya puedes volver a Lucy3000.'))
   } catch (error: any) {
-    console.error('Handle callback error:', error)
+    logError('Handle calendar callback error', error)
     const statusCode = error?.name === 'JsonWebTokenError' || error?.name === 'TokenExpiredError' ? 400 : 500
     res.status(statusCode).type('html').send(renderCallbackPage(false, error.message || 'Error procesando la autorización de Google.'))
   }
@@ -131,13 +146,17 @@ export const handleCallback = async (req: Request, res: Response) => {
 export const getConfig = async (_req: Request, res: Response) => {
   try {
     const config = await googleCalendarService.getConfig()
+    const setupStatus = googleCalendarService.getOAuthSetupStatus()
 
     if (!config) {
       return res.json({
         connected: false,
         enabled: false,
         sendClientInvites: true,
-        calendarId: 'primary'
+        calendarId: 'primary',
+        oauthConfigured: setupStatus.configured,
+        missingEnvVars: setupStatus.missingEnvVars,
+        redirectUri: setupStatus.redirectUri
       })
     }
 
@@ -145,10 +164,13 @@ export const getConfig = async (_req: Request, res: Response) => {
       connected: true,
       enabled: config.enabled,
       sendClientInvites: config.sendClientInvites,
-      calendarId: config.calendarId
+      calendarId: config.calendarId,
+      oauthConfigured: setupStatus.configured,
+      missingEnvVars: setupStatus.missingEnvVars,
+      redirectUri: setupStatus.redirectUri
     })
   } catch (error: any) {
-    console.error('Get config error:', error)
+    logError('Get calendar config error', error)
     res.status(500).json({ error: 'Error obteniendo configuración' })
   }
 }
@@ -172,7 +194,7 @@ export const updateConfig = async (req: Request, res: Response) => {
       }
     })
   } catch (error: any) {
-    console.error('Update config error:', error)
+    logError('Update calendar config error', error)
     const statusCode = error?.message?.includes('Primero debes autorizar') ? 400 : 500
     res.status(statusCode).json({ error: error.message || 'Error actualizando configuración' })
   }
@@ -183,7 +205,7 @@ export const disconnect = async (_req: Request, res: Response) => {
     await googleCalendarService.disconnect()
     res.json({ message: 'Google Calendar desconectado exitosamente' })
   } catch (error: any) {
-    console.error('Disconnect error:', error)
+    logError('Disconnect calendar error', error)
     res.status(500).json({ error: 'Error desconectando Google Calendar' })
   }
 }

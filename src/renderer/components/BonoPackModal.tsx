@@ -21,6 +21,7 @@ const normalizeText = (value: unknown) =>
 export default function BonoPackModal({ isOpen, onClose, clientId, onSuccess }: BonoPackModalProps) {
   const [loading, setLoading] = useState(false)
   const [services, setServices] = useState<any[]>([])
+  const [templates, setTemplates] = useState<any[]>([])
   const [bonoSearchQuery, setBonoSearchQuery] = useState('')
   const [isBonoDropdownOpen, setIsBonoDropdownOpen] = useState(false)
   const [formData, setFormData] = useState({
@@ -37,6 +38,9 @@ export default function BonoPackModal({ isOpen, onClose, clientId, onSuccess }: 
       api.get('/services?isActive=true')
         .then(res => setServices(res.data || []))
         .catch(() => {})
+      api.get('/bonos/templates')
+        .then(res => setTemplates(res.data || []))
+        .catch(() => setTemplates([]))
       setFormData({ name: '', serviceId: '', totalSessions: '5', price: '', expiryDate: '', notes: '' })
       setBonoSearchQuery('')
       setIsBonoDropdownOpen(false)
@@ -48,18 +52,37 @@ export default function BonoPackModal({ isOpen, onClose, clientId, onSuccess }: 
     [services, formData.serviceId]
   )
 
-  const filteredServices = useMemo(() => {
+  const hasTemplateCatalog = templates.length > 0
+
+  const filteredOptions = useMemo(() => {
     const term = normalizeText(bonoSearchQuery)
-    const source = [...services].sort((a, b) =>
-      String(a.name || '').localeCompare(String(b.name || ''), 'es', { sensitivity: 'base' })
+    const templateOptions = templates.map((template) => ({
+      type: 'template' as const,
+      id: `template-${template.id}`,
+      label: `${template.description} - ${template.serviceName}`,
+      detail: `${template.serviceLookup ? `Código: ${template.serviceLookup} · ` : ''}${template.category || 'Bonos'} · ${template.totalSessions} sesiones`,
+      searchText: `${template.description} ${template.serviceName} ${template.serviceLookup || ''} ${template.category || ''} ${template.totalSessions}`,
+      template
+    }))
+    const serviceOptions = services.map((service) => ({
+      type: 'service' as const,
+      id: `service-${service.id}`,
+      label: String(service.name || ''),
+      detail: `${service.serviceCode ? `Código: ${service.serviceCode} · ` : ''}${service.category || 'Sin categoría'}`,
+      searchText: `${service.name || ''} ${service.serviceCode || ''} ${service.category || ''}`,
+      service
+    }))
+
+    const source = (hasTemplateCatalog ? templateOptions : serviceOptions).sort((a, b) =>
+      a.label.localeCompare(b.label, 'es', { sensitivity: 'base' })
     )
 
     if (!term) return source
 
-    return source.filter((service) =>
-      normalizeText(`${service.name || ''} ${service.serviceCode || ''} ${service.category || ''}`).includes(term)
+    return source.filter((option) =>
+      normalizeText(`${option.label} ${option.detail} ${option.searchText}`).includes(term)
     )
-  }, [services, bonoSearchQuery])
+  }, [services, templates, bonoSearchQuery, hasTemplateCatalog])
 
   const handleSelectServiceFromSearch = (service: any) => {
     const serviceName = String(service.name || '').trim()
@@ -76,6 +99,18 @@ export default function BonoPackModal({ isOpen, onClose, clientId, onSuccess }: 
         : Number.isFinite(servicePrice)
           ? servicePrice.toFixed(2).replace('.', ',')
           : ''
+    }))
+  }
+
+  const handleSelectTemplate = (template: any) => {
+    setBonoSearchQuery(`${template.description} - ${template.serviceName}`)
+    setIsBonoDropdownOpen(false)
+    setFormData((prev) => ({
+      ...prev,
+      serviceId: template.serviceId || '',
+      name: `${template.description} - ${template.serviceName}`,
+      totalSessions: String(template.totalSessions || 1),
+      price: Number(template.price || 0).toFixed(2).replace('.', ',')
     }))
   }
 
@@ -147,28 +182,38 @@ export default function BonoPackModal({ isOpen, onClose, clientId, onSuccess }: 
             placeholder="Escribe para buscar por nombre, código o familia..."
             required
           />
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {hasTemplateCatalog
+              ? 'Se muestran los bonos del catálogo importado.'
+              : 'No hay catálogo de bonos importado; se usan tratamientos como base.'}
+          </p>
 
           {isBonoDropdownOpen && (
             <div className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800">
-              {filteredServices.length === 0 ? (
+              {filteredOptions.length === 0 ? (
                 <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
-                  No se encontraron bonos
+                  {hasTemplateCatalog
+                    ? 'No se encontraron bonos del catálogo'
+                    : 'No se encontraron tratamientos para crear el bono'}
                 </div>
               ) : (
-                filteredServices.slice(0, 30).map((service: any) => (
+                filteredOptions.slice(0, 30).map((option: any) => (
                   <button
-                    key={service.id}
+                    key={option.id}
                     type="button"
                     onMouseDown={(event) => {
                       event.preventDefault()
-                      handleSelectServiceFromSearch(service)
+                      if (option.type === 'template') {
+                        handleSelectTemplate(option.template)
+                      } else {
+                        handleSelectServiceFromSearch(option.service)
+                      }
                     }}
                     className="w-full border-b border-gray-100 px-3 py-2 text-left last:border-b-0 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700"
                   >
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">{service.name}</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">{option.label}</p>
                     <p className="text-xs text-gray-500 dark:text-gray-400">
-                      {service.serviceCode ? `Código: ${service.serviceCode} · ` : ''}
-                      {service.category || 'Sin categoría'}
+                      {option.detail}
                     </p>
                   </button>
                 ))

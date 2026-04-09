@@ -8,6 +8,11 @@ const GOOGLE_CALENDAR_TIMEZONE = 'Europe/Madrid'
 const OAUTH_STATE_SCOPE = 'google-calendar-oauth'
 const OAUTH_STATE_TTL_SECONDS = 60 * 10
 const GOOGLE_CALENDAR_SCOPES = ['https://www.googleapis.com/auth/calendar.events']
+const GOOGLE_CALENDAR_ENV_KEYS = [
+  'GOOGLE_CALENDAR_CLIENT_ID',
+  'GOOGLE_CALENDAR_CLIENT_SECRET',
+  'GOOGLE_CALENDAR_REDIRECT_URI'
+] as const
 
 type AuthenticatedCalendarUser = {
   id: string
@@ -27,6 +32,9 @@ type StoredGoogleCalendarConfig = {
   enabled: boolean
   sendClientInvites: boolean
 }
+
+export const GOOGLE_CALENDAR_RECONNECT_MESSAGE =
+  'La conexion con Google Calendar ha caducado o fue revocada. Ve a Configuracion > Google Calendar y vuelve a conectar la cuenta.'
 
 export type CalendarSyncStatus = 'DISABLED' | 'SYNCED' | 'ERROR'
 
@@ -48,6 +56,12 @@ export type CalendarSyncResult = {
   error: string | null
 }
 
+export type GoogleCalendarOAuthSetupStatus = {
+  configured: boolean
+  missingEnvVars: string[]
+  redirectUri: string | null
+}
+
 const isRecordNotFound = (error: unknown) => {
   return (
     !!error &&
@@ -55,6 +69,50 @@ const isRecordNotFound = (error: unknown) => {
     'code' in error &&
     ((error as { code?: number | string }).code === 404 || (error as { code?: number | string }).code === '404')
   )
+}
+
+export const isGoogleInvalidGrantError = (error: unknown) => {
+  if (!error) return false
+
+  const inspectedValues = new Set<string>()
+
+  const pushValue = (value: unknown) => {
+    if (value === undefined || value === null) return
+    const normalized = String(value).trim().toLowerCase()
+    if (normalized) inspectedValues.add(normalized)
+  }
+
+  if (error instanceof Error) {
+    pushValue(error.message)
+    const maybeCause = (error as Error & { cause?: unknown }).cause
+    if (maybeCause && typeof maybeCause === 'object') {
+      pushValue((maybeCause as { message?: unknown }).message)
+      pushValue((maybeCause as { code?: unknown }).code)
+    }
+  }
+
+  if (typeof error === 'object') {
+    const maybeError = error as {
+      code?: unknown
+      error?: unknown
+      message?: unknown
+      response?: { data?: { error?: unknown; error_description?: unknown } }
+      errors?: Array<{ reason?: unknown; message?: unknown }>
+    }
+
+    pushValue(maybeError.code)
+    pushValue(maybeError.error)
+    pushValue(maybeError.message)
+    pushValue(maybeError.response?.data?.error)
+    pushValue(maybeError.response?.data?.error_description)
+
+    for (const item of maybeError.errors || []) {
+      pushValue(item.reason)
+      pushValue(item.message)
+    }
+  }
+
+  return Array.from(inspectedValues).some((value) => value.includes('invalid_grant'))
 }
 
 const toDatePart = (value: Date | string) => {
@@ -73,13 +131,26 @@ const toDatePart = (value: Date | string) => {
 const toCalendarDateTime = (date: Date | string, time: string) => `${toDatePart(date)}T${time}:00`
 
 export class GoogleCalendarService {
+  getOAuthSetupStatus(): GoogleCalendarOAuthSetupStatus {
+    const missingEnvVars = GOOGLE_CALENDAR_ENV_KEYS.filter((key) => !process.env[key]?.trim())
+
+    return {
+      configured: missingEnvVars.length === 0,
+      missingEnvVars: [...missingEnvVars],
+      redirectUri: process.env.GOOGLE_CALENDAR_REDIRECT_URI?.trim() || null
+    }
+  }
+
   private getOAuthEnv() {
+    const setupStatus = this.getOAuthSetupStatus()
     const clientId = process.env.GOOGLE_CALENDAR_CLIENT_ID
     const clientSecret = process.env.GOOGLE_CALENDAR_CLIENT_SECRET
     const redirectUri = process.env.GOOGLE_CALENDAR_REDIRECT_URI
 
-    if (!clientId || !clientSecret || !redirectUri) {
-      throw new Error('Google Calendar environment variables are not configured')
+    if (!setupStatus.configured || !clientId || !clientSecret || !redirectUri) {
+      throw new Error(
+        `Google Calendar no está configurado. Faltan variables: ${setupStatus.missingEnvVars.join(', ')}`
+      )
     }
 
     return { clientId, clientSecret, redirectUri }
@@ -149,11 +220,45 @@ export class GoogleCalendarService {
   }
 
   private formatGoogleError(error: unknown) {
+    if (isGoogleInvalidGrantError(error)) {
+      return GOOGLE_CALENDAR_RECONNECT_MESSAGE
+    }
+
+    if (typeof error === 'object' && error) {
+      const maybeError = error as {
+        response?: { data?: { error_description?: unknown; error?: unknown } }
+      }
+      const responseMessage =
+        maybeError.response?.data?.error_description || maybeError.response?.data?.error
+
+      if (responseMessage) {
+        return String(responseMessage)
+      }
+    }
+
     if (error instanceof Error) {
       return error.message
     }
 
     return 'Unknown Google Calendar error'
+  }
+
+  private async invalidateStoredConfig(configId: string) {
+    try {
+      await prisma.googleCalendarConfig.delete({
+        where: { id: configId }
+      })
+    } catch {
+      // If the config is already gone, keep the original sync error flow.
+    }
+  }
+
+  private async resolveSyncError(configId: string, error: unknown) {
+    if (isGoogleInvalidGrantError(error)) {
+      await this.invalidateStoredConfig(configId)
+    }
+
+    return this.formatGoogleError(error)
   }
 
   buildAuthUrl(user: AuthenticatedCalendarUser): string {
@@ -288,7 +393,7 @@ export class GoogleCalendarService {
       return {
         eventId: input.existingEventId || null,
         status: 'ERROR',
-        error: this.formatGoogleError(error)
+        error: await this.resolveSyncError(config.id, error)
       }
     }
   }
@@ -337,7 +442,7 @@ export class GoogleCalendarService {
       return {
         eventId,
         status: 'ERROR',
-        error: this.formatGoogleError(error)
+        error: await this.resolveSyncError(config.id, error)
       }
     }
   }
