@@ -13,10 +13,17 @@ export class FileValidationError extends Error {
 }
 
 export const MAX_SPREADSHEET_FILE_SIZE_BYTES = 5 * 1024 * 1024
+export const MAX_SQL_DUMP_FILE_SIZE_BYTES = 30 * 1024 * 1024
 
 const ALLOWED_SPREADSHEET_EXTENSIONS = new Set(['.xlsx'])
 const ALLOWED_SPREADSHEET_MIME_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/octet-stream'
+])
+const ALLOWED_SQL_EXTENSIONS = new Set(['.sql'])
+const ALLOWED_SQL_MIME_TYPES = new Set([
+  'application/sql',
+  'text/plain',
   'application/octet-stream'
 ])
 const ALLOWED_LEGACY_SPREADSHEET_EXTENSIONS = new Set(['.xls', '.xlsx'])
@@ -29,6 +36,13 @@ export const spreadsheetUpload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: MAX_SPREADSHEET_FILE_SIZE_BYTES
+  }
+})
+
+export const sqlDumpUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: MAX_SQL_DUMP_FILE_SIZE_BYTES
   }
 })
 
@@ -79,5 +93,13 @@ export const validateLegacySpreadsheetUpload = (fieldName = 'file') =>
     ALLOWED_LEGACY_SPREADSHEET_EXTENSIONS,
     ALLOWED_LEGACY_SPREADSHEET_MIME_TYPES,
     'Only .xls or .xlsx spreadsheet files are supported',
+    fieldName
+  )
+
+export const validateSqlDumpUpload = (fieldName = 'file') =>
+  createSpreadsheetValidator(
+    ALLOWED_SQL_EXTENSIONS,
+    ALLOWED_SQL_MIME_TYPES,
+    'Only .sql dump files are supported',
     fieldName
   )

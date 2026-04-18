@@ -95,6 +95,8 @@ Reglas actuales de seguridad:
 - El token JWT se gestiona desde `authStore` (persistido con Zustand).
 - Mantener consistencia visual con utilidades Tailwind globales (`btn`, `card`, `input`, `badge`) de `src/renderer/styles/index.css`.
 - Si cambia payload de API, actualizar tipos/uso en páginas y componentes afectados.
+- En nuevas pantallas, formularios, cards o modales, no añadir textos explicativos debajo de los títulos salvo que exista una necesidad funcional validada o instrucción explícita.
+- En botones nuevos, no usar emojis ni iconos decorativos junto al texto. Por defecto, el label del botón debe ir solo en texto, salvo instrucción explícita.
 
 ## Testing
 - Framework: Vitest (`vitest.config.ts`, entorno Node).

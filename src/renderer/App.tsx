@@ -18,6 +18,7 @@ const Reports = lazy(() => import('./pages/Reports'))
 const Settings = lazy(() => import('./pages/Settings'))
 const ClientRanking = lazy(() => import('./pages/ClientRanking'))
 const Accounts = lazy(() => import('./pages/Accounts'))
+const Sql = lazy(() => import('./pages/Sql'))
 
 function RouteLoader() {
   return (
@@ -140,6 +141,14 @@ function App() {
             />
             <Route path="/ranking" element={<ClientRanking />} />
             <Route path="/settings" element={<Settings />} />
+            <Route
+              path="/sql"
+              element={
+                <AdminOnlyRoute>
+                  <Sql />
+                </AdminOnlyRoute>
+              }
+            />
           </Route>
         </Routes>
       </Suspense>

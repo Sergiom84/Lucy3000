@@ -10,6 +10,7 @@ import {
   Wallet,
   FileText,
   Settings,
+  Database,
   Sparkles,
   Trophy,
   ShieldCheck
@@ -30,6 +31,7 @@ const navigation = [
   { name: 'Cuentas', href: '/accounts', icon: ShieldCheck, adminOnly: true },
   { name: 'Reportes', href: '/reports', icon: FileText, adminOnly: true },
   { name: 'Configuración', href: '/settings', icon: Settings },
+  { name: 'SQL', href: '/sql', icon: Database, adminOnly: true },
 ]
 
 export default function Sidebar() {

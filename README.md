@@ -159,6 +159,13 @@ Los importadores oficiales de:
 
 aceptan únicamente archivos `.xlsx`. La validación se hace tanto en frontend como en backend, con control de extensión, MIME y tamaño.
 
+## Convenciones UI
+
+Para nuevas pantallas o cambios visuales, mantener estas reglas por defecto:
+
+- no añadir textos explicativos justo debajo de títulos de secciones, cards, modales o bloques, salvo requisito funcional claro o petición explícita;
+- no usar emojis ni iconos decorativos dentro de botones nuevos; el texto del botón debe ir limpio, salvo que se pida expresamente otra cosa.
+
 ## Build y distribución local
 
 ```bash

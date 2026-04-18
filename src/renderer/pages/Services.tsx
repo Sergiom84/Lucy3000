@@ -29,7 +29,6 @@ type ViewMode = 'all' | 'active' | null
 type CatalogMode = 'services' | 'bonos'
 const ImportServicesModal = lazy(() => import('../components/ImportServicesModal'))
 const ImportBonosModal = lazy(() => import('../components/ImportBonosModal'))
-const ImportClientBonosModal = lazy(() => import('../components/ImportClientBonosModal'))
 
 function LazyPanelLoader() {
   return <div className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">Cargando...</div>
@@ -74,7 +73,6 @@ export default function Services() {
   const [bonoShowCategories, setBonoShowCategories] = useState(false)
   const [bonoModalOpen, setBonoModalOpen] = useState(false)
   const [bonoImportModalOpen, setBonoImportModalOpen] = useState(false)
-  const [clientBonoImportModalOpen, setClientBonoImportModalOpen] = useState(false)
 
   useEffect(() => {
     void loadCatalogs()
@@ -661,13 +659,7 @@ export default function Services() {
                 onClick={() => setBonoImportModalOpen(true)}
                 className="btn btn-secondary"
               >
-                Importar catálogo
-              </button>
-              <button
-                onClick={() => setClientBonoImportModalOpen(true)}
-                className="btn btn-secondary"
-              >
-                Importar bonos de clientes
+                Importar bonos
               </button>
               <button onClick={() => void handleExportBonos()} className="btn btn-secondary">
                 Exportar
@@ -843,24 +835,6 @@ export default function Services() {
                     void loadBonoTemplates()
                   }}
                   onCancel={() => setBonoImportModalOpen(false)}
-                />
-              </Suspense>
-            ) : null}
-          </Modal>
-
-          <Modal
-            isOpen={clientBonoImportModalOpen}
-            onClose={() => setClientBonoImportModalOpen(false)}
-            title="Importar Bonos de Clientes"
-            maxWidth="xl"
-          >
-            {clientBonoImportModalOpen ? (
-              <Suspense fallback={<LazyPanelLoader />}>
-                <ImportClientBonosModal
-                  onSuccess={() => {
-                    setClientBonoImportModalOpen(false)
-                  }}
-                  onCancel={() => setClientBonoImportModalOpen(false)}
                 />
               </Suspense>
             ) : null}

@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
-import { AlertCircle, Calendar, CheckCircle2, Database, Download, FolderOpen, HardDrive, Link2, Printer, RefreshCw, RotateCcw, Save, Unlink, Upload } from 'lucide-react'
+import { AlertCircle, Calendar, CheckCircle2, Database, FolderOpen, HardDrive, RotateCcw, Unlink } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Modal from '../components/Modal'
 import {
@@ -27,6 +27,7 @@ const ImportAppointmentsModal = lazy(() => import('../components/ImportAppointme
 const ImportProductsModal = lazy(() => import('../components/ImportProductsModal'))
 const ImportServicesModal = lazy(() => import('../components/ImportServicesModal'))
 const ImportClientsModal = lazy(() => import('../components/ImportClientsModal'))
+const ImportBonosModal = lazy(() => import('../components/ImportBonosModal'))
 const ImportAbonosModal = lazy(() => import('../components/ImportAbonosModal'))
 const ImportClientBonosModal = lazy(() => import('../components/ImportClientBonosModal'))
 
@@ -76,7 +77,7 @@ export default function Settings() {
   const [desktopDbPath, setDesktopDbPath] = useState('')
 
   const [importModal, setImportModal] = useState<
-    'appointments' | 'clients' | 'services' | 'products' | 'abonos' | 'clientBonos' | null
+    'appointments' | 'clients' | 'services' | 'products' | 'bonos' | 'abonos' | 'clientBonos' | null
   >(null)
 
   const [backupFolder, setBackupFolder] = useState('')
@@ -488,12 +489,8 @@ export default function Settings() {
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
                 Impresora de tickets
               </h2>
-              <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                Esta configuración es local a cada equipo.
-              </p>
             </div>
             <button onClick={loadPrinters} className="btn btn-secondary" disabled={!desktopMode || loading}>
-              <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               Recargar
             </button>
           </div>
@@ -509,7 +506,6 @@ export default function Settings() {
                 className="btn btn-primary"
                 disabled={testingPrinter}
               >
-                <Printer className="mr-2 h-4 w-4" />
                 {testingPrinter ? 'Abriendo impresión...' : 'Imprimir prueba en navegador'}
               </button>
             </div>
@@ -592,7 +588,6 @@ export default function Settings() {
                   className="btn btn-primary"
                   disabled={saving || loading || testingPrinter}
                 >
-                  <Save className="mr-2 h-4 w-4" />
                   {saving ? 'Guardando...' : 'Guardar impresora'}
                 </button>
 
@@ -601,7 +596,6 @@ export default function Settings() {
                   className="btn btn-secondary"
                   disabled={saving || loading || testingPrinter}
                 >
-                  <Printer className="mr-2 h-4 w-4" />
                   {testingPrinter ? 'Imprimiendo...' : 'Imprimir prueba'}
                 </button>
               </div>
@@ -730,7 +724,6 @@ export default function Settings() {
                 className="btn btn-primary w-full"
                 disabled={savingCalendar}
               >
-                <Save className="mr-2 h-4 w-4" />
                 {savingCalendar ? 'Guardando...' : 'Guardar configuración'}
               </button>
             </div>
@@ -761,17 +754,11 @@ export default function Settings() {
                 </div>
               )}
 
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200">
-                Conecta una cuenta de Google para registrar las citas en tu calendario y, si el cliente tiene email,
-                enviarle la invitación del evento desde Google.
-              </div>
-
               <button
                 onClick={handleConnectGoogleCalendar}
                 className="btn btn-primary w-full"
                 disabled={!calendarConfig.oauthConfigured}
               >
-                <Link2 className="mr-2 h-4 w-4" />
                 Conectar Google Calendar
               </button>
             </div>
@@ -790,96 +777,78 @@ export default function Settings() {
             <div className="space-y-3">
               <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
                 <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Citas</h3>
-                <p className="mt-1 text-xs text-gray-700 dark:text-gray-300">
-                  Importa citas con la plantilla de Lucy3000 o adapta el Excel del otro software a las columnas canónicas.
-                </p>
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                   <button
                     onClick={() => setImportModal('appointments')}
                     className="btn btn-secondary w-full justify-start sm:flex-1"
                   >
-                    <Upload className="mr-2 h-4 w-4" />
                     Importar Citas
                   </button>
                   <button
                     onClick={handleDownloadAppointmentTemplate}
                     className="btn btn-secondary w-full justify-start sm:flex-1"
                   >
-                    <Download className="mr-2 h-4 w-4" />
                     Descargar Plantilla
                   </button>
                 </div>
-                <p className="mt-3 text-xs text-gray-700 dark:text-gray-300">
-                  Columnas canónicas: <span className="font-mono">Fecha</span>, <span className="font-mono">Hora</span>, <span className="font-mono">Minutos</span>, <span className="font-mono">cliente</span>, <span className="font-mono">Nombre</span>, <span className="font-mono">Código</span>, <span className="font-mono">Descripción</span>, <span className="font-mono">Cabina</span>, <span className="font-mono">Profesional</span>, <span className="font-mono">Teléfono</span>, <span className="font-mono">Mail</span> y <span className="font-mono">Notas</span>.
-                </p>
               </div>
 
               <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
                 <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Clientes</h3>
-                <p className="mt-1 text-xs text-gray-700 dark:text-gray-300">
-                  Alta masiva y actualización de fichas de clientes.
-                </p>
                 <button
                   onClick={() => setImportModal('clients')}
                   className="btn btn-secondary mt-3 w-full justify-start"
                 >
-                  <Upload className="mr-2 h-4 w-4" />
                   Importar Clientes
                 </button>
               </div>
 
               <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
                 <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Tratamientos</h3>
-                <p className="mt-1 text-xs text-gray-700 dark:text-gray-300">
-                  Importa el catálogo de tratamientos disponible en Lucy3000.
-                </p>
                 <button
                   onClick={() => setImportModal('services')}
                   className="btn btn-secondary mt-3 w-full justify-start"
                 >
-                  <Upload className="mr-2 h-4 w-4" />
                   Importar Tratamientos
                 </button>
               </div>
 
               <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
                 <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Productos</h3>
-                <p className="mt-1 text-xs text-gray-700 dark:text-gray-300">
-                  Importa el inventario inicial y el catálogo de productos.
-                </p>
                 <button
                   onClick={() => setImportModal('products')}
                   className="btn btn-secondary mt-3 w-full justify-start"
                 >
-                  <Upload className="mr-2 h-4 w-4" />
                   Importar Productos
                 </button>
               </div>
 
               <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Bonos</h3>
+                <button
+                  onClick={() => setImportModal('bonos')}
+                  className="btn btn-secondary mt-3 w-full justify-start"
+                >
+                  Importar Bonos
+                </button>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
                 <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Bonos de clientes</h3>
-                <p className="mt-1 text-xs text-gray-700 dark:text-gray-300">
-                  Importa bonos ya comprados por clientes para reflejarlos en su ficha, sin tocar caja.
-                </p>
                 <button
                   onClick={() => setImportModal('clientBonos')}
                   className="btn btn-secondary mt-3 w-full justify-start"
                 >
-                  <Upload className="mr-2 h-4 w-4" />
                   Importar Bonos de clientes
                 </button>
               </div>
 
               <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
                 <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Abonos</h3>
-                <p className="mt-1 text-xs text-gray-700 dark:text-gray-300">
-                  Importa el saldo disponible de abonos legacy para reflejarlo en la ficha del cliente.
-                </p>
                 <button
                   onClick={() => setImportModal('abonos')}
                   className="btn btn-secondary mt-3 w-full justify-start"
                 >
-                  <Upload className="mr-2 h-4 w-4" />
                   Importar Abonos
                 </button>
               </div>
@@ -907,7 +876,6 @@ export default function Settings() {
                 className="btn btn-primary w-full"
                 disabled={creatingBackup}
               >
-                <Save className="mr-2 h-4 w-4" />
                 {creatingBackup ? 'Creando backup...' : 'Hacer backup ahora'}
               </button>
 
@@ -915,7 +883,6 @@ export default function Settings() {
                 onClick={handleRestoreBackup}
                 className="btn btn-secondary w-full"
               >
-                <RotateCcw className="mr-2 h-4 w-4" />
                 Restaurar backup
               </button>
             </div>
@@ -951,7 +918,6 @@ export default function Settings() {
               </label>
 
               <button onClick={handleSaveBackupConfig} className="btn btn-secondary w-full">
-                <Save className="mr-2 h-4 w-4" />
                 Guardar configuracion de backup
               </button>
             </div>
@@ -1050,6 +1016,17 @@ export default function Settings() {
         {importModal === 'products' ? (
           <Suspense fallback={<LazyPanelLoader />}>
             <ImportProductsModal
+              onSuccess={() => { setImportModal(null) }}
+              onCancel={() => setImportModal(null)}
+            />
+          </Suspense>
+        ) : null}
+      </Modal>
+
+      <Modal isOpen={importModal === 'bonos'} title="Importar Bonos" onClose={() => setImportModal(null)}>
+        {importModal === 'bonos' ? (
+          <Suspense fallback={<LazyPanelLoader />}>
+            <ImportBonosModal
               onSuccess={() => { setImportModal(null) }}
               onCancel={() => setImportModal(null)}
             />

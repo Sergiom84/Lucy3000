@@ -2,7 +2,11 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import cors from 'cors'
 import multer from 'multer'
 import path from 'path'
-import { FileValidationError, MAX_SPREADSHEET_FILE_SIZE_BYTES } from './middleware/upload.middleware'
+import {
+  FileValidationError,
+  MAX_SPREADSHEET_FILE_SIZE_BYTES,
+  MAX_SQL_DUMP_FILE_SIZE_BYTES
+} from './middleware/upload.middleware'
 import { logError, logInfo, logWarn, sanitizeForLog } from './utils/logger'
 
 // Routes
@@ -21,6 +25,7 @@ import rankingRoutes from './routes/ranking.routes'
 import bonoRoutes from './routes/bono.routes'
 import calendarRoutes from './routes/calendar.routes'
 import quoteRoutes from './routes/quote.routes'
+import sqlRoutes from './routes/sql.routes'
 
 export const app = express()
 
@@ -90,6 +95,7 @@ app.use('/api/ranking', rankingRoutes)
 app.use('/api/bonos', bonoRoutes)
 app.use('/api/calendar', calendarRoutes)
 app.use('/api/quotes', quoteRoutes)
+app.use('/api/sql', sqlRoutes)
 
 // Static frontend build (Vite)
 const clientDir = path.resolve(__dirname, '..')
@@ -104,8 +110,12 @@ app.get('*', (req, res, next) => {
 // Error handling
 app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+    const limit = req.originalUrl.startsWith('/api/sql')
+      ? MAX_SQL_DUMP_FILE_SIZE_BYTES
+      : MAX_SPREADSHEET_FILE_SIZE_BYTES
+
     return res.status(400).json({
-      error: `Uploaded file exceeds the ${Math.round(MAX_SPREADSHEET_FILE_SIZE_BYTES / (1024 * 1024))}MB limit`
+      error: `Uploaded file exceeds the ${Math.round(limit / (1024 * 1024))}MB limit`
     })
   }
 
