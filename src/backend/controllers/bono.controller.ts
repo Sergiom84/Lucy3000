@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import { Prisma } from '@prisma/client'
+import type { Workbook } from 'exceljs'
 import { Request, Response } from 'express'
-import * as XLSX from 'xlsx'
 import { prisma } from '../db'
 import { AuthRequest } from '../middleware/auth.middleware'
 import { AppointmentSyncInput, googleCalendarService } from '../services/googleCalendar.service'
@@ -12,6 +12,7 @@ import {
   getAppointmentDisplayPhone
 } from '../utils/customer-display'
 import { normalizeTopUpPaymentMethod } from '../utils/payment-breakdown'
+import { loadWorkbookFromBuffer, worksheetToObjects } from '../utils/spreadsheet'
 
 class AccountBalanceError extends Error {
   statusCode: number
@@ -47,6 +48,21 @@ type BonoTemplate = {
   isActive: boolean
   createdAt: string
 }
+
+const sortBonoTemplates = (templates: BonoTemplate[]) =>
+  [...templates].sort((left, right) => {
+    const categoryCompare = String(left.category || '').localeCompare(String(right.category || ''), 'es', {
+      sensitivity: 'base'
+    })
+    if (categoryCompare !== 0) return categoryCompare
+
+    const descriptionCompare = String(left.description || '').localeCompare(String(right.description || ''), 'es', {
+      sensitivity: 'base'
+    })
+    if (descriptionCompare !== 0) return descriptionCompare
+
+    return Number(left.totalSessions || 0) - Number(right.totalSessions || 0)
+  })
 
 const normalizeTemplateKey = (value: string) =>
   value
@@ -121,27 +137,27 @@ const writeBonoTemplates = async (templates: BonoTemplate[]) => {
   await prisma.setting.upsert({
     where: { key: BONO_TEMPLATES_SETTING_KEY },
     update: {
-      value: JSON.stringify(templates),
+      value: JSON.stringify(sortBonoTemplates(templates)),
       description: 'Catalogo importado de bonos'
     },
     create: {
       key: BONO_TEMPLATES_SETTING_KEY,
-      value: JSON.stringify(templates),
+      value: JSON.stringify(sortBonoTemplates(templates)),
       description: 'Catalogo importado de bonos'
     }
   })
 }
 
-const selectBonoTemplateSheet = (workbook: XLSX.WorkBook) => {
+const selectBonoTemplateSheet = (workbook: Workbook) => {
   let bestMatch: {
     sheetName: string
     rawRows: Record<string, unknown>[]
     score: number
   } | null = null
 
-  for (const sheetName of workbook.SheetNames) {
-    const worksheet = workbook.Sheets[sheetName]
-    const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '' })
+  for (const worksheet of workbook.worksheets) {
+    const sheetName = worksheet.name
+    const rawRows = worksheetToObjects(worksheet)
     const normalizedRows = rawRows.slice(0, 25).map((row) => buildNormalizedTemplateRow(row || {}))
 
     const hasDescriptionColumn = normalizedRows.some((row) =>
@@ -306,9 +322,68 @@ export const getClientBonos = async (req: Request, res: Response) => {
 export const getBonoTemplates = async (_req: Request, res: Response) => {
   try {
     const templates = await readBonoTemplates()
-    res.json(templates.filter((template) => template.isActive !== false))
+    res.json(sortBonoTemplates(templates.filter((template) => template.isActive !== false)))
   } catch (error) {
     console.error('Get bono templates error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const createBonoTemplate = async (req: Request, res: Response) => {
+  try {
+    const category = String(req.body.category || '').trim()
+    const description = String(req.body.description || '').trim()
+    const serviceId = String(req.body.serviceId || '').trim()
+    const totalSessions = Number.parseInt(String(req.body.totalSessions), 10)
+    const price = normalizeMoney(Number(req.body.price || 0))
+    const isActive = req.body.isActive !== false
+
+    const service = await prisma.service.findUnique({
+      where: { id: serviceId },
+      select: {
+        id: true,
+        name: true,
+        serviceCode: true,
+        category: true
+      }
+    })
+
+    if (!service) {
+      return res.status(404).json({ error: 'No se encontró el tratamiento base seleccionado' })
+    }
+
+    const templates = await readBonoTemplates()
+    const normalizedDescription = normalizeSearchText(description)
+    const duplicateTemplate = templates.find(
+      (template) =>
+        template.serviceId === service.id &&
+        normalizeSearchText(template.description) === normalizedDescription &&
+        Number(template.totalSessions || 0) === totalSessions
+    )
+
+    if (duplicateTemplate) {
+      return res.status(409).json({
+        error: 'Ya existe un bono con ese tratamiento, descripción y número de sesiones'
+      })
+    }
+
+    const nextTemplate: BonoTemplate = {
+      id: randomUUID(),
+      category: category || String(service.category || '').trim() || 'Bonos',
+      description,
+      serviceId: service.id,
+      serviceName: service.name,
+      serviceLookup: String(service.serviceCode || service.name || '').trim(),
+      totalSessions,
+      price,
+      isActive,
+      createdAt: new Date().toISOString()
+    }
+
+    await writeBonoTemplates([...templates, nextTemplate])
+    res.status(201).json(nextTemplate)
+  } catch (error) {
+    console.error('Create bono template error:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 }
@@ -319,7 +394,7 @@ export const importBonoTemplatesFromExcel = async (req: Request, res: Response) 
       return res.status(400).json({ error: 'No file uploaded' })
     }
 
-    const workbook = XLSX.read(req.file.buffer, { type: 'buffer' })
+    const workbook = await loadWorkbookFromBuffer(req.file.buffer)
     const selectedSheet = selectBonoTemplateSheet(workbook)
 
     if (!selectedSheet || selectedSheet.rawRows.length === 0) {

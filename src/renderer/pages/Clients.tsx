@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
@@ -10,13 +10,11 @@ import {
   Link2,
   Mail,
   Phone,
-  Plus,
   Receipt,
   Search,
   Trash2
 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import ClientCalendarDock from '../components/ClientCalendarDock'
 import ClientForm from '../components/ClientForm'
 import Modal from '../components/Modal'
 import api from '../utils/api'
@@ -25,6 +23,7 @@ import { formatCurrency, formatDate, formatPhone } from '../utils/format'
 import { buildSaleTicketPayload, paymentMethodLabel } from '../utils/tickets'
 
 const PAGE_SIZE = 50
+const ClientCalendarDock = lazy(() => import('../components/ClientCalendarDock'))
 
 type ClientListPagination = {
   page: number
@@ -37,6 +36,10 @@ type ClientListSummary = {
   total: number
   active: number
   debtAlerts: number
+}
+
+function LazyPanelLoader() {
+  return <div className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">Cargando agenda...</div>
 }
 
 export default function Clients() {
@@ -213,9 +216,6 @@ export default function Clients() {
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Clientes</h1>
-              <p className="mt-1 text-gray-600 dark:text-gray-400">
-                Gestiona tu base de clientes y abre la agenda sin salir de esta pantalla.
-              </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
@@ -223,17 +223,7 @@ export default function Clients() {
                 onClick={() => setShowCalendarDock((current) => !current)}
                 className="btn btn-secondary"
               >
-                {showCalendarDock ? (
-                  <>
-                    <ChevronRight className="mr-2 h-4 w-4" />
-                    Ocultar agenda
-                  </>
-                ) : (
-                  <>
-                    <ChevronLeft className="mr-2 h-4 w-4" />
-                    Mostrar agenda
-                  </>
-                )}
+                {showCalendarDock ? 'Ocultar agenda' : 'Mostrar agenda'}
               </button>
 
               <button
@@ -243,7 +233,6 @@ export default function Clients() {
                 }}
                 className="btn btn-primary"
               >
-                <Plus className="mr-2 h-5 w-5" />
                 Nuevo Cliente
               </button>
             </div>
@@ -488,10 +477,12 @@ export default function Clients() {
         </div>
 
         {showCalendarDock && (
-          <ClientCalendarDock
-            onClose={handleCloseCalendarDock}
-            selectedClientId={highlightedClientId}
-          />
+          <Suspense fallback={<LazyPanelLoader />}>
+            <ClientCalendarDock
+              onClose={handleCloseCalendarDock}
+              selectedClientId={highlightedClientId}
+            />
+          </Suspense>
         )}
       </div>
 

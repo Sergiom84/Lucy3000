@@ -1,378 +1,266 @@
-# 🏗️ Arquitectura de Lucy3000
+# Arquitectura de Lucy3000
 
-Documentación técnica de la arquitectura del sistema.
+Estado actualizado: 2026-04-16
 
-## 📊 Diagrama de Arquitectura General
+## Topología oficial
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     LUCY3000 SYSTEM                          │
-├─────────────────────────────────────────────────────────────┤
-│                                                               │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │           ELECTRON DESKTOP APP                       │   │
-│  │  ┌───────────────────────────────────────────────┐  │   │
-│  │  │         REACT FRONTEND (Renderer)             │  │   │
-│  │  │  ┌─────────────────────────────────────────┐  │  │   │
-│  │  │  │  Components (UI)                        │  │  │   │
-│  │  │  │  - Layout, Navbar, Sidebar              │  │  │   │
-│  │  │  │  - Pages (Dashboard, Clients, etc.)     │  │  │   │
-│  │  │  └─────────────────────────────────────────┘  │  │   │
-│  │  │  ┌─────────────────────────────────────────┐  │  │   │
-│  │  │  │  State Management (Zustand)             │  │  │   │
-│  │  │  │  - Auth Store                           │  │  │   │
-│  │  │  │  - Theme Store                          │  │  │   │
-│  │  │  └─────────────────────────────────────────┘  │  │   │
-│  │  │  ┌─────────────────────────────────────────┐  │  │   │
-│  │  │  │  Utils & Helpers                        │  │  │   │
-│  │  │  │  - API Client (Axios)                   │  │  │   │
-│  │  │  │  - Formatters                           │  │  │   │
-│  │  │  └─────────────────────────────────────────┘  │  │   │
-│  │  └───────────────────────────────────────────────┘  │   │
-│  │                         ↕                            │   │
-│  │  ┌───────────────────────────────────────────────┐  │   │
-│  │  │         ELECTRON MAIN PROCESS                 │  │   │
-│  │  │  - Window Management                          │  │   │
-│  │  │  - IPC Handlers                               │  │   │
-│  │  │  - Native APIs                                │  │   │
-│  │  └───────────────────────────────────────────────┘  │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                         ↕ HTTP/REST                         │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │           NODE.JS BACKEND (Express)                  │   │
-│  │  ┌───────────────────────────────────────────────┐  │   │
-│  │  │  Routes (API Endpoints)                       │  │   │
-│  │  │  /auth, /clients, /appointments, etc.         │  │   │
-│  │  └───────────────────────────────────────────────┘  │   │
-│  │                         ↕                            │   │
-│  │  ┌───────────────────────────────────────────────┐  │   │
-│  │  │  Middleware                                    │  │   │
-│  │  │  - Authentication (JWT)                        │  │   │
-│  │  │  - Authorization (Roles)                       │  │   │
-│  │  │  - Error Handling                              │  │   │
-│  │  └───────────────────────────────────────────────┘  │   │
-│  │                         ↕                            │   │
-│  │  ┌───────────────────────────────────────────────┐  │   │
-│  │  │  Controllers (Business Logic)                  │  │   │
-│  │  │  - Auth, Clients, Sales, etc.                  │  │   │
-│  │  └───────────────────────────────────────────────┘  │   │
-│  │                         ↕                            │   │
-│  │  ┌───────────────────────────────────────────────┐  │   │
-│  │  │  Prisma ORM                                    │  │   │
-│  │  │  - Models & Queries                            │  │   │
-│  │  │  - Migrations                                  │  │   │
-│  │  └───────────────────────────────────────────────┘  │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                         ↕ SQL                               │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │     SQLITE LOCAL (resuelta en prisma/prisma/lucy3000.db)     │   │
-│  │  ┌───────────────────────────────────────────────┐  │   │
-│  │  │  Database Tables                               │  │   │
-│  │  │  - users, clients, appointments                │  │   │
-│  │  │  - products, sales, cash_registers             │  │   │
-│  │  │  - notifications, settings                     │  │   │
-│  │  └───────────────────────────────────────────────┘  │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                                                               │
-└─────────────────────────────────────────────────────────────┘
-```
+Lucy3000 se distribuye como aplicación de escritorio.
 
-## 🔄 Flujo de Datos
+Topología real del producto:
 
-### 1. Autenticación
-```
-User Input (Login Form)
-    ↓
-React Component
-    ↓
-API Client (Axios)
-    ↓
-POST /api/auth/login
-    ↓
-Auth Controller
-    ↓
-Prisma Query (users table)
-    ↓
+```text
+Electron Main
+    |
+    +-- arranca backend local empaquetado
+    +-- expone bridge seguro al renderer
+    +-- gestiona backups, impresión y assets de cliente
+    |
+    v
+React Renderer
+    |
+    v
+Express API local
+    |
+    v
+Prisma
+    |
+    v
 SQLite local
-    ↓
-JWT Token Generation
-    ↓
-Response to Frontend
-    ↓
-Store in Zustand (Auth Store)
-    ↓
-Redirect to Dashboard
 ```
 
-### 2. Operación CRUD (Ejemplo: Crear Cliente)
-```
-User Input (Client Form)
-    ↓
-React Component
-    ↓
-Form Validation
-    ↓
-API Client (with JWT token)
-    ↓
-POST /api/clients
-    ↓
-Auth Middleware (verify token)
-    ↓
-Client Controller
-    ↓
-Prisma Create
-    ↓
-SQLite local
-    ↓
-Response to Frontend
-    ↓
-Update UI
-    ↓
-Show Toast Notification
-```
+Aunque el backend puede ejecutarse standalone en desarrollo, el canal oficial de release es el `.exe` local, no un despliegue remoto.
 
-## 🗂️ Estructura de Carpetas Detallada
+## Capas principales
 
-```
-Lucy3000/
-│
-├── 📁 prisma/
-│   ├── schema.prisma          # Definición de modelos de BD
-│   └── migrations/            # Historial de migraciones
-│
-├── 📁 src/
-│   │
-│   ├── 📁 main/               # Electron Main Process
-│   │   └── main.ts            # Ventana principal, IPC handlers
-│   │
-│   ├── 📁 preload.ts          # Bridge seguro entre main y renderer
-│   │
-│   ├── 📁 backend/            # API Backend
-│   │   │
-│   │   ├── 📁 controllers/    # Lógica de negocio
-│   │   │   ├── auth.controller.ts
-│   │   │   ├── client.controller.ts
-│   │   │   ├── appointment.controller.ts
-│   │   │   ├── service.controller.ts
-│   │   │   ├── product.controller.ts
-│   │   │   ├── sale.controller.ts
-│   │   │   ├── cash.controller.ts
-│   │   │   ├── notification.controller.ts
-│   │   │   ├── report.controller.ts
-│   │   │   └── dashboard.controller.ts
-│   │   │
-│   │   ├── 📁 routes/         # Definición de endpoints
-│   │   │   ├── auth.routes.ts
-│   │   │   ├── client.routes.ts
-│   │   │   ├── appointment.routes.ts
-│   │   │   ├── service.routes.ts
-│   │   │   ├── product.routes.ts
-│   │   │   ├── sale.routes.ts
-│   │   │   ├── cash.routes.ts
-│   │   │   ├── notification.routes.ts
-│   │   │   ├── report.routes.ts
-│   │   │   └── dashboard.routes.ts
-│   │   │
-│   │   ├── 📁 middleware/     # Middleware de Express
-│   │   │   └── auth.middleware.ts
-│   │   │
-│   │   └── server.ts          # Configuración del servidor
-│   │
-│   └── 📁 renderer/           # React Frontend
-│       │
-│       ├── 📁 components/     # Componentes reutilizables
-│       │   ├── Layout.tsx
-│       │   ├── Navbar.tsx
-│       │   └── Sidebar.tsx
-│       │
-│       ├── 📁 pages/          # Páginas de la aplicación
-│       │   ├── Login.tsx
-│       │   ├── Dashboard.tsx
-│       │   ├── Clients.tsx
-│       │   ├── ClientDetail.tsx
-│       │   ├── Appointments.tsx
-│       │   ├── Services.tsx
-│       │   ├── Products.tsx
-│       │   ├── Sales.tsx
-│       │   ├── Cash.tsx
-│       │   ├── Reports.tsx
-│       │   └── Settings.tsx
-│       │
-│       ├── 📁 stores/         # Estado global (Zustand)
-│       │   ├── authStore.ts
-│       │   └── themeStore.ts
-│       │
-│       ├── 📁 utils/          # Utilidades
-│       │   ├── api.ts         # Cliente HTTP
-│       │   ├── format.ts      # Formateo de datos
-│       │   └── cn.ts          # Utilidad de clases CSS
-│       │
-│       ├── 📁 styles/         # Estilos globales
-│       │   └── index.css
-│       │
-│       ├── App.tsx            # Componente raíz
-│       └── main.tsx           # Punto de entrada
-│
-├── 📁 scripts/                # Scripts de utilidad
-│   ├── setup.js               # Configuración inicial
-│   └── create-admin.sql       # Crear usuario admin
-│
-├── 📁 public/                 # Archivos estáticos
-│   └── icons/                 # Iconos de la app
-│
-├── 📄 package.json            # Dependencias y scripts
-├── 📄 tsconfig.json           # Configuración TypeScript
-├── 📄 vite.config.ts          # Configuración Vite
-├── 📄 tailwind.config.js      # Configuración Tailwind
-├── 📄 .env.example            # Variables de entorno ejemplo
-├── 📄 README.md               # Documentación principal
-├── 📄 QUICK_START.md          # Guía rápida
-├── 📄 DEPLOYMENT.md           # Guía de deployment
-├── 📄 ROADMAP.md              # Estado y plan de trabajo
-└── 📄 ARCHITECTURE.md         # Este archivo
+### 1. Electron
+
+Responsabilidad:
+
+- crear la ventana principal;
+- arrancar el backend empaquetado en producción local;
+- gestionar backups;
+- gestionar assets locales de cliente;
+- gestionar impresión de tickets;
+- exponer APIs seguras al renderer.
+
+Archivos clave:
+
+- `src/main/main.ts`
+- `src/preload.ts`
+- `src/main/clientAssets.ts`
+- `src/main/escpos.ts`
+
+### 2. Renderer React
+
+Responsabilidad:
+
+- UI de negocio;
+- navegación por rutas;
+- estado de autenticación y tema;
+- consumo del backend a través de `src/renderer/utils/api.ts`;
+- integración con bridge de Electron cuando corre como escritorio.
+
+Páginas principales:
+
+- `Login`
+- `Dashboard`
+- `Clients`
+- `ClientDetail`
+- `Appointments`
+- `Services`
+- `Products`
+- `Sales`
+- `Cash`
+- `Reports`
+- `ClientRanking`
+- `Settings`
+
+Detalles actuales:
+
+- Las rutas pesadas se cargan con `React.lazy`.
+- El login incluye bootstrap del primer admin cuando no existen usuarios.
+- Los importadores soportan solo `.xlsx`.
+
+### 3. Backend Express
+
+Responsabilidad:
+
+- exponer la API REST local;
+- autenticar y autorizar;
+- validar requests con Zod;
+- ejecutar reglas de negocio;
+- servir la SPA compilada cuando la app se ejecuta empaquetada.
+
+Rutas montadas actualmente:
+
+- `/api/auth`
+- `/api/clients`
+- `/api/appointments`
+- `/api/services`
+- `/api/products`
+- `/api/sales`
+- `/api/cash`
+- `/api/notifications`
+- `/api/reports`
+- `/api/dashboard`
+- `/api/ranking`
+- `/api/bonos`
+- `/api/calendar`
+- `/api/quotes`
+- `/health`
+
+Archivos clave:
+
+- `src/backend/app.ts`
+- `src/backend/server.ts`
+- `src/backend/routes/*`
+- `src/backend/controllers/*`
+- `src/backend/validators/*`
+
+## Módulos de negocio reales
+
+Los módulos activos que debe reflejar cualquier documentación o cambio futuro son:
+
+- autenticación y usuarios;
+- clientes e historial;
+- assets de cliente: fotos, consentimientos y documentos;
+- citas y calendario;
+- servicios;
+- productos, stock y movimientos;
+- ventas y tickets;
+- caja y movimientos privados sin ticket;
+- bonos, packs y sesiones;
+- saldo a cuenta;
+- presupuestos;
+- ranking de clientes;
+- reportes;
+- notificaciones;
+- backups locales;
+- integración opcional con Google Calendar.
+
+## Flujo de autenticación
+
+### Login normal
+
+```text
+Login UI -> Axios -> POST /api/auth/login -> Prisma user lookup -> JWT -> authStore
 ```
 
-## 🔐 Seguridad
+### Bootstrap inicial
 
-### Autenticación
-- **JWT Tokens**: Tokens firmados con secret key
-- **Bcrypt**: Hash de contraseñas con salt
-- **Middleware**: Verificación en cada request protegido
-
-### Autorización
-- **Roles**: ADMIN, MANAGER, EMPLOYEE
-- **Permisos**: Basados en roles
-- **Middleware**: Verificación de permisos
-
-### Comunicación
-- **HTTPS**: En producción
-- **CORS**: Configurado para dominios permitidos
-- **Context Isolation**: En Electron
-
-## 📦 Modelos de Datos
-
-### Relaciones Principales
-
-```
-User (1) ──────────── (N) Appointment
-User (1) ──────────── (N) Sale
-User (1) ──────────── (N) CashMovement
-
-Client (1) ─────────── (N) Appointment
-Client (1) ─────────── (N) Sale
-Client (1) ─────────── (N) ClientHistory
-
-Service (1) ────────── (N) Appointment
-Service (1) ────────── (N) SaleItem
-
-Product (1) ────────── (N) StockMovement
-Product (1) ────────── (N) SaleItem
-
-Sale (1) ──────────── (N) SaleItem
-
-CashRegister (1) ───── (N) CashMovement
+```text
+Login UI -> GET /api/auth/bootstrap-status
+          -> si required=true
+          -> formulario inicial
+          -> POST /api/auth/bootstrap-admin
+          -> JWT + usuario ADMIN
 ```
 
-## 🚀 Tecnologías y Librerías
+El producto ya no crea un admin por seed de distribución.
 
-### Frontend
-- **Electron**: ^28.1.0 - Desktop app framework
-- **React**: ^18.2.0 - UI library
-- **TypeScript**: ^5.3.3 - Type safety
-- **Vite**: ^5.0.10 - Build tool
-- **Tailwind CSS**: ^3.4.0 - Styling
-- **Zustand**: ^4.4.7 - State management
-- **React Router**: ^6.21.1 - Routing
-- **Axios**: ^1.6.5 - HTTP client
-- **Recharts**: ^2.10.3 - Charts
-- **React Hot Toast**: ^2.4.1 - Notifications
-- **Lucide React**: ^0.303.0 - Icons
+## Flujo de arranque en producción local
 
-### Backend
-- **Node.js**: 18+ - Runtime
-- **Express**: ^4.18.2 - Web framework
-- **Prisma**: ^5.8.0 - ORM
-- **SQLite**: base de datos local
-- **JWT**: ^9.0.2 - Authentication
-- **Bcrypt**: ^2.4.3 - Password hashing
-- **Zod**: ^3.22.4 - Validation
+En el build empaquetado:
 
-### DevOps
-- **Supabase**: histórico / backups / despliegues remotos
-- **Render**: Backend hosting
-- **GitHub**: Version control
+1. Electron arranca.
+2. `src/main/main.ts` localiza o crea la base SQLite del usuario.
+3. Si no existe `JWT_SECRET`, genera uno en el directorio de datos del usuario.
+4. Arranca el backend empaquetado con `ELECTRON_RUN_AS_NODE=1`.
+5. Espera a que `/health` responda.
+6. Carga la SPA en la ventana principal.
 
-## 🔄 Ciclo de Vida de la Aplicación
+Esto evita depender de un servidor externo para el uso diario.
 
-### Desarrollo
-```
-1. npm install          → Instalar dependencias
-2. npm run prisma:generate → Generar cliente Prisma
-3. npm run prisma:migrate  → Ejecutar migraciones
-4. npm run dev          → Iniciar dev server
-   ├─ Backend en :3001
-   └─ Electron app
-```
+## Persistencia
 
-### Producción
-```
-1. npm run build        → Compilar aplicación
-   ├─ Backend → dist/backend/
-   ├─ Frontend → dist/renderer/
-   └─ Electron → release/
-2. Deploy backend en Render
-3. Distribuir instaladores
-```
+### Modelo
 
-## 📊 Métricas y Monitoreo
+La persistencia está en `prisma/schema.prisma` y cubre, entre otros:
 
-### Backend
-- Request logs en consola
-- Error tracking
-- Performance metrics (Render)
+- `User`
+- `Client`
+- `Appointment`
+- `Service`
+- `Product`
+- `StockMovement`
+- `Sale`
+- `SaleItem`
+- `CashRegister`
+- `CashMovement`
+- `AccountBalanceMovement`
+- `Notification`
+- `Setting`
+- `GoogleCalendarConfig`
+- `BonoPack`
+- `BonoSession`
+- `Quote`
+- `QuoteItem`
 
-### Frontend
-- React DevTools
-- Electron DevTools
-- Console logs
+### Migraciones
 
-### Base de Datos
-- Prisma Studio / archivo SQLite local
-- Query performance
-- Storage usage
+Regla general:
 
-## 🔮 Escalabilidad
+- cambios de modelo en `prisma/schema.prisma`;
+- migración versionada en `prisma/migrations/*`;
+- `prisma generate` y `prisma migrate` según entorno.
 
-### Horizontal
-- Backend puede escalar con múltiples instancias
-- Load balancer en Render
-- Database connection pooling
+### Compatibility migrations en runtime
 
-### Vertical
-- Upgrade de plan en Render
-- Migrar a un motor persistente si se publica backend remoto
-- Optimización de queries
+`src/backend/db.ts` mantiene guards de compatibilidad para SQLite histórica en runtime:
 
-### Caché
-- Redis para sesiones (futuro)
-- Local storage en frontend
-- Query caching en Prisma
+- `account_balance_movements.paymentMethod`;
+- soporte de `guestName` y `guestPhone` en `appointments`.
 
-## 🧪 Testing (Futuro)
+Estas guards existen para continuidad de instalaciones previas. No deben convertirse en mecanismo general para cambios de esquema nuevos; lo correcto es seguir usando migraciones Prisma versionadas.
 
-### Unit Tests
-- Jest para backend
-- React Testing Library para frontend
+## Seguridad y límites
 
-### Integration Tests
-- Supertest para API
-- Cypress para E2E
+- JWT para autenticación.
+- `contextIsolation` activado en Electron.
+- `contextBridge` en `preload`.
+- Validación Zod en rutas críticas y ya extendida a `clients`, `services`, `notifications`, `reports` y `quotes`.
+- Uploads validados en backend con `multer` y middleware específico.
+- Sin credenciales demo distribuidas.
 
-### Performance Tests
-- Lighthouse para frontend
-- Artillery para backend
+Límites vigentes:
 
----
+- el runtime oficial es local por instalación;
+- la base es SQLite;
+- la impresión y backups dependen del entorno de escritorio.
 
-**Arquitectura diseñada para escalar y mantener 🚀**
+## Integraciones de escritorio
 
+El bridge expuesto en `src/preload.ts` cubre:
+
+- versión y paths de la app;
+- apertura de carpeta de logs;
+- creación, restauración y listado de backups;
+- configuración e impresión de tickets;
+- gestión de assets locales de cliente.
+
+Esto separa lo que pertenece al entorno de escritorio de lo que pertenece a la API.
+
+## Build y empaquetado
+
+`npm run build` ejecuta:
+
+1. `build:prepare-db`
+2. `tsc`
+3. `vite build`
+4. `build:backend`
+5. `electron-builder`
+
+Resultado:
+
+- instaladores en `release/`;
+- backend compilado en `dist/backend`;
+- SPA compilada en `dist/`.
+
+## Regla de mantenimiento
+
+Si cambia un contrato de API o un flujo de negocio, el cambio debe mantenerse coherente en cuatro capas:
+
+1. validador Zod;
+2. ruta o controlador backend;
+3. consumo en frontend;
+4. test o smoke relevante.

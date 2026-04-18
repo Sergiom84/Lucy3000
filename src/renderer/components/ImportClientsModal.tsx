@@ -2,7 +2,14 @@ import { useState } from 'react'
 import { Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle, X } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
-import * as XLSX from 'xlsx'
+import {
+  XLSX_FILE_ACCEPT,
+  assertSupportedSpreadsheetFile,
+  downloadWorkbook,
+  markFirstRowAsHeader,
+  setWorksheetColumnWidths,
+  setWorksheetHeaderAutoFilter
+} from '../utils/excel'
 
 interface ImportClientsModalProps {
   onSuccess: () => void
@@ -100,8 +107,10 @@ export default function ImportClientsModal({ onSuccess, onCancel }: ImportClient
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0]
 
-      if (!selectedFile.name.match(/\.(xlsx|xls)$/)) {
-        toast.error('Por favor selecciona un archivo Excel valido (.xlsx o .xls)')
+      try {
+        assertSupportedSpreadsheetFile(selectedFile)
+      } catch (error: any) {
+        toast.error(error.message)
         return
       }
 
@@ -110,17 +119,27 @@ export default function ImportClientsModal({ onSuccess, onCancel }: ImportClient
     }
   }
 
-  const handleDownloadTemplate = () => {
-    const ws = XLSX.utils.aoa_to_sheet([templateHeaders, templateExampleRow])
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Clientes')
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(guideRows), 'Guia')
+  const handleDownloadTemplate = async () => {
+    try {
+      await downloadWorkbook('plantilla_clientes.xlsx', (workbook) => {
+        const clientsSheet = workbook.addWorksheet('Clientes')
+        clientsSheet.addRow(templateHeaders)
+        clientsSheet.addRow(templateExampleRow)
+        markFirstRowAsHeader(clientsSheet)
+        setWorksheetColumnWidths(clientsSheet, templateColumnWidths)
+        setWorksheetHeaderAutoFilter(clientsSheet, templateHeaders.length)
 
-    ws['!cols'] = templateColumnWidths.map((width) => ({ wch: width }))
-    ws['!autofilter'] = { ref: `A1:${XLSX.utils.encode_col(templateHeaders.length - 1)}1` }
+        const guideSheet = workbook.addWorksheet('Guia')
+        guideRows.forEach((row) => guideSheet.addRow(row))
+        markFirstRowAsHeader(guideSheet)
+        setWorksheetColumnWidths(guideSheet, [22, 60, 22])
+      })
 
-    XLSX.writeFile(wb, 'plantilla_clientes.xlsx')
-    toast.success('Plantilla descargada')
+      toast.success('Plantilla descargada')
+    } catch (error) {
+      console.error('Error generating clients template:', error)
+      toast.error('No se pudo generar la plantilla')
+    }
   }
 
   const handleImport = async () => {
@@ -200,11 +219,11 @@ export default function ImportClientsModal({ onSuccess, onCancel }: ImportClient
                   <p className="text-sm text-gray-600 dark:text-gray-400">
                     <span className="font-semibold">Haz clic para subir</span> o arrastra el archivo
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">Excel (XLSX, XLS)</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">Excel (.xlsx)</p>
                 </>
               )}
             </div>
-            <input type="file" className="hidden" accept=".xlsx,.xls" onChange={handleFileChange} />
+            <input type="file" className="hidden" accept={XLSX_FILE_ACCEPT} onChange={handleFileChange} />
           </label>
         </div>
       </div>

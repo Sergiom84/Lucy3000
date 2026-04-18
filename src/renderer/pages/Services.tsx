@@ -6,7 +6,6 @@ import {
   Edit,
   Euro,
   Package,
-  Plus,
   Scissors,
   Search,
   Trash2,
@@ -14,19 +13,14 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Modal from '../components/Modal'
+import BonoTemplateForm from '../components/BonoTemplateForm'
 import ServiceForm from '../components/ServiceForm'
 import api from '../utils/api'
 import { formatCurrency } from '../utils/format'
+import { buildSearchTokens, filterRankedItems } from '../utils/searchableOptions'
 
 type ViewMode = 'all' | 'active' | null
 type CatalogMode = 'services' | 'bonos'
-
-const normalizeText = (value: unknown) =>
-  String(value ?? '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim()
 
 const formatTaxRate = (value: unknown): string => {
   if (value === null || value === undefined || String(value).trim() === '') return '-'
@@ -62,6 +56,7 @@ export default function Services() {
   const [bonoSearch, setBonoSearch] = useState('')
   const [bonoSelectedCategory, setBonoSelectedCategory] = useState<string | null>(null)
   const [bonoShowCategories, setBonoShowCategories] = useState(false)
+  const [bonoModalOpen, setBonoModalOpen] = useState(false)
 
   useEffect(() => {
     void loadCatalogs()
@@ -127,17 +122,15 @@ export default function Services() {
     await refreshServices()
   }
 
+  const handleBonoTemplateSuccess = (templates: any[]) => {
+    setBonoTemplates(templates)
+    setBonoModalOpen(false)
+  }
+
   const activeServices = useMemo(
     () => services.filter((service) => service.isActive),
     [services]
   )
-
-  const serviceAverageDuration = useMemo(() => {
-    if (!services.length) return 0
-    return Math.round(
-      services.reduce((sum, item) => sum + Number(item.duration || 0), 0) / services.length
-    )
-  }, [services])
 
   const serviceCategoryCards = useMemo(() => {
     const grouped = services.reduce<Record<string, number>>((acc, service) => {
@@ -156,22 +149,31 @@ export default function Services() {
   }, [services])
 
   const filteredServices = useMemo(() => {
-    const searchLower = serviceSearch.toLowerCase().trim()
+    if (serviceSearch.trim()) {
+      const categoryFiltered = serviceSelectedCategory
+        ? services.filter((service) => String(service.category || '') === serviceSelectedCategory)
+        : services
+      const modeFiltered =
+        serviceViewMode === 'active'
+          ? categoryFiltered.filter((service) => service.isActive)
+          : categoryFiltered
 
-    if (searchLower) {
-      return services
-        .filter((service) => {
-          const matchesSearch =
-            String(service.serviceCode || '').toLowerCase().includes(searchLower) ||
-            String(service.name || '').toLowerCase().includes(searchLower) ||
-            String(service.category || '').toLowerCase().includes(searchLower)
-          const matchesCategory = serviceSelectedCategory
-            ? String(service.category || '') === serviceSelectedCategory
-            : true
-          const matchesMode = serviceViewMode === 'active' ? service.isActive : true
-          return matchesSearch && matchesCategory && matchesMode
-        })
-        .sort((a, b) => String(a.serviceCode || '').localeCompare(String(b.serviceCode || '')))
+      return filterRankedItems(modeFiltered, serviceSearch, (service) => {
+        const label = String(service.name || '')
+
+        return {
+          label,
+          labelTokens: buildSearchTokens(label),
+          searchText: [
+            service.serviceCode,
+            service.name,
+            service.category,
+            service.description
+          ]
+            .filter(Boolean)
+            .join(' ')
+        }
+      }).sort((a, b) => String(a.serviceCode || '').localeCompare(String(b.serviceCode || '')))
     }
 
     if (serviceViewMode === 'all') {
@@ -232,37 +234,23 @@ export default function Services() {
       .sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' }))
   }, [bonoTemplates])
 
-  const bonoAverageSessions = useMemo(() => {
-    if (!bonoTemplates.length) return 0
-    return Math.round(
-      bonoTemplates.reduce((sum, template) => sum + Number(template.totalSessions || 0), 0) /
-        bonoTemplates.length
-    )
-  }, [bonoTemplates])
-
-  const bonoLinkedServices = useMemo(() => {
-    return new Set(
-      bonoTemplates.map((template) => String(template.serviceId || '').trim()).filter(Boolean)
-    ).size
-  }, [bonoTemplates])
-
   const filteredBonos = useMemo(() => {
-    const searchLower = normalizeText(bonoSearch)
+    const categoryFiltered = bonoSelectedCategory
+      ? bonoTemplates.filter((template) => String(template.category || 'Bonos') === bonoSelectedCategory)
+      : bonoTemplates
 
-    return bonoTemplates
-      .filter((template) => {
-        const matchesSearch =
-          !searchLower ||
-          [template.category, template.description, template.serviceName, template.serviceLookup]
-            .map(normalizeText)
-            .some((value) => value.includes(searchLower))
-
-        const matchesCategory = bonoSelectedCategory
-          ? String(template.category || 'Bonos') === bonoSelectedCategory
-          : true
-
-        return matchesSearch && matchesCategory
-      })
+    return filterRankedItems(categoryFiltered, bonoSearch, (template) => ({
+      label: String(template.description || ''),
+      labelTokens: buildSearchTokens(template.description || ''),
+      searchText: [
+        template.category,
+        template.description,
+        template.serviceName,
+        template.serviceLookup
+      ]
+        .filter(Boolean)
+        .join(' ')
+    }))
       .sort((a, b) => {
         const categoryCompare = String(a.category || '').localeCompare(String(b.category || ''), 'es', {
           sensitivity: 'base'
@@ -336,9 +324,6 @@ export default function Services() {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Tratamientos</h1>
-              <p className="mt-1 text-gray-600 dark:text-gray-400">
-                Gestiona código, descripción, tarifa, IVA y tiempo
-              </p>
             </div>
             <button
               onClick={() => {
@@ -347,7 +332,6 @@ export default function Services() {
               }}
               className="btn btn-primary"
             >
-              <Plus className="mr-2 h-5 w-5" />
               Nuevo Tratamiento
             </button>
           </div>
@@ -408,19 +392,6 @@ export default function Services() {
               </div>
             </button>
 
-            <div className="card border border-gray-200 dark:border-gray-700">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Tiempo Promedio</p>
-                  <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">
-                    {serviceAverageDuration} min
-                  </p>
-                </div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-purple-500">
-                  <Clock className="h-6 w-6 text-white" />
-                </div>
-              </div>
-            </div>
           </div>
 
           <div className="space-y-3">
@@ -589,13 +560,10 @@ export default function Services() {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Bonos</h1>
-              <p className="mt-1 text-gray-600 dark:text-gray-400">
-                Catálogo de plantillas activas para crear bonos. Esta vista es de solo lectura.
-              </p>
             </div>
-            <div className="rounded-full bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
-              Catálogo de solo lectura
-            </div>
+            <button onClick={() => setBonoModalOpen(true)} className="btn btn-primary">
+              Nuevo Bono
+            </button>
           </div>
 
           <div className="card">
@@ -608,48 +576,6 @@ export default function Services() {
                 placeholder="Buscar por descripción, servicio o categoría..."
                 className="input pl-10"
               />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-            <div className="card border border-gray-200 dark:border-gray-700">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Plantillas visibles</p>
-                  <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">
-                    {bonoTemplates.length}
-                  </p>
-                </div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-indigo-500">
-                  <Package className="h-6 w-6 text-white" />
-                </div>
-              </div>
-            </div>
-
-            <div className="card border border-gray-200 dark:border-gray-700">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Servicios enlazados</p>
-                  <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{bonoLinkedServices}</p>
-                </div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-cyan-500">
-                  <Scissors className="h-6 w-6 text-white" />
-                </div>
-              </div>
-            </div>
-
-            <div className="card border border-gray-200 dark:border-gray-700">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Sesiones promedio</p>
-                  <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">
-                    {bonoAverageSessions} sesiones
-                  </p>
-                </div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-purple-500">
-                  <Clock className="h-6 w-6 text-white" />
-                </div>
-              </div>
             </div>
           </div>
 
@@ -697,7 +623,7 @@ export default function Services() {
               <div>
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{bonoTableTitle}</h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
-                  La tabla refleja plantillas activas de bonos y no permite editar desde aquí.
+                  Catálogo general de bonos disponible para ventas y clientes.
                 </p>
               </div>
               <span className="badge badge-secondary">{filteredBonos.length}</span>
@@ -778,6 +704,18 @@ export default function Services() {
               </table>
             </div>
           </div>
+
+          <Modal
+            isOpen={bonoModalOpen}
+            onClose={() => setBonoModalOpen(false)}
+            title="Nuevo Bono"
+            maxWidth="lg"
+          >
+            <BonoTemplateForm
+              onSuccess={handleBonoTemplateSuccess}
+              onCancel={() => setBonoModalOpen(false)}
+            />
+          </Modal>
         </>
       )}
     </div>

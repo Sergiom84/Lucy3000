@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import crypto from 'crypto'
+import net from 'net'
 import { promises as fsPromises } from 'fs'
 import { ChildProcess, spawn } from 'child_process'
 import { printNetworkTicket } from './escpos'
@@ -30,9 +31,16 @@ import type { TicketPrintPayload, TicketPrinterConfig } from '../shared/ticketPr
 
 let mainWindow: BrowserWindow | null = null
 let backendProcess: ChildProcess | null = null
+let isForcingAppExit = false
 
 const isDevelopment = process.env.NODE_ENV === 'development'
 const backendPort = process.env.PORT || '3001'
+
+if (isDevelopment) {
+  const developmentRuntimeRoot = path.join(app.getPath('appData'), 'lucy3000-accounting-dev')
+  app.setPath('userData', developmentRuntimeRoot)
+  app.setPath('sessionData', path.join(developmentRuntimeRoot, 'session'))
+}
 
 type AppPathName =
   | 'home'
@@ -65,6 +73,69 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const isLocalPortReachable = (host: string, port: number) =>
+  new Promise<boolean>((resolve) => {
+    const socket = net.createConnection({ host, port })
+
+    const finish = (reachable: boolean) => {
+      socket.removeAllListeners()
+      socket.destroy()
+      resolve(reachable)
+    }
+
+    socket.once('connect', () => finish(true))
+    socket.once('error', () => finish(false))
+    socket.setTimeout(500, () => finish(false))
+  })
+
+const isBackendPortOccupied = async () => {
+  const port = Number(backendPort)
+
+  if (!Number.isFinite(port)) {
+    return false
+  }
+
+  for (const host of ['127.0.0.1', 'localhost']) {
+    if (await isLocalPortReachable(host, port)) {
+      return true
+    }
+  }
+
+  return false
+}
+
+const waitForChildExit = (child: ChildProcess, timeoutMs = 5000) =>
+  new Promise<boolean>((resolve) => {
+    if (child.exitCode !== null) {
+      resolve(true)
+      return
+    }
+
+    const cleanup = () => {
+      clearTimeout(timer)
+      child.off('exit', handleExit)
+      child.off('error', handleError)
+    }
+
+    const handleExit = () => {
+      cleanup()
+      resolve(true)
+    }
+
+    const handleError = () => {
+      cleanup()
+      resolve(true)
+    }
+
+    const timer = setTimeout(() => {
+      cleanup()
+      resolve(false)
+    }, timeoutMs)
+
+    child.once('exit', handleExit)
+    child.once('error', handleError)
+  })
 
 const getUserDataDir = () => app.getPath('userData')
 const getLegacyClientsRootDir = () => path.join(getUserDataDir(), 'clients')
@@ -162,13 +233,18 @@ const setTicketPrinterConfig = async (config: unknown) => {
 const waitForBackendReady = async (
   attempts: number,
   delayMs: number,
-  hosts: string[] = ['localhost']
+  hosts: string[] = ['localhost'],
+  canContinue: () => boolean = () => true
 ) => {
   for (let i = 0; i < attempts; i += 1) {
+    if (!canContinue()) {
+      return false
+    }
+
     for (const host of hosts) {
       try {
         const response = await fetch(`http://${host}:${backendPort}/health`)
-        if (response.ok) {
+        if (response.ok && canContinue()) {
           return true
         }
       } catch {
@@ -287,8 +363,10 @@ const getProductionDbPath = () => {
 
 const getBundledSeedDbPath = () =>
   findExistingPath([
+    path.join(process.resourcesPath, 'app.asar.unpacked', 'prisma', 'packaged', 'lucy3000.db'),
     path.join(process.resourcesPath, 'app.asar.unpacked', 'prisma', 'prisma', 'lucy3000.db'),
     path.join(process.resourcesPath, 'app.asar.unpacked', 'prisma', 'lucy3000.db'),
+    path.join(process.resourcesPath, 'prisma', 'packaged', 'lucy3000.db'),
     path.join(process.resourcesPath, 'prisma', 'prisma', 'lucy3000.db'),
     path.join(process.resourcesPath, 'prisma', 'lucy3000.db')
   ])
@@ -312,6 +390,12 @@ const ensureProductionDatabaseInitialized = async (dbPath: string) => {
 
 const startBackendInProduction = async () => {
   if (isDevelopment || backendProcess) return
+
+  if (await isBackendPortOccupied()) {
+    throw new Error(
+      `El puerto ${backendPort} ya esta en uso. Cierra cualquier otra instancia de Lucy3000 o backend de desarrollo antes de abrir el instalador.`
+    )
+  }
 
   const backendEntry = getPackagedBackendEntry()
   if (!backendEntry || !fs.existsSync(backendEntry)) {
@@ -371,12 +455,19 @@ const startBackendInProduction = async () => {
 
   child.on('exit', (code) => {
     writeMainLog('error', 'Backend process exited', { code })
-    backendProcess = null
+    if (backendProcess === child) {
+      backendProcess = null
+    }
   })
 
-  const ready = await waitForBackendReady(40, 500, ['localhost', '127.0.0.1'])
+  const ready = await waitForBackendReady(
+    40,
+    500,
+    ['localhost', '127.0.0.1'],
+    () => backendProcess === child && child.exitCode === null
+  )
   if (!ready) {
-    stopBackend()
+    await stopBackendGracefully()
     throw new Error(`Packaged backend did not respond on http://localhost:${backendPort}/health`)
   }
 }
@@ -395,11 +486,34 @@ const ensureBackendReady = async () => {
   await startBackendInProduction()
 }
 
-const stopBackend = () => {
-  if (backendProcess && !backendProcess.killed) {
-    backendProcess.kill()
-    backendProcess = null
+const stopBackendGracefully = async () => {
+  const child = backendProcess
+  if (!child) {
+    return true
   }
+
+  if (child.exitCode !== null) {
+    backendProcess = null
+    return true
+  }
+
+  backendProcess = null
+
+  try {
+    child.kill()
+  } catch (error) {
+    writeMainLog('warn', 'Failed to signal backend process for shutdown', error)
+  }
+
+  const exited = await waitForChildExit(child, 5000)
+  if (!exited) {
+    writeMainLog('warn', 'Backend process did not exit after shutdown signal', {
+      pid: child.pid,
+      timeoutMs: 5000
+    })
+  }
+
+  return exited
 }
 
 function createWindow() {
@@ -465,7 +579,11 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  app.setAppLogsPath()
+  if (isDevelopment) {
+    app.setAppLogsPath(path.join(getUserDataDir(), 'logs'))
+  } else {
+    app.setAppLogsPath()
+  }
   initializeMainLogging()
   installMainProcessErrorLogging()
   writeMainLog('info', 'Electron app ready', {
@@ -510,7 +628,19 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   writeMainLog('info', 'Application quitting')
-  stopBackend()
+})
+
+app.on('before-quit', (event) => {
+  if (isDevelopment || isForcingAppExit || !backendProcess) {
+    return
+  }
+
+  event.preventDefault()
+  isForcingAppExit = true
+
+  void stopBackendGracefully().finally(() => {
+    app.exit(0)
+  })
 })
 
 app.on('child-process-gone', (_event, details) => {
@@ -519,6 +649,14 @@ app.on('child-process-gone', (_event, details) => {
 
 ipcMain.handle('app:getVersion', () => app.getVersion())
 ipcMain.handle('app:getPath', (_, name: string) => app.getPath(name as AppPathName))
+ipcMain.handle('app:relaunch', () => {
+  setTimeout(() => {
+    app.relaunch()
+    app.quit()
+  }, 150)
+
+  return { success: true }
+})
 ipcMain.handle('app:quit', () => {
   app.quit()
 })
@@ -611,6 +749,12 @@ ipcMain.handle('backup:restore', async () => {
     const sourcePath = dialogResult.filePaths[0]
     const dbPath = getDbPath()
 
+    writeMainLog('info', 'Starting backup restore', { sourcePath, dbPath, isDevelopment })
+
+    if (!isDevelopment) {
+      await stopBackendGracefully()
+    }
+
     // Create a safety backup before restoring
     const safetyPath = dbPath + '.pre-restore'
     if (fs.existsSync(dbPath)) {
@@ -619,8 +763,22 @@ ipcMain.handle('backup:restore', async () => {
 
     await fsPromises.copyFile(sourcePath, dbPath)
 
-    return { success: true, message: 'Backup restaurado. Reinicia la aplicacion para aplicar los cambios.' }
+    writeMainLog('info', 'Backup restored successfully', {
+      sourcePath,
+      dbPath,
+      safetyPath,
+      requiresRelaunch: !isDevelopment
+    })
+
+    return {
+      success: true,
+      message: isDevelopment
+        ? 'Backup restaurado. Reinicia el entorno de desarrollo para aplicar los cambios.'
+        : 'Backup restaurado. La aplicacion se reiniciara para aplicar los cambios.',
+      requiresRelaunch: !isDevelopment
+    }
   } catch (error) {
+    writeMainLog('error', 'Backup restore failed', error)
     return { success: false, message: `Error al restaurar: ${error instanceof Error ? error.message : error}` }
   }
 })
@@ -895,6 +1053,62 @@ ipcMain.handle('ticket:print', async (_, payload: TicketPrintPayload) => {
   }
 })
 
-ipcMain.handle('print:pdf', async (_, data: TicketPrintPayload) => {
-  return { success: false, error: 'Use ticket:print instead', data }
-})
+ipcMain.handle(
+  'print:pdf',
+  async (
+    _,
+    data: {
+      html?: string
+      defaultFileName?: string
+      landscape?: boolean
+    }
+  ) => {
+    if (!data?.html || typeof data.html !== 'string') {
+      return { success: false, error: 'Invalid PDF payload' }
+    }
+
+    const saveDialogOptions = {
+      title: 'Guardar PDF',
+      defaultPath: data.defaultFileName || `lucy3000_${new Date().toISOString().slice(0, 10)}.pdf`,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }]
+    }
+    const saveResult = mainWindow
+      ? await dialog.showSaveDialog(mainWindow, saveDialogOptions)
+      : await dialog.showSaveDialog(saveDialogOptions)
+
+    if (saveResult.canceled || !saveResult.filePath) {
+      return { success: false, canceled: true }
+    }
+
+    const pdfWindow = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        sandbox: true
+      }
+    })
+
+    try {
+      await pdfWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(data.html)}`)
+
+      const pdfBuffer = await pdfWindow.webContents.printToPDF({
+        printBackground: true,
+        landscape: Boolean(data.landscape),
+        pageSize: 'A4'
+      })
+
+      await fsPromises.writeFile(saveResult.filePath, pdfBuffer)
+
+      return {
+        success: true,
+        filePath: saveResult.filePath
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error)
+      }
+    } finally {
+      pdfWindow.close()
+    }
+  }
+)

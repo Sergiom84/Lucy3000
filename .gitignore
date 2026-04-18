@@ -43,6 +43,9 @@ out/
 # Backups
 backups/
 
+# Local SQLite runtime/build databases
+prisma/prisma/
+
 # Local tooling / binaries
 tools/
 

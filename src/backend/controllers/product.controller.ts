@@ -1,6 +1,13 @@
 import { Request, Response } from 'express'
 import { prisma } from '../db'
-import * as XLSX from 'xlsx'
+import { loadWorkbookFromBuffer, worksheetToObjects } from '../utils/spreadsheet'
+
+const buildSearchTerms = (value: string) =>
+  value
+    .trim()
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter(Boolean)
 
 const parseSpanishDecimal = (value: unknown): number => {
   if (value === null || value === undefined) return NaN
@@ -21,12 +28,19 @@ export const getProducts = async (req: Request, res: Response) => {
 
     const where: any = {}
 
-    if (search) {
-      where.OR = [
-        { name: { contains: search as string } },
-        { sku: { contains: search as string } },
-        { barcode: { contains: search as string } }
-      ]
+    if (typeof search === 'string' && search.trim()) {
+      const searchTerms = buildSearchTerms(search)
+
+      where.AND = searchTerms.map((term) => ({
+        OR: [
+          { name: { contains: term } },
+          { sku: { contains: term } },
+          { barcode: { contains: term } },
+          { brand: { contains: term } },
+          { category: { contains: term } },
+          { description: { contains: term } }
+        ]
+      }))
     }
 
     if (isActive !== undefined) {
@@ -253,11 +267,14 @@ export const importProductsFromExcel = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'No file uploaded' })
     }
 
-    // Leer el archivo Excel
-    const workbook = XLSX.read(req.file.buffer, { type: 'buffer' })
-    const sheetName = workbook.SheetNames[0]
-    const worksheet = workbook.Sheets[sheetName]
-    const data = XLSX.utils.sheet_to_json(worksheet)
+    const workbook = await loadWorkbookFromBuffer(req.file.buffer)
+    const worksheet = workbook.worksheets[0]
+
+    if (!worksheet) {
+      return res.status(400).json({ error: 'No worksheet found in the uploaded file' })
+    }
+
+    const data = worksheetToObjects(worksheet)
 
     const results = {
       success: 0,

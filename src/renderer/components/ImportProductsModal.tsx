@@ -2,7 +2,13 @@ import { useState } from 'react'
 import { Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle, X } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
-import * as XLSX from 'xlsx'
+import {
+  XLSX_FILE_ACCEPT,
+  assertSupportedSpreadsheetFile,
+  downloadWorkbook,
+  markFirstRowAsHeader,
+  setWorksheetColumnWidths
+} from '../utils/excel'
 
 interface ImportProductsModalProps {
   onSuccess: () => void
@@ -18,14 +24,10 @@ export default function ImportProductsModal({ onSuccess, onCancel }: ImportProdu
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0]
 
-      // Validar que sea un archivo Excel
-      const validTypes = [
-        'application/vnd.ms-excel',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-      ]
-
-      if (!validTypes.includes(selectedFile.type) && !selectedFile.name.match(/\.(xlsx|xls)$/)) {
-        toast.error('Por favor selecciona un archivo Excel válido (.xlsx o .xls)')
+      try {
+        assertSupportedSpreadsheetFile(selectedFile)
+      } catch (error: any) {
+        toast.error(error.message)
         return
       }
 
@@ -34,36 +36,21 @@ export default function ImportProductsModal({ onSuccess, onCancel }: ImportProdu
     }
   }
 
-  const handleDownloadTemplate = () => {
-    // Crear plantilla de Excel
-    const template = [
-      {
-        ID: 'CHAMP-001',
-        Marca: "L'Oréal",
-        Familia: 'Cuidado del Cabello',
-        'Descripción': 'Champú hidratante 500ml',
-        Cantidad: 50,
-        PVP: '15,99'
-      }
-    ]
+  const handleDownloadTemplate = async () => {
+    try {
+      await downloadWorkbook('plantilla_productos.xlsx', (workbook) => {
+        const worksheet = workbook.addWorksheet('Productos')
+        worksheet.addRow(['ID', 'Marca', 'Familia', 'Descripcion', 'Cantidad', 'PVP'])
+        worksheet.addRow(['CHAMP-001', "L'Oréal", 'Cuidado del Cabello', 'Champu hidratante 500ml', 50, '15,99'])
+        markFirstRowAsHeader(worksheet)
+        setWorksheetColumnWidths(worksheet, [15, 20, 20, 35, 10, 10])
+      })
 
-    const ws = XLSX.utils.json_to_sheet(template)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Productos')
-
-    // Ajustar ancho de columnas
-    const colWidths = [
-      { wch: 15 }, // ID
-      { wch: 20 }, // Marca
-      { wch: 20 }, // Familia
-      { wch: 35 }, // Descripción
-      { wch: 10 }, // Cantidad
-      { wch: 10 }  // PVP
-    ]
-    ws['!cols'] = colWidths
-
-    XLSX.writeFile(wb, 'plantilla_productos.xlsx')
-    toast.success('Plantilla descargada')
+      toast.success('Plantilla descargada')
+    } catch (error) {
+      console.error('Error generating products template:', error)
+      toast.error('No se pudo generar la plantilla')
+    }
   }
 
   const handleImport = async () => {
@@ -156,7 +143,7 @@ export default function ImportProductsModal({ onSuccess, onCancel }: ImportProdu
                     <span className="font-semibold">Haz clic para subir</span> o arrastra el archivo
                   </p>
                   <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                    Excel (XLSX, XLS)
+                    Excel (.xlsx)
                   </p>
                 </>
               )}
@@ -164,7 +151,7 @@ export default function ImportProductsModal({ onSuccess, onCancel }: ImportProdu
             <input
               type="file"
               className="hidden"
-              accept=".xlsx,.xls"
+              accept={XLSX_FILE_ACCEPT}
               onChange={handleFileChange}
             />
           </label>

@@ -1,19 +1,68 @@
-# Backup y Restauración (Supabase)
+# Backup y Restauración
 
-Estado de revisión: 2026-02-17
+Estado actualizado: 2026-04-16
 
-> Nota: este documento describe un flujo histórico de restauración sobre Supabase/PostgreSQL. No implica que el runtime actual de la app de escritorio use Supabase; ese runtime usa SQLite local por defecto.
+## Alcance
 
-## Resumen rápido
-- Backup analizado: `C:\Users\sergi\Desktop\backup Lucy3000\db_cluster-08-11-2025@00-27-55.backup`
-- Formato real detectado: SQL plano (texto), no `pg_dump` custom
-- Proyecto Supabase actual (`mpyifvwqyakkmwdmtbhp`): reconstruido y operativo
-- `supabase db pull` falla sin Docker en este entorno
-- Ya hay binarios portables PostgreSQL en `tools/postgresql-17/pgsql/bin` (`psql`, `pg_restore`, `pg_dump`)
+Este documento cubre dos cosas distintas:
+
+- backups y restauración del runtime actual de escritorio basado en SQLite;
+- restauración histórica apoyada en scripts PostgreSQL/Supabase heredados.
+
+No son el mismo flujo y no deben mezclarse.
+
+## 1. Runtime actual de escritorio
+
+El escritorio usa SQLite local. Los backups operativos diarios se resuelven copiando el fichero `.db`.
+
+### Qué hace hoy la app
+
+Desde Electron, `src/main/main.ts` expone:
+
+- creación manual de backup;
+- restauración desde un backup seleccionado;
+- listado de backups existentes;
+- configuración de carpeta de backups;
+- auto-backup simple semanal.
+
+Comportamiento actual:
+
+- los backups manuales generan `lucy3000-backup-<timestamp>.db`;
+- se conservan los últimos 10 backups manuales;
+- la restauración crea antes una copia de seguridad adicional `*.pre-restore`;
+- el auto-backup conserva los últimos 4 backups automáticos.
+
+### Dónde viven
+
+Por defecto, la app usa el directorio de datos del usuario. La carpeta de destino puede cambiarse desde `Settings`.
+
+### Recomendación operativa
+
+- usa una carpeta sincronizada si quieres réplica externa, por ejemplo OneDrive o Google Drive;
+- no reemplaces la base en caliente fuera del flujo de restauración de la app;
+- después de restaurar, reinicia la aplicación.
+
+## 2. Restauración histórica
+
+El repositorio conserva tooling para analizar y reconstruir un backup histórico PostgreSQL/Supabase. Esto no convierte a Supabase en la base activa del producto; es un flujo separado de auditoría o recuperación.
+
+Scripts relevantes:
+
+- `scripts/analyze-backup.ps1`
+- `scripts/restore-backup.ps1`
+- `scripts/rebuild-supabase-db.ps1`
+- `scripts/pull-schema-no-docker.ps1`
+- `scripts/public-data-counts.sql`
+
+## Resumen del backup histórico auditado
+
+- Backup analizado: `db_cluster-08-11-2025@00-27-55.backup`
+- Formato detectado: SQL plano
 - Flujo automático disponible: `npm run db:rebuild`
+- Binarios PostgreSQL portables disponibles en `tools/postgresql-17/pgsql/bin`
 
-## Hallazgos del backup
-Inventario detectado (esquema `public`) y compatible con `prisma/schema.prisma`:
+Inventario de negocio detectado:
+
 - `users`
 - `clients`
 - `client_history`
@@ -28,60 +77,39 @@ Inventario detectado (esquema `public`) y compatible con `prisma/schema.prisma`:
 - `notifications`
 - `settings`
 
-Enums públicos detectados:
-- `UserRole`
-- `AppointmentStatus`
-- `StockMovementType`
-- `PaymentMethod`
-- `SaleStatus`
-- `CashMovementType`
+Conteos auditados en el histórico:
 
-Filas detectadas por bloques `COPY` en backup:
-- `public.users`: 1
-- `public.clients`: 2
-- `public.services`: 24
-- Resto de tablas negocio: 0
-
-## Entregables añadidos
-- Migración base Prisma:
-  - `prisma/migrations/20260217184500_initial_schema/migration.sql`
-- Script de auditoría de backup:
-  - `scripts/analyze-backup.ps1`
-- Script de restauración con `pg_restore`:
-  - `scripts/restore-backup.ps1`
-- Script de extracción de esquema remoto sin Docker:
-  - `scripts/pull-schema-no-docker.ps1`
-- Script de reconstrucción completa (sin Docker y sin password manual):
-  - `scripts/rebuild-supabase-db.ps1`
-- SQL de validación post-restauración:
-  - `scripts/public-data-counts.sql`
-
-## Flujo recomendado de reconstrucción
-1. Ejecutar reconstrucción completa:
-```powershell
-npm run db:rebuild
-```
-2. Validar conteos de tablas con `scripts/public-data-counts.sql`.
-3. Probar login (`admin@lucy3000.com`) y flujos de negocio (clientes, servicios, ventas).
-
-## Resultado actual de la restauración
-Conteos verificados en remoto tras `db:rebuild`:
 - `users`: 1
 - `clients`: 2
 - `services`: 24
 - resto de tablas de negocio: 0
 
-## Flujo recomendado sin Docker para "pull" de esquema remoto
-Para mantener un snapshot del esquema remoto sin usar `supabase db pull`:
+## Flujo recomendado para reconstrucción histórica
+
+```powershell
+npm run db:rebuild
+```
+
+Después:
+
+- valida conteos con `scripts/public-data-counts.sql`;
+- revisa permisos del entorno restaurado;
+- valida login y flujos básicos antes de usar ese entorno para soporte o migración.
+
+## Snapshot de esquema remoto sin Docker
+
+Si necesitas extraer un snapshot de esquema remoto sin `supabase db pull`:
+
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pull-schema-no-docker.ps1 `
-  -DatabaseUrl "<SUPABASE_DATABASE_URL_CON_SSLMODE_REQUIRE>" `
+  -DatabaseUrl "<DATABASE_URL>" `
   -Schemas public `
   -PgBinDir ".\tools\postgresql-17\pgsql\bin"
 ```
-Esto genera un SQL en `supabase/migrations` con timestamp.
 
-## Notas importantes
-- El backup incluye esquemas de plataforma (`auth`, `storage`, `realtime`, `vault`), pero para Lucy3000 solo se requiere `public`.
-- En el dump histórico se observan `GRANT ALL` amplios sobre tablas públicas; se recomienda revisar permisos/RLS después de restaurar.
-- `scripts/rebuild-supabase-db.ps1` reutiliza `filtered_db_cluster-08-11-2025@00-27-55.sql` si existe para acelerar la carga.
+## Qué no hacer
+
+- no trates el flujo histórico PostgreSQL como si fuera el runtime diario del escritorio;
+- no documentes Supabase como dependencia obligatoria del producto actual;
+- no restaures un backup antiguo sobre una instalación activa sin conservar copia previa del `.db` local;
+- no toques migraciones históricas ya aplicadas para “arreglar” un restore puntual.

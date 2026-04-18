@@ -1,0 +1,21 @@
+-- CreateTable
+CREATE TABLE "appointment_legends" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "name" TEXT NOT NULL,
+    "color" TEXT NOT NULL,
+    "sortOrder" INTEGER NOT NULL DEFAULT 0,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
+);
+
+INSERT INTO "appointment_legends" ("id", "name", "color", "sortOrder", "createdAt", "updatedAt") VALUES
+('5f4a529f-c55d-4e91-9a6f-2cc3a8a87ad1', 'Cejas y pestañas', '#7C3AED', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+('cef13ecf-36ca-4f1a-a7d5-5405a65f6d59', 'Cera hombre', '#92400E', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+('0b3b6602-0f3d-44a4-b79b-8f341ec5c846', 'Cera mujer', '#BE123C', 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+('19144c05-aadf-4b80-9fbe-af6a3036a8df', 'Corporal', '#0F766E', 3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+('b963ca48-b1cf-43a7-94fe-b3cfaec1d5fc', 'Dep. electrica', '#1D4ED8', 4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+('7e17fe9e-8946-4f12-ad1c-d22beecde106', 'Facial', '#15803D', 5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+('fa4a0d75-8ba1-4827-bcc6-727799d51506', 'Medicina', '#475569', 6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+('1d5f50bd-f4f5-4ef3-ae97-89df56d11bc0', 'Micropigmentacion', '#C026D3', 7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+('4c577eb3-4475-4304-a938-b3cfab8a6920', 'SHR', '#EA580C', 8, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+('9b3d422b-e1e7-45cc-971e-3d9f4e1c8086', 'Venta', '#0284C7', 9, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);

@@ -66,16 +66,16 @@ describe('validateAppointmentSlot', () => {
     })
   })
 
-  it('rechaza horas fuera de 09:00-21:00 con INVALID_HOURS', async () => {
+  it('rechaza horas fuera de 08:00-22:00 con INVALID_HOURS', async () => {
     const result = await validateAppointmentSlot(
-      { ...baseInput, startTime: '08:00', endTime: '09:00' },
+      { ...baseInput, startTime: '07:59', endTime: '09:00' },
       prismaMock
     )
 
     expect(result.errors).toHaveLength(1)
     expect(result.errors[0]).toEqual({
       code: 'INVALID_HOURS',
-      message: 'El horario debe estar entre 09:00 y 21:00'
+      message: 'El horario debe estar entre 08:00 y 22:00'
     })
   })
 
@@ -144,7 +144,7 @@ describe('validateAppointmentSlot', () => {
     expect(result.warnings).toEqual([
       {
         code: 'OUTSIDE_BUSINESS_HOURS',
-        message: 'La hora seleccionada esta fuera del horario habitual (descanso 14:00-16:00)'
+        message: 'La hora seleccionada coincide con la franja de descanso habitual (14:00-16:00)'
       }
     ])
   })

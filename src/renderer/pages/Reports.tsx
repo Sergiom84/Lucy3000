@@ -1,15 +1,38 @@
 import { useState, useEffect } from 'react'
-import { TrendingUp, TrendingDown, Users, Package, DollarSign, ShoppingCart, Download, Filter, Activity, PieChart as PieChartIcon, BarChart3, Maximize2, Minimize2 } from 'lucide-react'
+import {
+  TrendingUp,
+  TrendingDown,
+  Users,
+  Package,
+  DollarSign,
+  ShoppingCart,
+  Filter,
+  Activity,
+  PieChart as PieChartIcon,
+  BarChart3,
+  Maximize2,
+  Minimize2,
+  CreditCard,
+  Ticket,
+  Scissors
+} from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
 import { format, subDays, startOfMonth, endOfMonth } from 'date-fns'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart as RePieChart, Pie, Cell } from 'recharts'
 import { paymentMethodLabel } from '../utils/tickets'
+import { exportRawSalesReportWorkbook } from '../utils/exports'
 
 interface DateRange {
   startDate: string
   endDate: string
 }
+
+const formatCurrency = (value: number) =>
+  new Intl.NumberFormat('es-ES', {
+    style: 'currency',
+    currency: 'EUR'
+  }).format(value)
 
 // Componente para tarjeta expandible
 const ExpandableCard = ({ title, children, icon: Icon }: { title: string; children: React.ReactNode; icon: any }) => {
@@ -101,25 +124,50 @@ export default function Reports() {
     })
   }
 
-  const exportReport = (type: string) => {
-    toast.success(`Exportando reporte de ${type}...`)
-    // TODO: Implement export functionality
+  const exportReport = async () => {
+    if (!salesReport) {
+      toast.error('Todavía no hay datos para exportar')
+      return
+    }
+
+    try {
+      await exportRawSalesReportWorkbook({
+        startDate: dateRange.startDate,
+        endDate: dateRange.endDate,
+        totalSales: Number(salesReport.totalSales || 0),
+        collectedRevenue: Number(salesReport.collectedRevenue || 0),
+        workPerformedRevenue: Number(salesReport.workPerformedRevenue || 0),
+        paymentMethods: salesReport.paymentMethods || {}
+      })
+      toast.success('Resumen bruto exportado por fechas')
+    } catch (error) {
+      console.error('Report export error:', error)
+      toast.error('No se pudo exportar el resumen de reportes')
+    }
   }
 
   const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
 
   // Prepare chart data
   const paymentMethodsData = salesReport
-    ? Object.entries(salesReport.paymentMethods).map(([key, value]: any) => ({
+    ? Object.entries(salesReport.paymentMethods)
+        .map(([key, value]: any) => ({
         name: paymentMethodLabel(key),
         value: Number(value)
-      }))
+        }))
+        .filter((entry) => entry.value > 0)
     : []
 
   const topProductsData = productReport?.topProducts.slice(0, 5).map((p: any) => ({
     name: p.name.length > 20 ? p.name.substring(0, 20) + '...' : p.name,
     ventas: p.totalSold,
     ingresos: Number(p.revenue)
+  })) || []
+
+  const topServicesData = salesReport?.topServices?.slice(0, 5).map((service: any) => ({
+    name: service.name.length > 20 ? service.name.substring(0, 20) + '...' : service.name,
+    ventas: service.quantity,
+    ingresos: Number(service.revenue)
   })) || []
 
   const topClientsData = clientReport?.topClients.slice(0, 5).map((c: any) => ({
@@ -135,6 +183,19 @@ export default function Reports() {
     { name: 'Retiros', monto: cashReport.totalWithdrawals }
   ] : []
 
+  const accountBalanceSummary = salesReport?.accountBalanceSummary || {
+    topUpCount: 0,
+    topUpTotal: 0,
+    consumptionCount: 0,
+    consumptionTotal: 0
+  }
+
+  const bonoSummary = salesReport?.bonoSummary || {
+    soldCount: 0,
+    consumedSessions: 0,
+    topBonos: []
+  }
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
@@ -144,10 +205,9 @@ export default function Reports() {
         </h1>
 
         <button
-          onClick={() => exportReport(activeTab)}
+          onClick={() => void exportReport()}
           className="btn btn-secondary"
         >
-          <Download className="w-5 h-5 mr-2" />
           Exportar
         </button>
       </div>
@@ -197,35 +257,30 @@ export default function Reports() {
           onClick={() => setActiveTab('overview')}
           className={`btn ${activeTab === 'overview' ? 'btn-primary' : 'btn-secondary'}`}
         >
-          <Activity className="w-4 h-4 mr-2" />
           Resumen
         </button>
         <button
           onClick={() => setActiveTab('sales')}
           className={`btn ${activeTab === 'sales' ? 'btn-primary' : 'btn-secondary'}`}
         >
-          <ShoppingCart className="w-4 h-4 mr-2" />
           Ventas
         </button>
         <button
           onClick={() => setActiveTab('clients')}
           className={`btn ${activeTab === 'clients' ? 'btn-primary' : 'btn-secondary'}`}
         >
-          <Users className="w-4 h-4 mr-2" />
           Clientes
         </button>
         <button
           onClick={() => setActiveTab('products')}
           className={`btn ${activeTab === 'products' ? 'btn-primary' : 'btn-secondary'}`}
         >
-          <Package className="w-4 h-4 mr-2" />
           Productos
         </button>
         <button
           onClick={() => setActiveTab('cash')}
           className={`btn ${activeTab === 'cash' ? 'btn-primary' : 'btn-secondary'}`}
         >
-          <DollarSign className="w-4 h-4 mr-2" />
           Flujo de Caja
         </button>
       </div>
@@ -253,114 +308,172 @@ export default function Reports() {
                     {salesReport?.totalSales || 0}
                   </p>
                   <p className="text-sm text-blue-600 mt-1">
-                    €{salesReport?.workPerformedRevenue.toFixed(2) || '0.00'}
+                    {formatCurrency(Number(salesReport?.workPerformedRevenue || 0))}
                   </p>
                 </div>
 
                 <div className="card">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm text-gray-600 dark:text-gray-400">Ticket Promedio</span>
+                    <span className="text-sm text-gray-600 dark:text-gray-400">Venta Promedio</span>
                     <TrendingUp className="w-5 h-5 text-green-600" />
                   </div>
                   <p className="text-3xl font-bold text-gray-900 dark:text-white">
-                    €{salesReport?.averageTicket.toFixed(2) || '0.00'}
+                    {formatCurrency(Number(salesReport?.averageTicket || 0))}
                   </p>
                 </div>
 
                 <div className="card">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm text-gray-600 dark:text-gray-400">Clientes Totales</span>
-                    <Users className="w-5 h-5 text-purple-600" />
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <span className="text-sm text-gray-600 dark:text-gray-400">Abono</span>
+                    <CreditCard className="w-5 h-5 text-purple-600" />
                   </div>
-                  <p className="text-3xl font-bold text-gray-900 dark:text-white">
-                    {clientReport?.totalClients || 0}
+                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Recargado</p>
+                  <p className="text-2xl font-bold text-purple-600">
+                    {formatCurrency(Number(accountBalanceSummary.topUpTotal || 0))}
                   </p>
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                    €{clientReport?.averageSpent.toFixed(2) || '0.00'} promedio
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    {accountBalanceSummary.topUpCount || 0} movimientos
+                  </p>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mt-4">Consumido</p>
+                  <p className="text-lg font-semibold text-red-600">
+                    {formatCurrency(Number(accountBalanceSummary.consumptionTotal || 0))}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    {accountBalanceSummary.consumptionCount || 0} usos
                   </p>
                 </div>
 
                 <div className="card">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm text-gray-600 dark:text-gray-400">Valor Inventario</span>
-                    <Package className="w-5 h-5 text-orange-600" />
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <span className="text-sm text-gray-600 dark:text-gray-400">Bono</span>
+                    <Ticket className="w-5 h-5 text-orange-600" />
                   </div>
                   <p className="text-3xl font-bold text-gray-900 dark:text-white">
-                    €{productReport?.totalValue.toFixed(2) || '0.00'}
+                    {bonoSummary.soldCount || 0}
                   </p>
-                  <p className="text-sm text-red-600 mt-1">
-                    {productReport?.lowStockProducts.length || 0} stock bajo
+                  <p className="text-sm text-orange-600 mt-1">
+                    {bonoSummary.consumedSessions || 0} sesiones consumidas
+                  </p>
+                  <p className="mt-4 text-xs text-gray-500 dark:text-gray-400">
+                    {Array.isArray(bonoSummary.topBonos) && bonoSummary.topBonos.length > 0
+                      ? `Top 3: ${bonoSummary.topBonos
+                          .map((bono: any) => `${bono.name} (${bono.count})`)
+                          .join(' · ')}`
+                      : 'Sin ventas de bonos en el periodo'}
                   </p>
                 </div>
               </div>
 
               {/* Expandable Charts Grid */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5 gap-4">
                 {/* Payment Methods Chart */}
                 <ExpandableCard title="Ventas por Método de Pago" icon={PieChartIcon}>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <RePieChart>
-                      <Pie
-                        data={paymentMethodsData}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        label={(entry) => `${entry.name}: €${entry.value.toFixed(0)}`}
-                        outerRadius={80}
-                        fill="#8884d8"
-                        dataKey="value"
-                      >
-                        {paymentMethodsData.map((_, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip formatter={(value: any) => `€${value.toFixed(2)}`} />
-                    </RePieChart>
-                  </ResponsiveContainer>
+                  {paymentMethodsData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={300}>
+                      <RePieChart>
+                        <Pie
+                          data={paymentMethodsData}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          label={(entry) => `${entry.name}: €${entry.value.toFixed(0)}`}
+                          outerRadius={80}
+                          fill="#8884d8"
+                          dataKey="value"
+                        >
+                          {paymentMethodsData.map((_, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(value: any) => formatCurrency(Number(value || 0))} />
+                      </RePieChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex h-[300px] items-center justify-center text-center text-sm text-gray-500 dark:text-gray-400">
+                      No hay cobros registrados en el periodo.
+                    </div>
+                  )}
                 </ExpandableCard>
 
                 {/* Cash Flow Chart */}
                 <ExpandableCard title="Flujo de Caja" icon={BarChart3}>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={cashFlowData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" />
-                      <YAxis />
-                      <Tooltip formatter={(value: any) => `€${value.toFixed(2)}`} />
-                      <Bar dataKey="monto" fill="#3b82f6" />
-                    </BarChart>
-                  </ResponsiveContainer>
+                  {cashFlowData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={cashFlowData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" />
+                        <YAxis />
+                        <Tooltip formatter={(value: any) => formatCurrency(Number(value || 0))} />
+                        <Bar dataKey="monto" fill="#3b82f6" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex h-[300px] items-center justify-center text-center text-sm text-gray-500 dark:text-gray-400">
+                      No hay movimientos de caja en el periodo.
+                    </div>
+                  )}
                   <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
                     <p className="text-sm font-semibold text-blue-900 dark:text-blue-200">
-                      Flujo Neto: €{cashReport?.netCashFlow.toFixed(2) || '0.00'}
+                      Flujo Neto: {formatCurrency(Number(cashReport?.netCashFlow || 0))}
                     </p>
                   </div>
                 </ExpandableCard>
 
                 {/* Top Products Chart */}
                 <ExpandableCard title="Productos Más Vendidos" icon={Package}>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={topProductsData} layout="vertical">
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis type="number" />
-                      <YAxis dataKey="name" type="category" width={100} />
-                      <Tooltip />
-                      <Bar dataKey="ventas" fill="#10b981" />
-                    </BarChart>
-                  </ResponsiveContainer>
+                  {topProductsData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={topProductsData} layout="vertical">
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis type="number" />
+                        <YAxis dataKey="name" type="category" width={100} />
+                        <Tooltip />
+                        <Bar dataKey="ventas" fill="#10b981" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex h-[300px] items-center justify-center text-center text-sm text-gray-500 dark:text-gray-400">
+                      Todavía no hay productos vendidos.
+                    </div>
+                  )}
+                </ExpandableCard>
+
+                {/* Top Services Chart */}
+                <ExpandableCard title="Tratamientos Más Vendidos" icon={Scissors}>
+                  {topServicesData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={topServicesData} layout="vertical">
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis type="number" />
+                        <YAxis dataKey="name" type="category" width={100} />
+                        <Tooltip />
+                        <Bar dataKey="ventas" fill="#f59e0b" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex h-[300px] items-center justify-center text-center text-sm text-gray-500 dark:text-gray-400">
+                      Todavía no hay tratamientos vendidos.
+                    </div>
+                  )}
                 </ExpandableCard>
 
                 {/* Top Clients Chart */}
                 <ExpandableCard title="Top Clientes" icon={Users}>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={topClientsData} layout="vertical">
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis type="number" />
-                      <YAxis dataKey="name" type="category" width={100} />
-                      <Tooltip formatter={(value: any) => `€${value.toFixed(2)}`} />
-                      <Bar dataKey="gastado" fill="#8b5cf6" />
-                    </BarChart>
-                  </ResponsiveContainer>
+                  {topClientsData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={topClientsData} layout="vertical">
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis type="number" />
+                        <YAxis dataKey="name" type="category" width={100} />
+                        <Tooltip formatter={(value: any) => formatCurrency(Number(value || 0))} />
+                        <Bar dataKey="gastado" fill="#8b5cf6" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex h-[300px] items-center justify-center text-center text-sm text-gray-500 dark:text-gray-400">
+                      Todavía no hay clientes con gasto acumulado.
+                    </div>
+                  )}
                 </ExpandableCard>
               </div>
             </div>

@@ -5,6 +5,43 @@ import renderer from 'vite-plugin-electron-renderer'
 import path from 'path'
 
 export default defineConfig({
+  build: {
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          const normalizedId = id.replace(/\\/g, '/')
+
+          if (!normalizedId.includes('/node_modules/')) {
+            return
+          }
+
+          if (normalizedId.includes('/exceljs/')) {
+            return 'exceljs'
+          }
+
+          if (
+            normalizedId.includes('/react-big-calendar/') ||
+            normalizedId.includes('/moment/')
+          ) {
+            return 'calendar'
+          }
+
+          if (normalizedId.includes('/recharts/')) {
+            return 'analytics'
+          }
+
+          if (
+            normalizedId.includes('/react-router/') ||
+            normalizedId.includes('/react-router-dom/') ||
+            normalizedId.includes('/@remix-run/router/')
+          ) {
+            return 'router'
+          }
+        }
+      }
+    }
+  },
   plugins: [
     react(),
     electron([

@@ -1,7 +1,14 @@
 import { Request, Response } from 'express'
 import { Prisma } from '@prisma/client'
-import * as XLSX from 'xlsx'
 import { prisma } from '../db'
+import { loadWorkbookFromBuffer, worksheetToObjects } from '../utils/spreadsheet'
+
+const buildSearchTerms = (value: string) =>
+  value
+    .trim()
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter(Boolean)
 
 const parseDecimal = (value: unknown): number | null => {
   if (value === null || value === undefined || String(value).trim() === '') return null
@@ -60,16 +67,29 @@ const normalizeServicePayload = (payload: Record<string, any>, partial = false) 
 
 export const getServices = async (req: Request, res: Response) => {
   try {
-    const { isActive, category } = req.query
+    const { search, isActive, category } = req.query
 
     const where: any = {}
 
+    if (typeof search === 'string' && search.trim()) {
+      const searchTerms = buildSearchTerms(search)
+
+      where.AND = searchTerms.map((term) => ({
+        OR: [
+          { name: { contains: term } },
+          { serviceCode: { contains: term } },
+          { category: { contains: term } },
+          { description: { contains: term } }
+        ]
+      }))
+    }
+
     if (isActive !== undefined) {
-      where.isActive = isActive === 'true'
+      where.isActive = typeof isActive === 'boolean' ? isActive : isActive === 'true'
     }
 
     if (category) {
-      where.category = category
+      where.category = String(category)
     }
 
     const services = await prisma.service.findMany({
@@ -227,10 +247,14 @@ export const importServicesFromExcel = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'No file uploaded' })
     }
 
-    const workbook = XLSX.read(req.file.buffer, { type: 'buffer' })
-    const sheetName = workbook.SheetNames[0]
-    const worksheet = workbook.Sheets[sheetName]
-    const data = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '' })
+    const workbook = await loadWorkbookFromBuffer(req.file.buffer)
+    const worksheet = workbook.worksheets[0]
+
+    if (!worksheet) {
+      return res.status(400).json({ error: 'No worksheet found in the uploaded file' })
+    }
+
+    const data = worksheetToObjects(worksheet)
 
     const results = {
       success: 0,

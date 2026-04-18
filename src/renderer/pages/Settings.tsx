@@ -1,11 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import { AlertCircle, Calendar, CheckCircle2, Database, FolderOpen, HardDrive, Link2, Printer, RefreshCw, RotateCcw, Save, Unlink, Upload } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Modal from '../components/Modal'
-import ImportProductsModal from '../components/ImportProductsModal'
-import ImportServicesModal from '../components/ImportServicesModal'
-import ImportClientsModal from '../components/ImportClientsModal'
-import ImportBonosModal from '../components/ImportBonosModal'
 import {
   getPrintTicketSuccessMessage,
   getDebugLogFilePath,
@@ -22,6 +18,11 @@ import api from '../utils/api'
 import { useAuthStore } from '../stores/authStore'
 import { buildTestTicketPayload } from '../utils/tickets'
 import { DEFAULT_NETWORK_TICKET_PORT } from '../../shared/ticketPrinter'
+
+const ImportProductsModal = lazy(() => import('../components/ImportProductsModal'))
+const ImportServicesModal = lazy(() => import('../components/ImportServicesModal'))
+const ImportClientsModal = lazy(() => import('../components/ImportClientsModal'))
+const ImportBonosModal = lazy(() => import('../components/ImportBonosModal'))
 
 type GoogleCalendarConfig = {
   connected: boolean
@@ -45,8 +46,12 @@ const DEFAULT_CALENDAR_CONFIG: GoogleCalendarConfig = {
 
 const GOOGLE_CALENDAR_MESSAGE_SOURCE = 'lucy3000-google-calendar-oauth'
 
+function LazyPanelLoader() {
+  return <div className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">Cargando...</div>
+}
+
 export default function Settings() {
-  const { user } = useAuthStore()
+  const { user, logout } = useAuthStore()
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [testingPrinter, setTestingPrinter] = useState(false)
@@ -269,6 +274,13 @@ export default function Settings() {
       const result = await window.electronAPI!.backup.restore()
       if (result.success) {
         toast.success(result.message || 'Backup restaurado')
+
+        if (result.requiresRelaunch) {
+          logout()
+          setTimeout(() => {
+            void window.electronAPI!.relaunch()
+          }, 600)
+        }
       } else {
         toast.error(result.message || 'Error al restaurar')
       }
@@ -410,9 +422,6 @@ export default function Settings() {
     <div className="space-y-6 animate-fade-in">
       <div>
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Configuración</h1>
-        <p className="mt-1 text-gray-600 dark:text-gray-400">
-          Ajustes del dispositivo e integraciones de la agenda.
-        </p>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -554,9 +563,6 @@ export default function Settings() {
             <Calendar className="h-5 w-5 text-primary-600" />
             <div>
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Google Calendar</h2>
-              <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                Integración global de agenda. Requiere permisos de administrador.
-              </p>
             </div>
           </div>
 
@@ -720,9 +726,6 @@ export default function Settings() {
             <Database className="h-5 w-5 text-primary-600" />
             <div>
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Importar datos</h2>
-              <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                Carga clientes, tratamientos o productos desde un archivo Excel.
-              </p>
             </div>
           </div>
 
@@ -769,9 +772,6 @@ export default function Settings() {
               <HardDrive className="h-5 w-5 text-primary-600" />
               <div>
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Backups</h2>
-                <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                  Copia de seguridad de la base de datos local.
-                </p>
               </div>
             </div>
 
@@ -810,9 +810,6 @@ export default function Settings() {
                     <FolderOpen className="h-4 w-4" />
                   </button>
                 </div>
-                <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
-                  Si usas Google Drive o OneDrive, elige una carpeta sincronizada para subir los backups a la nube automaticamente.
-                </p>
               </div>
 
               <label className="flex cursor-pointer items-center gap-3">
@@ -857,9 +854,6 @@ export default function Settings() {
               <AlertCircle className="h-5 w-5 text-primary-600" />
               <div>
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Diagnostico y logs</h2>
-                <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                  Lucy3000 guarda errores del renderer, Electron y backend en un fichero local.
-                </p>
               </div>
             </div>
 
@@ -872,70 +866,52 @@ export default function Settings() {
               <FolderOpen className="mr-2 h-4 w-4" />
               Abrir carpeta de logs
             </button>
-
-            <p className="text-xs text-gray-600 dark:text-gray-400">
-              Reproduce el error y enviame el contenido del log mas reciente para localizar el fallo exacto.
-            </p>
           </div>
         )}
-
-        <div className="card space-y-4 lg:col-span-2">
-          <div className="flex items-center gap-3">
-            <Printer className="h-5 w-5 text-primary-600" />
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Notas de despliegue</h2>
-          </div>
-
-          <div className="space-y-3 text-sm text-gray-600 dark:text-gray-400">
-            <p className="flex gap-2">
-              <CheckCircle2 className="mt-0.5 h-4 w-4 text-green-600" />
-              La impresora de tickets se configura por equipo; Google Calendar se configura una sola vez para toda la app.
-            </p>
-            <p className="flex gap-2">
-              <CheckCircle2 className="mt-0.5 h-4 w-4 text-green-600" />
-              Si Lucy3000 se abre en navegador, el fallback usa el diálogo de impresión del sistema y aprovecha los drivers instalados en ese equipo.
-            </p>
-            <p className="flex gap-2">
-              <AlertCircle className="mt-0.5 h-4 w-4 text-amber-600" />
-              Para impresoras ESC/POS, prioriza LAN con IP conocida o impresora instalada en Windows; USB directo desde Electron suele requerir más mantenimiento.
-            </p>
-            <p className="flex gap-2">
-              <AlertCircle className="mt-0.5 h-4 w-4 text-amber-600" />
-              Si desactivas la sincronización, Lucy3000 dejará de enviar nuevos cambios a Google Calendar, pero no borrará eventos antiguos automáticamente.
-            </p>
-            <p className="flex gap-2">
-              <CheckCircle2 className="mt-0.5 h-4 w-4 text-green-600" />
-              La invitación al cliente solo se envía si la cita tiene email y está activada la opción de invitaciones.
-            </p>
-          </div>
-        </div>
       </div>
 
       <Modal isOpen={importModal === 'clients'} title="Importar Clientes" onClose={() => setImportModal(null)}>
-        <ImportClientsModal
-          onSuccess={() => { setImportModal(null) }}
-          onCancel={() => setImportModal(null)}
-        />
+        {importModal === 'clients' ? (
+          <Suspense fallback={<LazyPanelLoader />}>
+            <ImportClientsModal
+              onSuccess={() => { setImportModal(null) }}
+              onCancel={() => setImportModal(null)}
+            />
+          </Suspense>
+        ) : null}
       </Modal>
 
       <Modal isOpen={importModal === 'services'} title="Importar Tratamientos" onClose={() => setImportModal(null)}>
-        <ImportServicesModal
-          onSuccess={() => { setImportModal(null) }}
-          onCancel={() => setImportModal(null)}
-        />
+        {importModal === 'services' ? (
+          <Suspense fallback={<LazyPanelLoader />}>
+            <ImportServicesModal
+              onSuccess={() => { setImportModal(null) }}
+              onCancel={() => setImportModal(null)}
+            />
+          </Suspense>
+        ) : null}
       </Modal>
 
       <Modal isOpen={importModal === 'products'} title="Importar Productos" onClose={() => setImportModal(null)}>
-        <ImportProductsModal
-          onSuccess={() => { setImportModal(null) }}
-          onCancel={() => setImportModal(null)}
-        />
+        {importModal === 'products' ? (
+          <Suspense fallback={<LazyPanelLoader />}>
+            <ImportProductsModal
+              onSuccess={() => { setImportModal(null) }}
+              onCancel={() => setImportModal(null)}
+            />
+          </Suspense>
+        ) : null}
       </Modal>
 
       <Modal isOpen={importModal === 'bonos'} title="Importar Bonos" onClose={() => setImportModal(null)}>
-        <ImportBonosModal
-          onSuccess={() => { setImportModal(null) }}
-          onCancel={() => setImportModal(null)}
-        />
+        {importModal === 'bonos' ? (
+          <Suspense fallback={<LazyPanelLoader />}>
+            <ImportBonosModal
+              onSuccess={() => { setImportModal(null) }}
+              onCancel={() => setImportModal(null)}
+            />
+          </Suspense>
+        ) : null}
       </Modal>
     </div>
   )

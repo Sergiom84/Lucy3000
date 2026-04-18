@@ -2,7 +2,13 @@ import { useState } from 'react'
 import { Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle, X } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
-import * as XLSX from 'xlsx'
+import {
+  XLSX_FILE_ACCEPT,
+  assertSupportedSpreadsheetFile,
+  downloadWorkbook,
+  markFirstRowAsHeader,
+  setWorksheetColumnWidths
+} from '../utils/excel'
 
 interface ImportBonosModalProps {
   onSuccess: () => void
@@ -18,8 +24,10 @@ export default function ImportBonosModal({ onSuccess, onCancel }: ImportBonosMod
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0]
 
-      if (!selectedFile.name.match(/\.(xlsx|xls)$/)) {
-        toast.error('Por favor selecciona un archivo Excel valido (.xlsx o .xls)')
+      try {
+        assertSupportedSpreadsheetFile(selectedFile)
+      } catch (error: any) {
+        toast.error(error.message)
         return
       }
 
@@ -28,29 +36,21 @@ export default function ImportBonosModal({ onSuccess, onCancel }: ImportBonosMod
     }
   }
 
-  const handleDownloadTemplate = () => {
-    const template = [
-      {
-        Categoria: 'CORPORAL',
-        Codigo: 'Corporal lipoled 40`',
-        Descripcion: 'Bono de 6 sesiones',
-        'Tarifa 1': '354'
-      }
-    ]
+  const handleDownloadTemplate = async () => {
+    try {
+      await downloadWorkbook('plantilla_bonos.xlsx', (workbook) => {
+        const worksheet = workbook.addWorksheet('Bonos')
+        worksheet.addRow(['Categoria', 'Codigo', 'Descripcion', 'Tarifa 1'])
+        worksheet.addRow(['CORPORAL', 'Corporal lipoled 40`', 'Bono de 6 sesiones', '354'])
+        markFirstRowAsHeader(worksheet)
+        setWorksheetColumnWidths(worksheet, [18, 28, 24, 12])
+      })
 
-    const ws = XLSX.utils.json_to_sheet(template)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Bonos')
-
-    ws['!cols'] = [
-      { wch: 18 },
-      { wch: 28 },
-      { wch: 24 },
-      { wch: 12 }
-    ]
-
-    XLSX.writeFile(wb, 'plantilla_bonos.xlsx')
-    toast.success('Plantilla descargada')
+      toast.success('Plantilla descargada')
+    } catch (error) {
+      console.error('Error generating bonos template:', error)
+      toast.error('No se pudo generar la plantilla')
+    }
   }
 
   const handleImport = async () => {
@@ -129,11 +129,11 @@ export default function ImportBonosModal({ onSuccess, onCancel }: ImportBonosMod
                   <p className="text-sm text-gray-600 dark:text-gray-400">
                     <span className="font-semibold">Haz clic para subir</span> o arrastra el archivo
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">Excel (XLSX, XLS)</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">Excel (.xlsx)</p>
                 </>
               )}
             </div>
-            <input type="file" className="hidden" accept=".xlsx,.xls" onChange={handleFileChange} />
+            <input type="file" className="hidden" accept={XLSX_FILE_ACCEPT} onChange={handleFileChange} />
           </label>
         </div>
       </div>

@@ -4,12 +4,24 @@ import { Calendar as BigCalendar, momentLocalizer, View } from 'react-big-calend
 import moment from 'moment'
 import 'moment/locale/es'
 import 'react-big-calendar/lib/css/react-big-calendar.css'
-import { ChevronLeft, ChevronRight, CreditCard, Plus, UserX } from 'lucide-react'
+import { ChevronLeft, ChevronRight, CreditCard, UserX } from 'lucide-react'
 import api from '../utils/api'
-import { getAppointmentColorTheme, TREATMENT_CATEGORY_LABELS } from '../utils/appointmentColors'
+import {
+  loadAppointmentLegendItems,
+  loadAppointmentLegendCategories,
+  preloadAppointmentFormCatalogs,
+  type AppointmentLegendCatalogItem
+} from '../utils/appointmentCatalogs'
+import { getAppointmentColorTheme } from '../utils/appointmentColors'
+import {
+  BUSINESS_END_MINUTES,
+  BUSINESS_START_MINUTES,
+  getTimeInputValueFromDate
+} from '../utils/appointmentTime'
 import { paymentMethodLabel } from '../utils/tickets'
 import toast from 'react-hot-toast'
 import Modal from '../components/Modal'
+import AppointmentLegendModal from '../components/AppointmentLegendModal'
 import AppointmentForm from '../components/AppointmentForm'
 import { getAppointmentDisplayName } from '../../shared/customerDisplay'
 
@@ -101,16 +113,27 @@ export default function Appointments() {
   const navigate = useNavigate()
   const [appointments, setAppointments] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [legendLoading, setLegendLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+  const [showLegendModal, setShowLegendModal] = useState(false)
   const [editingAppointment, setEditingAppointment] = useState<any>(null)
   const [selectedDate, setSelectedDate] = useState<Date | undefined>()
+  const [preselectedStartTime, setPreselectedStartTime] = useState<string | undefined>()
   const [initialCabin, setInitialCabin] = useState<'LUCY' | 'TAMARA' | 'CABINA_1' | 'CABINA_2'>('LUCY')
   const [view, setView] = useState<View>('day')
   const [currentDate, setCurrentDate] = useState(new Date())
+  const [legendItems, setLegendItems] = useState<AppointmentLegendCatalogItem[]>([])
+  const [legendCategories, setLegendCategories] = useState<string[]>([])
 
   useEffect(() => {
     fetchAppointments()
   }, [currentDate, view])
+
+  useEffect(() => {
+    void preloadAppointmentFormCatalogs()
+    void fetchAppointmentLegends()
+    void fetchAppointmentLegendCategories()
+  }, [])
 
   const fetchAppointments = async () => {
     try {
@@ -143,8 +166,37 @@ export default function Appointments() {
     }
   }
 
+  const fetchAppointmentLegends = async () => {
+    try {
+      setLegendLoading(true)
+      const nextLegendItems = await loadAppointmentLegendItems()
+      setLegendItems(nextLegendItems)
+    } catch (error) {
+      console.error('Error fetching appointment legends:', error)
+      toast.error('No se pudo cargar la leyenda de citas')
+    } finally {
+      setLegendLoading(false)
+    }
+  }
+
+  const fetchAppointmentLegendCategories = async () => {
+    try {
+      const nextLegendCategories = await loadAppointmentLegendCategories()
+      setLegendCategories(nextLegendCategories)
+    } catch (error) {
+      console.error('Error fetching appointment legend categories:', error)
+      toast.error('No se pudieron cargar las categorías de tratamientos')
+    }
+  }
+
   const handleSelectSlot = ({ start, resourceId }: { start: Date; resourceId?: string | number }) => {
     setSelectedDate(start)
+    const slotMinutes = start.getHours() * 60 + start.getMinutes()
+    setPreselectedStartTime(
+      slotMinutes >= BUSINESS_START_MINUTES && slotMinutes < BUSINESS_END_MINUTES
+        ? getTimeInputValueFromDate(start)
+        : undefined
+    )
     const selectedCabin = String(resourceId || 'LUCY') as typeof initialCabin
     setInitialCabin(selectedCabin)
     setEditingAppointment(null)
@@ -155,6 +207,7 @@ export default function Appointments() {
     setEditingAppointment(event.appointment)
     setInitialCabin(event.appointment.cabin || 'LUCY')
     setSelectedDate(undefined)
+    setPreselectedStartTime(undefined)
     setShowModal(true)
   }
 
@@ -162,6 +215,7 @@ export default function Appointments() {
     setShowModal(false)
     setEditingAppointment(null)
     setSelectedDate(undefined)
+    setPreselectedStartTime(undefined)
     setInitialCabin('LUCY')
   }
 
@@ -231,11 +285,11 @@ export default function Appointments() {
     [appointments]
   )
 
+  const getThemeForAppointment = (appointment: any) =>
+    getAppointmentColorTheme(legendItems, appointment.service?.category)
+
   const eventStyleGetter = (event: any) => {
-    const theme = getAppointmentColorTheme(
-      event.appointment.service?.category,
-      event.appointment.service?.name
-    )
+    const theme = getThemeForAppointment(event.appointment)
     const isInactive = INACTIVE_STATUSES.has(String(event.appointment.status || '').toUpperCase())
 
     return {
@@ -298,22 +352,24 @@ export default function Appointments() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Agenda de Citas</h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">
-            Vista diaria priorizada por cabinas. El color de cada cita se asigna segun el tratamiento.
-          </p>
         </div>
-        <button
-          onClick={() => {
-            setEditingAppointment(null)
-            setInitialCabin('LUCY')
-            setSelectedDate(new Date())
-            setShowModal(true)
-          }}
-          className="btn btn-primary"
-        >
-          <Plus className="w-5 h-5 mr-2" />
-          Nueva Cita
-        </button>
+        <div className="flex gap-3">
+          <button onClick={() => setShowLegendModal(true)} className="btn btn-secondary">
+            Añadir Leyenda
+          </button>
+          <button
+            onClick={() => {
+              setEditingAppointment(null)
+              setInitialCabin('LUCY')
+              setSelectedDate(new Date(currentDate))
+              setPreselectedStartTime(undefined)
+              setShowModal(true)
+            }}
+            className="btn btn-primary"
+          >
+            Nueva Cita
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-3 xl:grid-cols-[repeat(3,minmax(0,1fr))_22rem]">
@@ -395,18 +451,24 @@ export default function Appointments() {
       <div className="card p-3">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
           <span className="text-xs font-medium text-gray-500 dark:text-gray-400 mr-1">Leyenda:</span>
-          {TREATMENT_CATEGORY_LABELS.map(({ key, label }) => {
-            const theme = getAppointmentColorTheme(label, null)
-            return (
-              <span key={key} className="inline-flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300">
-                <span
-                  className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
-                  style={{ backgroundColor: theme.background }}
-                />
-                {label}
-              </span>
-            )
-          })}
+          {legendLoading ? (
+            <span className="text-xs text-gray-500 dark:text-gray-400">Cargando...</span>
+          ) : legendItems.length === 0 ? (
+            <span className="text-xs text-gray-500 dark:text-gray-400">No hay leyendas configuradas</span>
+          ) : (
+            legendItems.map((item) => {
+              const theme = getAppointmentColorTheme(legendItems, item.category)
+              return (
+                <span key={item.id} className="inline-flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300">
+                  <span
+                    className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: theme.background }}
+                  />
+                  {item.category}
+                </span>
+              )
+            })
+          )}
         </div>
       </div>
 
@@ -439,6 +501,20 @@ export default function Appointments() {
       </div>
 
       <Modal
+        isOpen={showLegendModal}
+        onClose={() => setShowLegendModal(false)}
+        title="Añadir Leyenda"
+        maxWidth="lg"
+      >
+        <AppointmentLegendModal
+          isOpen={showLegendModal}
+          legendItems={legendItems}
+          availableCategories={legendCategories}
+          onUpdated={setLegendItems}
+        />
+      </Modal>
+
+      <Modal
         isOpen={showModal}
         onClose={handleCloseModal}
         title={editingAppointment?.id ? 'Editar Cita' : 'Nueva Cita'}
@@ -449,8 +525,8 @@ export default function Appointments() {
             <div
               className="space-y-4 rounded-lg p-4"
               style={{
-                backgroundColor: getAppointmentColorTheme(editingAppointment.service?.category, editingAppointment.service?.name).softBackground,
-                border: `1px solid ${getAppointmentColorTheme(editingAppointment.service?.category, editingAppointment.service?.name).border}`
+                backgroundColor: getThemeForAppointment(editingAppointment).softBackground,
+                border: `1px solid ${getThemeForAppointment(editingAppointment).border}`
               }}
             >
               <div className="grid grid-cols-2 gap-4 text-sm md:grid-cols-4">
@@ -514,6 +590,7 @@ export default function Appointments() {
             onSuccess={handleFormSuccess}
             onCancel={handleCloseModal}
             preselectedDate={selectedDate}
+            preselectedStartTime={preselectedStartTime}
             initialCabin={initialCabin}
           />
         </div>

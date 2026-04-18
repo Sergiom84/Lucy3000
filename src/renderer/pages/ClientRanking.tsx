@@ -5,6 +5,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
 import { formatCurrency, formatDate } from '../utils/format'
+import { buildSearchTokens, filterRankedItems } from '../utils/searchableOptions'
 
 interface RankingClient {
   id: string
@@ -82,9 +83,12 @@ export default function ClientRanking() {
   const filtered = useMemo(() => {
     if (!data) return []
     let list = data.clients
-    if (search) {
-      const q = search.toLowerCase()
-      list = list.filter(c => c.name.toLowerCase().includes(q))
+    if (search.trim()) {
+      list = filterRankedItems(list, search, (client) => ({
+        label: client.name,
+        labelTokens: buildSearchTokens(client.name),
+        searchText: [client.name, client.firstService, client.lastService].filter(Boolean).join(' ')
+      }))
     }
     if (riskOnly) {
       list = list.filter(c => c.abandonmentRisk)

@@ -1,5 +1,4 @@
 import { Router } from 'express'
-import multer from 'multer'
 import {
   getClients,
   getClientById,
@@ -12,21 +11,32 @@ import {
   importClientsFromExcel
 } from '../controllers/client.controller'
 import { authMiddleware } from '../middleware/auth.middleware'
+import { spreadsheetUpload, validateSpreadsheetUpload } from '../middleware/upload.middleware'
+import { validateRequest } from '../middleware/validation.middleware'
+import {
+  clientHistoryBodySchema,
+  clientIdParamSchema,
+  clientsQuerySchema,
+  createClientBodySchema,
+  updateClientBodySchema
+} from '../validators/client.schemas'
 
 const router = Router()
 
-const upload = multer({ storage: multer.memoryStorage() })
-
 router.use(authMiddleware)
 
-router.get('/', getClients)
+router.get('/', validateRequest({ query: clientsQuerySchema }), getClients)
 router.get('/birthdays', getBirthdaysThisMonth)
-router.get('/:id', getClientById)
-router.post('/', createClient)
-router.post('/import', upload.single('file'), importClientsFromExcel)
-router.put('/:id', updateClient)
-router.delete('/:id', deleteClient)
-router.get('/:id/history', getClientHistory)
-router.post('/:id/history', addClientHistory)
+router.get('/:id', validateRequest({ params: clientIdParamSchema }), getClientById)
+router.post('/', validateRequest({ body: createClientBodySchema }), createClient)
+router.post('/import', spreadsheetUpload.single('file'), validateSpreadsheetUpload(), importClientsFromExcel)
+router.put('/:id', validateRequest({ params: clientIdParamSchema, body: updateClientBodySchema }), updateClient)
+router.delete('/:id', validateRequest({ params: clientIdParamSchema }), deleteClient)
+router.get('/:id/history', validateRequest({ params: clientIdParamSchema }), getClientHistory)
+router.post(
+  '/:id/history',
+  validateRequest({ params: clientIdParamSchema, body: clientHistoryBodySchema }),
+  addClientHistory
+)
 
 export default router

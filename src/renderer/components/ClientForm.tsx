@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo } from 'react'
 import { Save, X } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
+import { loadAppointmentClients } from '../utils/appointmentCatalogs'
+import { buildSearchTokens, filterRankedItems } from '../utils/searchableOptions'
 
 interface ClientFormProps {
   client?: any
@@ -110,8 +112,7 @@ export default function ClientForm({ client, onSuccess, onCancel }: ClientFormPr
   useEffect(() => {
     const fetchLinkedClients = async () => {
       try {
-        const response = await api.get('/clients?isActive=true')
-        const allClients = response.data || []
+        const allClients = await loadAppointmentClients()
         setLinkedClients(allClients.filter((item: any) => item.id !== client?.id))
       } catch (error) {
         console.error('Error loading clients for linking:', error)
@@ -122,13 +123,14 @@ export default function ClientForm({ client, onSuccess, onCancel }: ClientFormPr
   }, [client?.id])
 
   const filteredLinkedClients = useMemo(() => {
-    const query = linkedClientSearch.trim().toLowerCase()
-    if (!query) return linkedClients
+    return filterRankedItems(linkedClients, linkedClientSearch, (item: any) => {
+      const fullName = `${item.firstName || ''} ${item.lastName || ''}`.trim()
 
-    return linkedClients.filter((item: any) => {
-      const haystack = `${item.firstName || ''} ${item.lastName || ''} ${item.externalCode || ''} ${item.phone || ''}`
-        .toLowerCase()
-      return haystack.includes(query)
+      return {
+        label: fullName,
+        labelTokens: buildSearchTokens(fullName),
+        searchText: [fullName, item.externalCode, item.phone, item.email].filter(Boolean).join(' ')
+      }
     })
   }, [linkedClients, linkedClientSearch])
 

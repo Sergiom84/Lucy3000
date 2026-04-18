@@ -1,88 +1,93 @@
-# Configuración de Google Calendar en Lucy3000
+# Google Calendar Setup
 
-Esta guía configura la integración para que las citas de Lucy3000:
+Estado actualizado: 2026-04-16
 
-- se registren en tu Google Calendar;
-- se actualicen o cancelen también en Google Calendar;
-- envíen la invitación o actualización al cliente si la cita tiene email y tienes activada esa opción.
+## Qué integra Lucy3000
 
-Lucy3000 no usa SMTP ni Nodemailer para este flujo. El correo al cliente lo envía Google Calendar cuando el cliente se añade como invitado del evento.
+La integración sincroniza citas con Google Calendar:
 
-## Requisitos previos
+- crea eventos al crear citas;
+- actualiza eventos cuando cambia la cita;
+- elimina eventos cuando la cita se borra;
+- puede enviar invitaciones al cliente si existe email y la opción está activada.
 
-- Una cuenta de Google con acceso a Google Calendar.
-- Un usuario `ADMIN` en Lucy3000 para conectar la integración.
-- Variables de entorno configuradas en `.env` o `.env.development`.
+Lucy3000 no usa SMTP para esto. Las invitaciones las envía Google Calendar cuando el cliente se añade como invitado.
 
-## Paso 1: Preparar Google Cloud
+## Requisitos
 
-1. Entra en [Google Cloud Console](https://console.cloud.google.com/).
-2. Crea un proyecto o reutiliza uno existente.
-3. Activa `Google Calendar API`.
-4. Configura la pantalla de consentimiento OAuth.
-5. Crea un cliente OAuth de tipo `Aplicación de ordenador`.
-6. Copia el `Client ID` y el `Client Secret`.
+- cuenta de Google con acceso a Calendar;
+- usuario `ADMIN` en Lucy3000;
+- variables de entorno configuradas;
+- backend local accesible en la URL usada como callback.
 
-## Paso 2: Configurar variables de entorno
-
-Añade estas variables:
+## Variables de entorno
 
 ```env
-GOOGLE_CALENDAR_CLIENT_ID="tu-client-id-de-google"
-GOOGLE_CALENDAR_CLIENT_SECRET="tu-client-secret-de-google"
+GOOGLE_CALENDAR_CLIENT_ID="tu-client-id"
+GOOGLE_CALENDAR_CLIENT_SECRET="tu-client-secret"
 GOOGLE_CALENDAR_REDIRECT_URI="http://localhost:3001/api/calendar/callback"
 ```
 
-La `REDIRECT_URI` debe coincidir exactamente con la que uses en Google Cloud.
+La `REDIRECT_URI` debe coincidir exactamente con la configurada en Google Cloud.
 
-## Paso 3: Aplicar la migración
+## Configuración en Google Cloud
 
-La integración necesita una tabla de configuración propia y varios campos nuevos en `appointments`.
+1. Crea o reutiliza un proyecto.
+2. Activa `Google Calendar API`.
+3. Configura la pantalla de consentimiento OAuth.
+4. Crea un cliente OAuth.
+5. Añade la URI de callback exacta.
+6. Copia `client_id` y `client_secret`.
+
+## Preparación de la base
+
+Si estás levantando el proyecto desde código fuente:
 
 ```bash
 npm run prisma:migrate
 ```
 
-## Paso 4: Conectar la cuenta desde Lucy3000
+La integración necesita la tabla `google_calendar_config` y los campos de sincronización en `appointments`.
 
-1. Inicia la app.
-2. Entra en `Configuración`.
-3. Accede con un usuario `ADMIN`.
-4. En la tarjeta `Google Calendar`, pulsa `Conectar Google Calendar`.
-5. Completa la autorización en la ventana emergente.
-6. Al volver a la app, guarda la configuración:
+## Activación en Lucy3000
+
+1. Inicia sesión como `ADMIN`.
+2. Ve a `Settings`.
+3. En la sección `Google Calendar`, pulsa `Conectar Google Calendar`.
+4. Completa la autorización.
+5. Guarda la configuración:
    - `Sincronizar citas con Google Calendar`
    - `Enviar invitaciones y actualizaciones al cliente`
-   - `ID de Calendar` (`primary` para el calendario principal)
+   - `calendarId` (`primary` es el valor recomendado para empezar)
 
-## Qué hace la integración
+## Comportamiento funcional
 
-### Al crear una cita
+### Crear cita
 
-- Si la integración está activa, Lucy3000 crea o intenta crear el evento en Google Calendar.
-- Si la cita tiene email de cliente y están activadas las invitaciones, Google envía la invitación del evento.
-- Si no hay email de cliente, el evento se crea solo en tu calendario.
+- si la integración está activa, se crea el evento;
+- si hay email y están activadas invitaciones, Google envía la invitación;
+- si no hay email, el evento se crea solo en el calendario del negocio.
 
-### Al modificar una cita
+### Actualizar cita
 
-- Lucy3000 actualiza el evento ya enlazado.
-- Si el cliente era invitado, Google envía la actualización del evento.
+- se parchea el evento vinculado;
+- si el cliente es invitado, Google gestiona la actualización.
 
-### Al borrar una cita
+### Borrar cita
 
-- Lucy3000 intenta eliminar el evento de Google Calendar.
-- Si el cliente era invitado, Google puede enviar la cancelación del evento.
+- se intenta eliminar el evento remoto;
+- si existía invitado, Google puede notificar la cancelación.
 
-## Notas importantes
+## Reglas operativas
 
-- La integración de Calendar es global para la app, no por equipo.
-- La configuración de impresora sigue siendo local por dispositivo.
-- Si desactivas la sincronización, Lucy3000 deja de enviar nuevos cambios a Google Calendar. No borra automáticamente los eventos que ya existieran.
-- Si cambias de cuenta y desconectas la integración, Lucy3000 elimina el vínculo local con los eventos ya sincronizados.
+- La integración es global para la app, no por equipo.
+- La impresora de tickets se configura por dispositivo; Calendar no.
+- Desactivar la sincronización corta cambios nuevos, pero no borra eventos previos.
+- Desconectar la cuenta rompe el vínculo local con eventos ya sincronizados.
 
-## Problemas comunes
+## Troubleshooting
 
-### `Error generando URL de autorización`
+### Error generando URL de autorización
 
 Revisa:
 
@@ -90,23 +95,27 @@ Revisa:
 - `GOOGLE_CALENDAR_CLIENT_SECRET`
 - `GOOGLE_CALENDAR_REDIRECT_URI`
 
-### La ventana de autorización no termina de conectar la app
+### La autorización no vuelve correctamente
 
 Revisa:
 
-- que la URL de callback configurada en Google coincida exactamente;
-- que el backend local esté levantado en el puerto configurado;
-- que el popup no haya sido bloqueado por el navegador.
+- callback exacta en Google Cloud;
+- backend local levantado;
+- popup o navegador no bloqueando la redirección.
 
-### Las citas no aparecen en Google Calendar
+### Las citas no se sincronizan
 
 Revisa:
 
 - que la integración esté conectada;
-- que la sincronización esté activada;
+- que `enabled` esté activo;
 - que el `calendarId` sea correcto;
-- los logs del backend para ver si la cita quedó marcada con error de sincronización.
+- los logs del backend para ver errores de sincronización.
 
-## Recomendación operativa
+## Recomendación
 
-Empieza con `calendarId = primary` y con una sola cuenta de Google del negocio. Cuando eso esté estable, ya puedes plantearte calendarios específicos o más reglas de negocio.
+Empieza con:
+
+- una sola cuenta de Google del negocio;
+- `calendarId=primary`;
+- invitaciones activadas solo cuando el flujo ya esté verificado con una cuenta real.

@@ -2,7 +2,7 @@
 
 ## Contexto del proyecto
 Lucy3000 es una app de escritorio para gestión de estética.
-Combina Electron (main/preload), React + Vite (renderer) y un backend Express con Prisma sobre SQLite local en el runtime actual. Las referencias a Supabase quedan como histórico o para flujos de backup/restore y despliegue remoto.
+Combina Electron (main/preload), React + Vite (renderer) y un backend Express con Prisma sobre SQLite local en el runtime actual. Las referencias a Supabase quedan como histórico o para flujos de backup/restore puntuales.
 
 ## Estado actual y fuentes de verdad
 Usa estas fuentes en este orden para decidir cómo trabajar:
@@ -12,7 +12,7 @@ Usa estas fuentes en este orden para decidir cómo trabajar:
 4. `ARCHITECTURE.md` para mapa técnico del sistema.
 
 ## Stack técnico
-- Runtime: Node.js 18+ (Render usa Node 20).
+- Runtime: Node.js 18+.
 - Frontend: React 18, TypeScript, Vite, Tailwind, Zustand, Axios.
 - Desktop: Electron + `vite-plugin-electron`.
 - Backend: Express + TypeScript + Zod.
@@ -47,15 +47,15 @@ Usa estas fuentes en este orden para decidir cómo trabajar:
 - `npm run prisma:studio`: inspección/edición manual de datos.
 - `npm run backup:analyze`: auditoría de backup.
 - `npm run backup:restore`: restauración desde backup.
-- `npm run db:rebuild`: reconstrucción de BD Supabase histórica/remota (script avanzado).
+- `npm run db:rebuild`: reconstrucción de BD Supabase histórica (script avanzado).
 
 ## Flujo local recomendado
 1. Instalar dependencias: `npm install`.
 2. Configurar variables (`.env` y opcional `.env.development`).
 3. Ejecutar `npm run prisma:generate`.
 4. Ejecutar `npm run prisma:migrate`.
-5. Crear/admin seed con `scripts/create-admin.sql` o Prisma Studio.
-6. Levantar con `npm run dev`.
+5. Levantar con `npm run dev`.
+6. Si la base está vacía, crear el primer admin desde la pantalla de login.
 
 ## Entorno y secretos
 - Archivo base: `.env`.
@@ -122,9 +122,9 @@ Reglas actuales de seguridad:
 - Estos scripts están orientados a Windows/PowerShell y tooling PostgreSQL local (`tools/postgresql-17/...`) o PATH.
 
 ## Deployment
-- Configuración de referencia: `render.yaml`.
-- Build en Render genera frontend y backend; arranque ejecuta `prisma migrate deploy` + `node dist/backend/server.js`.
-- Healthcheck esperado: `/health`.
+- El canal oficial es el instalador local generado por `npm run build`.
+- El backend empaquetado arranca dentro de la app de escritorio.
+- Healthcheck interno esperado: `/health`.
 
 ## Qué no tocar sin necesidad
 - No editar manualmente artefactos generados:

@@ -2,8 +2,8 @@ import { PrismaClient } from '@prisma/client'
 
 export const ACTIVE_APPOINTMENT_STATUSES = ['SCHEDULED', 'CONFIRMED', 'IN_PROGRESS'] as const
 
-const BUSINESS_DAY_START_MINUTES = 9 * 60
-const BUSINESS_DAY_END_MINUTES = 21 * 60
+const BUSINESS_DAY_START_MINUTES = 8 * 60
+const BUSINESS_DAY_END_MINUTES = 22 * 60
 const BREAK_START_MINUTES = 14 * 60
 const BREAK_END_MINUTES = 16 * 60
 
@@ -89,7 +89,7 @@ export async function validateAppointmentSlot(
   if (startMinutes < BUSINESS_DAY_START_MINUTES || endMinutes > BUSINESS_DAY_END_MINUTES) {
     errors.push({
       code: 'INVALID_HOURS',
-      message: 'El horario debe estar entre 09:00 y 21:00'
+      message: 'El horario debe estar entre 08:00 y 22:00'
     })
   }
 
@@ -119,7 +119,7 @@ export async function validateAppointmentSlot(
   if (startMinutes >= BREAK_START_MINUTES && startMinutes < BREAK_END_MINUTES) {
     warnings.push({
       code: 'OUTSIDE_BUSINESS_HOURS',
-      message: 'La hora seleccionada esta fuera del horario habitual (09:30-14:00 y 16:00-20:00)'
+      message: 'La hora seleccionada coincide con la franja de descanso habitual (14:00-16:00)'
     })
   }
 

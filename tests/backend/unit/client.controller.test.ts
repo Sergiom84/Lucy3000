@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import * as XLSX from 'xlsx'
-import { createClient, importClientsFromExcel, updateClient } from '../../../src/backend/controllers/client.controller'
+import { createClient, getClients, importClientsFromExcel, updateClient } from '../../../src/backend/controllers/client.controller'
+import { createWorkbookBuffer } from '../helpers/spreadsheet'
 import { createMockRequest, createMockResponse } from '../helpers/http'
 import { prismaMock, resetPrismaMock } from '../mocks/prisma.mock'
 
@@ -183,7 +183,7 @@ describe('client.controller gender validation', () => {
     }))
     prismaMock.client.update.mockResolvedValue({ id: 'client-1', linkedClientId: 'linked-1' })
 
-    const worksheet = XLSX.utils.aoa_to_sheet([
+    const buffer = await createWorkbookBuffer([
       [
         'Nº Cliente',
         'DNI',
@@ -250,10 +250,7 @@ describe('client.controller gender validation', () => {
         'Prefiere citas de mañana',
         'NO'
       ]
-    ])
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Clientes')
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' })
+    ], 'Clientes')
 
     const req = createMockRequest({
       file: { buffer } as any
@@ -330,7 +327,7 @@ describe('client.controller gender validation', () => {
     }))
     prismaMock.client.update.mockResolvedValue({ id: 'client-legacy', linkedClientId: 'linked-legacy' })
 
-    const worksheet = XLSX.utils.aoa_to_sheet([
+    const buffer = await createWorkbookBuffer([
       [
         'NºCliente',
         'DNI',
@@ -391,10 +388,7 @@ describe('client.controller gender validation', () => {
         'ana@example.com',
         '99'
       ]
-    ])
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Clientes')
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' })
+    ], 'Clientes')
 
     const req = createMockRequest({
       file: { buffer } as any
@@ -446,5 +440,43 @@ describe('client.controller gender validation', () => {
         })
       })
     )
+  })
+
+  it('getClients splits multi-term search into token clauses', async () => {
+    prismaMock.client.findMany.mockResolvedValue([])
+
+    const req = createMockRequest({
+      query: {
+        search: 'ser her',
+        isActive: 'true',
+        includeCounts: 'false'
+      }
+    })
+    const res = createMockResponse()
+
+    await getClients(req as any, res)
+
+    expect(prismaMock.client.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          isActive: true,
+          AND: [
+            {
+              OR: expect.arrayContaining([
+                { firstName: { contains: 'ser' } },
+                { lastName: { contains: 'ser' } }
+              ])
+            },
+            {
+              OR: expect.arrayContaining([
+                { firstName: { contains: 'her' } },
+                { lastName: { contains: 'her' } }
+              ])
+            }
+          ]
+        })
+      })
+    )
+    expect(res.json).toHaveBeenCalledWith([])
   })
 })

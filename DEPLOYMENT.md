@@ -1,307 +1,145 @@
-# 🚀 Guía de Deployment en Render
+# Deployment y Distribución Local
 
-Esta guía te ayudará a desplegar Lucy3000 en Render.
+Estado actualizado: 2026-04-16
 
-## 📋 Prerrequisitos
+## Alcance
 
-> Nota: este documento cubre el despliegue remoto del backend. El runtime local de escritorio sigue usando SQLite por defecto; solo usa Supabase si vas a publicar una variante remota o a restaurar un histórico.
+Este documento cubre el canal oficial de entrega de Lucy3000:
 
-1. Cuenta en [Render](https://render.com) (gratuita)
-2. Repositorio en GitHub con el código
+- build local del producto;
+- empaquetado del instalador;
+- distribución del `.exe`;
+- comportamiento del runtime local una vez instalado.
 
-## 🗄️ Paso 1: Preparar la base de datos remota
+No existe despliegue remoto como canal oficial de esta versión.
 
-Si vas a desplegar un backend remoto, necesitas una base de datos persistente. Supabase es una opción histórica/compatible, pero no es la base activa del runtime local.
+## Pipeline de build
 
-1. Elegir proveedor de base de datos persistente
-2. Obtener la `DATABASE_URL`
-3. Ejecutar las migraciones de Prisma:
-
-```bash
-# En tu máquina local
-npm run prisma:migrate
-```
-
-4. Crear usuario administrador inicial usando Prisma Studio o el flujo de seed que uses para esa base remota:
-
-```sql
-INSERT INTO users (id, email, password, name, role, "isActive", "createdAt", "updatedAt")
-VALUES (
-  gen_random_uuid(),
-  'admin@lucy3000.com',
-  '$2a$10$YourHashedPasswordHere',
-  'Administrador',
-  'ADMIN',
-  true,
-  NOW(),
-  NOW()
-);
-```
-
-## 🌐 Paso 2: Desplegar Backend en Render
-
-### Crear Web Service
-
-1. Ir a [Render Dashboard](https://dashboard.render.com)
-2. Click en "New +" > "Web Service"
-3. Conectar tu repositorio de GitHub
-4. Configurar el servicio:
-
-**General:**
-- Name: `lucy3000-backend`
-- Region: Elegir la más cercana
-- Branch: `main`
-- Root Directory: (dejar vacío)
-
-**Build & Deploy:**
-- Build Command:
-```bash
-npm install && npm run build:backend && npx prisma generate
-```
-
-- Start Command:
-```bash
-node dist/backend/server.js
-```
-
-**Environment:**
-- Node Version: `18`
-
-### Configurar Variables de Entorno
-
-En la sección "Environment" del servicio, agregar:
-
-```
-DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
-PORT=3001
-NODE_ENV=production
-JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
-APP_NAME=Lucy3000 Accounting
-APP_VERSION=1.0.0
-```
-
-### Desplegar
-
-1. Click en "Create Web Service"
-2. Esperar a que se complete el deployment (5-10 minutos)
-3. Copiar la URL del servicio (ej: `https://lucy3000-backend.onrender.com`)
-
-## 💻 Paso 3: Configurar Aplicación de Escritorio
-
-### Opción A: Desarrollo Local con Backend en Render
-
-1. Actualizar `.env.development`:
-
-```env
-VITE_API_URL=https://lucy3000-backend.onrender.com/api
-```
-
-2. Ejecutar la aplicación:
-
-```bash
-npm run dev:electron
-```
-
-### Opción B: Compilar para Distribución
-
-1. Actualizar `src/renderer/utils/api.ts`:
-
-```typescript
-const API_URL = 'https://lucy3000-backend.onrender.com/api'
-```
-
-2. Compilar la aplicación:
+El build principal es:
 
 ```bash
 npm run build
 ```
 
-3. Los instaladores estarán en `/release`:
-   - Windows: `.exe`
-   - macOS: `.dmg`
-   - Linux: `.AppImage`
+Ese comando ejecuta:
 
-## 🔧 Paso 4: Configuración Adicional
+1. `npm run build:prepare-db`
+2. `tsc`
+3. `vite build`
+4. `npm run build:backend`
+5. `electron-builder`
 
-### Habilitar CORS en Backend
+## Qué produce el build
 
-Asegurarse de que `src/backend/server.ts` tenga:
+Salida principal:
 
-```typescript
-app.use(cors({
-  origin: '*', // En producción, especificar dominios permitidos
-  credentials: true
-}))
+- instalador Windows en `release/`;
+- backend compilado en `dist/backend`;
+- SPA compilada en `dist/`.
+
+La preparación de base de datos:
+
+- deja la base empaquetada lista para usarse como semilla técnica;
+- no crea un usuario admin por defecto;
+- mantiene solo datos de soporte necesarios para arrancar.
+
+## Comportamiento del runtime instalado
+
+En el primer arranque del `.exe`:
+
+1. Electron busca la base SQLite del usuario.
+2. Si no existe, copia la base semilla empaquetada.
+3. Si no existe un `JWT_SECRET`, genera uno local.
+4. Arranca el backend empaquetado.
+5. Espera a `/health`.
+6. Abre la interfaz React.
+
+Cuando la base está vacía, la pantalla de login entra en modo bootstrap y permite crear el primer `ADMIN`.
+
+## Variables de entorno en el empaquetado
+
+El runtime puede leer `.env` desde ubicaciones de ejecución relevantes. En escritorio interesa sobre todo:
+
+- `.env` junto al ejecutable;
+- `.env` en recursos de la app;
+- `.env` en el directorio de trabajo cuando aplique.
+
+En entornos no productivos, `.env.development` puede sobreescribir `.env`.
+
+Variables mínimas útiles:
+
+```env
+DATABASE_URL="file:./prisma/lucy3000.db"
+JWT_SECRET="cambia-este-valor"
+PORT=3001
+NODE_ENV=production
 ```
 
-### Configurar Dominio Personalizado (Opcional)
+En un build empaquetado normal, la app puede generar el `JWT_SECRET` si no lo encuentra.
 
-1. En Render, ir a Settings > Custom Domain
-2. Agregar tu dominio
-3. Configurar DNS según instrucciones de Render
+## Checklist previo a distribución
 
-## 📊 Monitoreo y Logs
+### Verificación técnica
 
-### Ver Logs en Render
+- `npm run test`
+- `npm run build`
+- revisar que no se empaquetan secretos reales
+- revisar que no se incluyen dumps o artefactos accidentales
 
-1. Ir a tu servicio en Render
-2. Click en "Logs" en el menú lateral
-3. Ver logs en tiempo real
+### Verificación funcional mínima
 
-### Métricas
+- instalación limpia;
+- arranque limpio;
+- bootstrap del primer admin;
+- login;
+- alta de cliente;
+- alta de servicio;
+- creación de cita;
+- venta;
+- importación `.xlsx`;
+- backup manual;
+- restore manual;
+- impresión de ticket si el hardware objetivo existe.
 
-Render proporciona métricas básicas:
-- CPU usage
-- Memory usage
-- Request count
-- Response time
+## Entrega del instalador
 
-## 🔄 Actualizaciones Automáticas
+Canal esperado:
 
-Render detecta automáticamente cambios en tu repositorio:
+- entregar el `.exe` generado en `release/`;
+- acompañarlo solo de la documentación operativa necesaria;
+- no entregar bases de datos con usuarios reales;
+- no entregar `.env` con secretos reales embebidos.
 
-1. Push a la rama `main`
-2. Render inicia deployment automático
-3. La aplicación se actualiza sin downtime
+## Troubleshooting
 
-### Desactivar Auto-Deploy
+### El instalador compila pero la app no abre
 
-En Settings > Build & Deploy:
-- Desactivar "Auto-Deploy"
-- Deployments manuales desde el dashboard
+- revisar logs del proceso principal;
+- confirmar que el backend empaquetado responde a `/health`;
+- revisar permisos de escritura en el directorio de datos del usuario.
 
-## 💰 Costos
+### La app abre pero no deja iniciar sesión
 
-### Plan Gratuito de Render
+- comprobar si la base está vacía y el login debería mostrar bootstrap;
+- revisar `JWT_SECRET`;
+- revisar que la base local no esté corrupta.
 
-- 750 horas/mes de servicio
-- 512 MB RAM
-- Servicio se suspende después de 15 minutos de inactividad
-- Reinicio automático al recibir requests
+### Fallos de base de datos
 
-### Plan Starter ($7/mes)
+- confirmar que `DATABASE_URL` resuelve a un fichero SQLite escribible;
+- revisar migraciones;
+- usar backup/restore antes de intervenir manualmente.
 
-- Servicio siempre activo
-- 512 MB RAM
-- Sin suspensión
+### Problemas de impresión
 
-### Base de Datos Remota
+- revisar configuración de impresora en `Settings`;
+- validar que el equipo objetivo tenga acceso real a la impresora;
+- si se usa impresora de red, revisar host y puerto.
 
-- Usa una base persistente externa si necesitas despliegue remoto.
-- No apoyes el backend remoto en la SQLite local del escritorio.
+## Fuera de alcance
 
-## 🐛 Solución de Problemas
+Este documento no cubre:
 
-### Error: "Application failed to respond"
-
-**Causa:** El servidor no está escuchando en el puerto correcto
-
-**Solución:**
-```typescript
-const PORT = process.env.PORT || 3001
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`)
-})
-```
-
-### Error: "Database connection failed"
-
-**Causa:** `DATABASE_URL` incorrecta o la base remota no está accesible
-
-**Solución:**
-1. Verificar `DATABASE_URL` en variables de entorno
-2. Comprobar conectividad con el proveedor de base de datos
-3. Verificar que las migraciones se ejecutaron
-
-### Error: "Build failed"
-
-**Causa:** Dependencias faltantes o errores de TypeScript
-
-**Solución:**
-1. Verificar que todas las dependencias estén en `package.json`
-2. Ejecutar `npm run build:backend` localmente para detectar errores
-3. Revisar logs de build en Render
-
-### Servicio Lento
-
-**Causa:** Plan gratuito se suspende por inactividad
-
-**Soluciones:**
-1. Upgrade a plan Starter
-2. Usar servicio de "keep-alive" (ping cada 10 minutos)
-3. Implementar caché
-
-## 🔐 Seguridad en Producción
-
-### Variables de Entorno
-
-- ✅ Usar JWT_SECRET fuerte y único
-- ✅ No commitear archivos `.env`
-- ✅ Rotar claves periódicamente
-
-### CORS
-
-```typescript
-app.use(cors({
-  origin: ['https://tu-dominio.com'],
-  credentials: true
-}))
-```
-
-### Rate Limiting
-
-Instalar y configurar:
-
-```bash
-npm install express-rate-limit
-```
-
-```typescript
-import rateLimit from 'express-rate-limit'
-
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 100 // límite de requests
-})
-
-app.use('/api/', limiter)
-```
-
-## 📱 Alternativas de Deployment
-
-### Backend
-
-- **Vercel**: Serverless, gratis para proyectos pequeños
-- **Railway**: Similar a Render, con plan gratuito
-- **Heroku**: Clásico, pero ya no tiene plan gratuito
-- **DigitalOcean**: VPS desde $5/mes
-
-### Base de Datos
-
-- **PostgreSQL gestionado**: opción recomendada para backend remoto
-- **PlanetScale**: MySQL serverless
-- **Neon**: PostgreSQL serverless
-- **MongoDB Atlas**: NoSQL
-
-### Aplicación de Escritorio
-
-- **GitHub Releases**: Distribución gratuita
-- **Microsoft Store**: Windows ($19 one-time)
-- **Mac App Store**: macOS ($99/año)
-- **Snap Store**: Linux (gratuito)
-
-## 📞 Soporte
-
-Si tienes problemas con el deployment:
-
-1. Revisar logs en Render
-2. Verificar variables de entorno
-3. Comprobar conexión a la base de datos remota
-4. Consultar documentación de Render: https://render.com/docs
-
----
-
-**¡Deployment exitoso! 🎉**
-
-Tu aplicación Lucy3000 ahora está en la nube y lista para usar.
-
+- despliegues remotos como canal oficial;
+- topologías multiusuario remotas;
+- migraciones del producto a otra base de datos.

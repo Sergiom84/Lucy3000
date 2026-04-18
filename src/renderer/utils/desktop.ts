@@ -49,6 +49,11 @@ export type TicketPayload = TicketPrintPayload
 export type TicketPrintResult = {
   mode: 'desktop' | 'browser'
 }
+export type PdfSaveResult = {
+  mode: 'desktop' | 'browser'
+  filePath?: string
+  canceled?: boolean
+}
 
 const desktopUnavailableError = 'Disponible solo en la app de escritorio'
 const CLIENT_ASSET_PROTOCOL = 'lucyasset://asset/'
@@ -102,7 +107,7 @@ const removeBrowserPrintFrame = () => {
   browserPrintFrame = null
 }
 
-const printTicketInBrowser = async (payload: TicketPayload): Promise<TicketPrintResult> => {
+const printHtmlInBrowser = async (html: string): Promise<void> => {
   if (typeof document === 'undefined') {
     throw new Error('La impresión web no está disponible en este entorno')
   }
@@ -141,7 +146,7 @@ const printTicketInBrowser = async (payload: TicketPayload): Promise<TicketPrint
         return
       }
 
-      resolve({ mode: 'browser' })
+      resolve()
     }
 
     iframe.onload = () => {
@@ -167,8 +172,13 @@ const printTicketInBrowser = async (payload: TicketPayload): Promise<TicketPrint
       }
     }
 
-    iframe.srcdoc = buildTicketHtml(payload)
+    iframe.srcdoc = html
   })
+}
+
+const printTicketInBrowser = async (payload: TicketPayload): Promise<TicketPrintResult> => {
+  await printHtmlInBrowser(buildTicketHtml(payload))
+  return { mode: 'browser' }
 }
 
 export const isDesktop = () => Boolean(window.electronAPI)
@@ -338,4 +348,29 @@ export const printTicket = async (payload: TicketPayload): Promise<TicketPrintRe
   }
 
   return { mode: 'desktop' }
+}
+
+export const savePdfDocument = async (payload: {
+  html: string
+  defaultFileName?: string
+  landscape?: boolean
+}): Promise<PdfSaveResult> => {
+  if (!window.electronAPI) {
+    await printHtmlInBrowser(payload.html)
+    return { mode: 'browser' }
+  }
+
+  const response = await window.electronAPI.printPDF(payload)
+  if (response.canceled) {
+    return { mode: 'desktop', canceled: true }
+  }
+
+  if (!response.success) {
+    throw new Error(response.error || 'No se pudo generar el PDF')
+  }
+
+  return {
+    mode: 'desktop',
+    filePath: response.filePath
+  }
 }

@@ -1,14 +1,53 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import * as XLSX from 'xlsx'
-import { importServicesFromExcel } from '../../../src/backend/controllers/service.controller'
+import { getServices, importServicesFromExcel } from '../../../src/backend/controllers/service.controller'
 import { createMockRequest, createMockResponse } from '../helpers/http'
 import { prismaMock, resetPrismaMock } from '../mocks/prisma.mock'
+import { createWorkbookBuffer } from '../helpers/spreadsheet'
 
 vi.mock('../../../src/backend/db', async () => import('../mocks/db.mock'))
 
 describe('service.controller importServicesFromExcel', () => {
   beforeEach(() => {
     resetPrismaMock()
+  })
+
+  it('splits service search into token clauses across searchable fields', async () => {
+    prismaMock.service.findMany.mockResolvedValue([])
+
+    const req = createMockRequest({
+      query: {
+        search: 'rad fac',
+        isActive: 'true'
+      }
+    })
+    const res = createMockResponse()
+
+    await getServices(req as any, res)
+
+    expect(prismaMock.service.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          isActive: true,
+          AND: [
+            {
+              OR: expect.arrayContaining([
+                { name: { contains: 'rad' } },
+                { serviceCode: { contains: 'rad' } },
+                { category: { contains: 'rad' } }
+              ])
+            },
+            {
+              OR: expect.arrayContaining([
+                { name: { contains: 'fac' } },
+                { serviceCode: { contains: 'fac' } },
+                { category: { contains: 'fac' } }
+              ])
+            }
+          ]
+        })
+      })
+    )
+    expect(res.json).toHaveBeenCalledWith([])
   })
 
   it('updates existing services when the Excel uses Tarifa 1', async () => {
@@ -18,13 +57,10 @@ describe('service.controller importServicesFromExcel', () => {
     ])
     prismaMock.service.update.mockResolvedValue({})
 
-    const worksheet = XLSX.utils.aoa_to_sheet([
+    const buffer = await createWorkbookBuffer([
       ['Categoria', 'Codigo', 'Descripcion', 'Tarifa 1', 'IVA', 'Tiempo'],
       ['Faciales', 'LIMP-FAC', 'Limpieza facial', '34,95', '21', "60'"]
-    ])
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Tratamientos')
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' })
+    ], 'Tratamientos')
 
     const req = createMockRequest({
       file: { buffer } as any
@@ -60,13 +96,10 @@ describe('service.controller importServicesFromExcel', () => {
   })
 
   it('skips rows when tariff is invalid instead of creating services with price 0', async () => {
-    const worksheet = XLSX.utils.aoa_to_sheet([
+    const buffer = await createWorkbookBuffer([
       ['Categoria', 'Codigo', 'Descripcion', 'Tarifa 1', 'IVA', 'Tiempo'],
       ['Faciales', 'LIMP-FAC', 'Limpieza facial', 'abc', '21', "60'"]
-    ])
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Tratamientos')
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' })
+    ], 'Tratamientos')
 
     const req = createMockRequest({
       file: { buffer } as any

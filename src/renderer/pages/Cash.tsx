@@ -3,11 +3,7 @@ import {
   CreditCard,
   DollarSign,
   Filter,
-  Lock,
-  Plus,
-  Receipt,
   RefreshCw,
-  Settings,
   ShoppingBag,
   Unlock,
   Edit
@@ -15,6 +11,12 @@ import {
 import toast from 'react-hot-toast'
 import Modal from '../components/Modal'
 import api from '../utils/api'
+import { savePdfDocument } from '../utils/desktop'
+import {
+  buildCashMovementsPdfHtml,
+  exportCashMovementsWorkbook,
+  getCashMovementsPdfFileName
+} from '../utils/exports'
 import { formatCurrency } from '../utils/format'
 import { paymentMethodLabel } from '../utils/tickets'
 
@@ -43,6 +45,18 @@ const commercialPaymentMethods = ['CASH', 'CARD', 'BIZUM', 'ABONO'] as const
 const formatQuantity = (value: number) => {
   if (Number.isInteger(value)) return String(value)
   return value.toFixed(3).replace(/\.?0+$/, '')
+}
+
+const findOptionLabel = <T,>(
+  items: T[],
+  value: string,
+  getId: (item: T) => string,
+  getLabel: (item: T) => string,
+  fallback: string
+) => {
+  if (!value) return fallback
+  const item = items.find((current) => getId(current) === value)
+  return item ? getLabel(item) : fallback
 }
 
 export default function Cash() {
@@ -293,23 +307,90 @@ export default function Cash() {
     []
   )
 
+  const exportContext = useMemo(
+    () => ({
+      period,
+      clientLabel: findOptionLabel(
+        clients,
+        filters.clientId,
+        (client) => client.id,
+        (client) => `${client.firstName} ${client.lastName}`.trim(),
+        'Todos los clientes'
+      ),
+      paymentMethodLabel: filters.paymentMethod ? paymentMethodLabel(filters.paymentMethod) : 'Todos los pagos',
+      serviceLabel: findOptionLabel(
+        services,
+        filters.serviceId,
+        (service) => service.id,
+        (service) => service.name,
+        'Todos los tratamientos'
+      ),
+      productLabel: findOptionLabel(
+        products,
+        filters.productId,
+        (product) => product.id,
+        (product) => product.name,
+        'Todos los productos'
+      ),
+      typeLabel:
+        filters.type === 'SERVICE' ? 'Tratamientos' : filters.type === 'PRODUCT' ? 'Productos' : 'Todo'
+    }),
+    [clients, filters, period, products, services]
+  )
+
+  const handleExportExcel = async () => {
+    if (analyticsRows.length === 0) {
+      toast.error('No hay movimientos para exportar con los filtros actuales')
+      return
+    }
+
+    try {
+      await exportCashMovementsWorkbook(analyticsRows, exportContext)
+      toast.success('Excel generado con los movimientos filtrados')
+    } catch (error) {
+      console.error('Cash Excel export error:', error)
+      toast.error('No se pudo generar el Excel de caja')
+    }
+  }
+
+  const handleExportPdf = async () => {
+    if (analyticsRows.length === 0) {
+      toast.error('No hay movimientos para exportar con los filtros actuales')
+      return
+    }
+
+    try {
+      const result = await savePdfDocument({
+        html: buildCashMovementsPdfHtml(analyticsRows, exportContext),
+        defaultFileName: getCashMovementsPdfFileName(period),
+        landscape: true
+      })
+
+      if (result.canceled) {
+        return
+      }
+
+      toast.success(
+        result.mode === 'desktop' ? 'PDF generado con los movimientos filtrados' : 'Se abrió el diálogo para guardar el PDF'
+      )
+    } catch (error) {
+      console.error('Cash PDF export error:', error)
+      toast.error('No se pudo generar el PDF de caja')
+    }
+  }
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Caja</h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">
-            Resumen operativo y analítica por periodos.
-          </p>
         </div>
 
         <div className="flex gap-3">
           <button onClick={() => void loadCashHistory()} className="btn btn-secondary">
-            <Receipt className="w-4 h-4 mr-2" />
             Historial
           </button>
           <button onClick={() => setPrivatePinModal(true)} className="btn btn-secondary" title="Sección privada">
-            <Settings className="w-4 h-4 mr-2" />
             Privado
           </button>
           {!activeCashRegister ? (
@@ -320,11 +401,9 @@ export default function Cash() {
           ) : (
             <>
               <button onClick={() => setMovementModal(true)} className="btn btn-secondary">
-                <Plus className="w-4 h-4 mr-2" />
                 Movimiento
               </button>
               <button onClick={() => setCloseCashModal(true)} className="btn btn-primary">
-                <Lock className="w-4 h-4 mr-2" />
                 Cerrar caja
               </button>
             </>
@@ -430,13 +509,21 @@ export default function Cash() {
       <div className="card">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Movimientos unificados</h2>
-          <button
-            onClick={() => void Promise.all([loadAnalytics(), loadRanking(), loadSummary()])}
-            className="btn btn-secondary btn-sm"
-          >
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Actualizar
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => void handleExportExcel()} className="btn btn-secondary btn-sm">
+              Exportar Excel
+            </button>
+            <button onClick={() => void handleExportPdf()} className="btn btn-secondary btn-sm">
+              Exportar PDF
+            </button>
+            <button
+              onClick={() => void Promise.all([loadAnalytics(), loadRanking(), loadSummary()])}
+              className="btn btn-secondary btn-sm"
+            >
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Actualizar
+            </button>
+          </div>
         </div>
 
         {analyticsLoading ? (

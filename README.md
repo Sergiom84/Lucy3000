@@ -1,381 +1,201 @@
-# 🌟 Lucy3000 - Sistema de Gestión para Estética
+# Lucy3000
 
-Sistema de contabilidad y gestión completo para tiendas de estética, desarrollado con Electron, React, TypeScript, Node.js y Prisma sobre SQLite local.
+Aplicación de escritorio para gestión de estética construida con Electron, React, Express, Prisma y SQLite.
 
-> Nota: este repo se ejecuta en local con SQLite por defecto. Las referencias a Supabase en esta documentación son históricas o aplicables solo a backups/restauraciones y despliegues remotos.
+Canal oficial de producto actual:
 
-Estado actual del proyecto y plan de trabajo: [ROADMAP.md](ROADMAP.md)
-Guía de recuperación de base de datos: [BACKUP_RESTORE.md](BACKUP_RESTORE.md)
+- instalación local mediante `.exe`;
+- backend embebido dentro de la app de escritorio;
+- persistencia local SQLite por instalación.
 
-## 📋 Características Principales
+Quedan fuera del canal oficial de release:
 
-### ✨ Funcionalidades Implementadas
+- backend remoto como topología recomendada;
+- Supabase como dependencia activa del runtime.
 
-- **Dashboard Interactivo**: Resumen general con estadísticas en tiempo real
-- **Gestión de Clientes**: 
-  - Registro completo con historial
-  - Fotos y documentos
-  - Sistema de puntos de fidelidad
-  - Alertas de cumpleaños
-  - Historial de servicios y compras
-  
-- **Agenda de Citas**:
-  - Vista diaria y semanal
-  - Recordatorios automáticos
-  - Estados de citas (programada, confirmada, completada, cancelada)
-  
-- **Servicios**:
-  - Catálogo de tratamientos
-  - Precios y duraciones
-  - Categorización
-  
-- **Productos y Almacén**:
-  - Control de inventario
-  - Alertas de stock bajo
-  - Movimientos de stock (compras, ventas, ajustes)
-  - Códigos de barras y SKU
-  
-- **Ventas**:
-  - Punto de venta integrado
-  - Múltiples métodos de pago
-  - Generación automática de tickets
-  - Sistema de descuentos
-  
-- **Caja Diaria**:
-  - Apertura y cierre de caja
-  - Registro de ingresos y gastos
-  - Arqueo automático
-  - Historial de movimientos
-  
-- **Reportes**:
-  - Ventas por período
-  - Clientes top
-  - Productos más vendidos
-  - Flujo de caja
-  - Exportación (en desarrollo)
-  
-- **Sistema de Notificaciones**:
-  - Cumpleaños de clientes
-  - Stock bajo
-  - Citas próximas
-  - Recordatorios personalizados
-  
-- **Características Adicionales**:
-  - Modo oscuro/claro
-  - Sistema de roles (Admin, Manager, Employee)
-  - Backups (en desarrollo)
-  - Multi-sucursal (preparado)
-  - Responsive design
+Las referencias a Supabase o despliegues remotos se conservan solo como histórico, soporte o recuperación puntual.
 
-## 🚀 Tecnologías Utilizadas
+## Estado actual
 
-### Frontend
-- **Electron**: Aplicación de escritorio multiplataforma
-- **React 18**: Biblioteca de UI
-- **TypeScript**: Tipado estático
-- **Tailwind CSS**: Estilos modernos y responsive
-- **Zustand**: Gestión de estado
-- **React Router**: Navegación
-- **Recharts**: Gráficos y visualizaciones
-- **React Hot Toast**: Notificaciones
-- **Lucide React**: Iconos
+Baseline verificado en esta pasada:
 
-### Backend
-- **Node.js**: Runtime de JavaScript
-- **Express**: Framework web
-- **Prisma**: ORM para base de datos
-- **SQLite**: Base de datos local del runtime de escritorio
-- **JWT**: Autenticación
-- **Bcrypt**: Encriptación de contraseñas
+- `npm run test` pasa.
+- `npm run build` pasa y genera instalador.
+- `npm audit --omit=dev` queda en `0 vulnerabilities`.
+- El producto ya no distribuye credenciales conocidas ni un admin precargado.
+- El primer administrador se crea mediante bootstrap desde la pantalla de login.
+- Las importaciones soportadas oficialmente son solo `.xlsx`.
 
-### Base de Datos
-- **SQLite**: Base de datos local por defecto
-- **Supabase**: Referencia histórica para backups/restauración o despliegues remotos
+La fuente de verdad del estado funcional y la deuda activa es [ROADMAP.md](ROADMAP.md).
 
-## 📦 Instalación
+## Qué hace la aplicación
 
-### Prerrequisitos
+- Dashboard con métricas operativas.
+- Gestión de clientes con historial, saldo a cuenta, ranking, fotos, consentimientos y documentos.
+- Agenda de citas con calendario y soporte de clienta invitada.
+- Servicios, productos e inventario.
+- Ventas, tickets y caja.
+- Bonos, packs, sesiones y abonos.
+- Presupuestos.
+- Notificaciones y reportes.
+- Backups locales desde la propia app.
+- Integración opcional con Google Calendar.
 
-- Node.js 18+ 
-- npm o yarn
-- Cuenta de Supabase solo si vas a trabajar con restauración histórica o despliegue remoto
+## Arquitectura resumida
 
-### Pasos de Instalación
+- `src/main/main.ts`: proceso principal de Electron, arranque del backend empaquetado, backups, impresión y assets locales.
+- `src/preload.ts`: bridge seguro con `contextBridge`.
+- `src/renderer/*`: SPA React con Zustand, Axios y lazy loading en rutas pesadas.
+- `src/backend/*`: API Express con validación Zod, controladores y Prisma.
+- `prisma/schema.prisma`: modelo de datos principal.
+- `prisma/migrations/*`: migraciones versionadas.
 
-1. **Clonar el repositorio**
-```bash
-git clone <repository-url>
-cd Lucy3000
-```
+La app de escritorio empaqueta frontend y backend. En producción local, Electron arranca el backend internamente y la UI React consume esa API local.
 
-2. **Instalar dependencias**
+## Bootstrap del primer administrador
+
+La distribución ya no incluye usuario demo ni seed de credenciales.
+
+Si la base de datos está vacía:
+
+- `GET /api/auth/bootstrap-status` devuelve `{ "required": true }`;
+- la pantalla de login muestra el formulario de creación del primer admin;
+- `POST /api/auth/bootstrap-admin` crea ese usuario `ADMIN` y devuelve el payload de autenticación.
+
+Cuando ya existe al menos un usuario:
+
+- `bootstrap-admin` devuelve `409`;
+- `POST /api/auth/register` sigue siendo un alta administrada y requiere un `ADMIN` autenticado.
+
+## Arranque local en desarrollo
+
+### Requisitos
+
+- Node.js 18 o superior.
+- npm.
+- Windows es el entorno de referencia para scripts operativos y build del instalador.
+
+### Configuración mínima
+
+1. Instala dependencias:
+
 ```bash
 npm install
 ```
 
-3. **Configurar entorno local**
+2. Crea `.env` a partir de `.env.example`.
 
-   a. La app usa SQLite local. En `.env` se configura como `file:./prisma/lucy3000.db` y Prisma la resuelve físicamente en `prisma/prisma/lucy3000.db`
-   
-   b. Si necesitas restaurar un estado previo, consulta `BACKUP_RESTORE.md`
-
-4. **Configurar variables de entorno**
-
-Copiar `.env.example` a `.env` y completar:
+3. Ajusta como mínimo:
 
 ```env
-# SQLite local
-# Nota: Prisma resuelve esta ruta relativa desde `prisma/schema.prisma`,
-# por eso el fichero real queda en `prisma/prisma/lucy3000.db`.
 DATABASE_URL="file:./prisma/lucy3000.db"
-
-# Backend Configuration
+JWT_SECRET="cambia-este-valor"
 PORT=3001
 NODE_ENV=development
-
-# JWT Secret
-JWT_SECRET="your-super-secret-jwt-key-change-this"
-
-# App Configuration
-APP_NAME="Lucy3000 Accounting"
-APP_VERSION="1.0.0"
-
-# WhatsApp reminders (Meta WhatsApp Cloud API)
-WHATSAPP_REMINDERS_ENABLED=false
-WHATSAPP_ACCESS_TOKEN="your-whatsapp-access-token"
-WHATSAPP_PHONE_NUMBER_ID="your-whatsapp-phone-number-id"
-WHATSAPP_TEMPLATE_NAME="appointment_reminder"
-WHATSAPP_TEMPLATE_LANGUAGE="es"
-WHATSAPP_DEFAULT_COUNTRY_CODE="34"
-WHATSAPP_GRAPH_API_VERSION="v23.0"
-WHATSAPP_REMINDER_INTERVAL_MINUTES=30
 ```
 
-### Recordatorios por WhatsApp (día anterior)
+4. Si necesitas overrides locales no productivos, usa `.env.development`. El backend carga primero `.env` y después `.env.development`.
 
-- La app revisa automáticamente las citas de mañana y envía recordatorio si `appointment.reminder = true`.
-- Se envía una sola vez por cita y se marca internamente como enviado.
-- Requiere plantilla de WhatsApp aprobada en Meta con este orden de variables:
-  1. Nombre de clienta
-  2. Servicio/tratamiento
-  3. Fecha de la cita
-  4. Hora de inicio
-
-5. **Sincronizar la base de datos local**
+5. Genera Prisma y aplica migraciones:
 
 ```bash
-# Generar cliente de Prisma
 npm run prisma:generate
-
-# Ejecutar migraciones
 npm run prisma:migrate
 ```
 
-6. **Crear usuario administrador inicial**
-
-Usa Prisma Studio para crear el primer usuario si la base local está vacía:
+6. Arranca la app:
 
 ```bash
-npm run prisma:studio
-```
-
-Si estás restaurando un entorno PostgreSQL/Supabase histórico, el flujo SQL original sigue documentado en `BACKUP_RESTORE.md`.
-
-## 🎯 Uso
-
-### Desarrollo
-
-```bash
-# Iniciar backend y frontend en modo desarrollo
 npm run dev
+```
 
-# Solo backend
+7. Si no hay usuarios, crea el primer admin desde la pantalla de login.
+
+## Scripts principales
+
+```bash
+npm run dev
 npm run dev:backend
-
-# Solo frontend (Electron)
 npm run dev:electron
-```
-
-La aplicación se abrirá automáticamente en una ventana de Electron.
-
-### Producción
-
-```bash
-# Compilar la aplicación
 npm run build
-
-# Los instaladores se generarán en la carpeta /release
-```
-
-## 📱 Credenciales de Demo
-
-```
-Email: admin@lucy3000.com
-Password: lucy3000
-```
-
-## 🗂️ Estructura del Proyecto
-
-```
-Lucy3000/
-├── prisma/
-│   └── schema.prisma          # Esquema de base de datos
-├── src/
-│   ├── main/                  # Proceso principal de Electron
-│   │   └── main.ts
-│   ├── preload.ts             # Script de preload
-│   ├── backend/               # API Backend
-│   │   ├── controllers/       # Controladores
-│   │   ├── routes/            # Rutas de API
-│   │   ├── middleware/        # Middleware (auth, etc.)
-│   │   └── server.ts          # Servidor Express
-│   └── renderer/              # Frontend React
-│       ├── components/        # Componentes reutilizables
-│       ├── pages/             # Páginas de la aplicación
-│       ├── stores/            # Estado global (Zustand)
-│       ├── utils/             # Utilidades
-│       ├── styles/            # Estilos CSS
-│       ├── App.tsx            # Componente principal
-│       └── main.tsx           # Punto de entrada
-├── public/                    # Archivos estáticos
-├── package.json
-├── tsconfig.json
-├── vite.config.ts
-└── tailwind.config.js
-```
-
-## 🔧 Scripts Disponibles
-
-```bash
-npm run dev              # Desarrollo completo
-npm run dev:backend      # Solo backend
-npm run dev:electron     # Solo Electron
-npm run build            # Compilar para producción
-npm run prisma:generate  # Generar cliente Prisma
-npm run prisma:migrate   # Ejecutar migraciones
-npm run prisma:studio    # Abrir Prisma Studio
-```
-
-## 🌐 Deployment en Render
-
-### Backend API
-
-1. Crear nuevo Web Service en Render
-2. Conectar repositorio
-3. Configurar:
-   - Build Command: `npm install && npm run build:backend`
-   - Start Command: `node dist/backend/server.js`
-4. Agregar variables de entorno desde `.env`
-
-### Base de Datos
-
-El runtime local usa SQLite y no depende de Supabase para operar. Si publicas un backend remoto, tendrás que definir una estrategia de persistencia distinta.
-
-## 📊 Modelos de Base de Datos
-
-- **Users**: Usuarios del sistema con roles
-- **Clients**: Clientes de la tienda
-- **ClientHistory**: Historial de servicios por cliente
-- **Services**: Catálogo de servicios
-- **Appointments**: Citas programadas
-- **Products**: Productos en inventario
-- **StockMovements**: Movimientos de stock
-- **Sales**: Ventas realizadas
-- **SaleItems**: Items de cada venta
-- **CashRegister**: Cajas diarias
-- **CashMovement**: Movimientos de caja
-- **Notifications**: Notificaciones del sistema
-- **Settings**: Configuración general
-
-## 🎨 Personalización
-
-### Colores
-
-Editar `tailwind.config.js` para cambiar la paleta de colores:
-
-```javascript
-colors: {
-  primary: { /* tus colores */ },
-  secondary: { /* tus colores */ }
-}
-```
-
-### Logo
-
-Reemplazar archivos en `/public`:
-- `icon.ico` (Windows)
-- `icon.icns` (macOS)
-- `icon.png` (Linux)
-
-## 🔐 Seguridad
-
-- Autenticación JWT
-- Contraseñas hasheadas con bcrypt
-- Roles y permisos
-- Validación de datos con Zod
-- CORS configurado
-- Variables de entorno para secretos
-
-## 🐛 Solución de Problemas
-
-### Error de conexión a la base de datos
-- Verificar `DATABASE_URL` en `.env`
-- Confirmar que la SQLite local exista en `prisma/prisma/lucy3000.db` y tenga permisos de escritura
-- Ejecutar `npm run prisma:generate`
-
-### Error al iniciar Electron
-- Verificar que el backend esté corriendo
-- Comprobar puerto 3001 disponible
-- Revisar logs en la consola
-
-### Problemas con Prisma
-```bash
-# Resetear base de datos (¡cuidado en producción!)
-npx prisma migrate reset
-
-# Regenerar cliente
+npm run build:backend
+npm run test
+npm run test:unit
+npm run test:smoke
 npm run prisma:generate
+npm run prisma:migrate
+npm run prisma:studio
+npm run backup:analyze
+npm run backup:restore
+npm run db:rebuild
 ```
 
-## 📝 Próximas Características
+## Variables de entorno
 
-- [ ] Calendario interactivo para citas
-- [ ] Generación de PDFs personalizados
-- [ ] Exportación a Excel
-- [ ] Sistema de recordatorios por email/SMS
-- [ ] Integración con WhatsApp
-- [ ] App móvil complementaria
-- [ ] Modo offline completo
-- [ ] Multi-sucursal activo
-- [ ] Reportes avanzados con BI
-- [ ] Integración con pasarelas de pago
+Variables críticas:
 
-## 👥 Contribuir
+- `DATABASE_URL`
+- `JWT_SECRET`
+- `PORT`
+- `NODE_ENV`
 
-Las contribuciones son bienvenidas. Por favor:
+Variables opcionales según integración:
 
-1. Fork el proyecto
-2. Crear una rama (`git checkout -b feature/AmazingFeature`)
-3. Commit cambios (`git commit -m 'Add some AmazingFeature'`)
-4. Push a la rama (`git push origin feature/AmazingFeature`)
-5. Abrir un Pull Request
+- `VITE_API_URL` para desarrollo específico;
+- `GOOGLE_CALENDAR_CLIENT_ID`
+- `GOOGLE_CALENDAR_CLIENT_SECRET`
+- `GOOGLE_CALENDAR_REDIRECT_URI`
+- `WHATSAPP_*`
+- `SUPABASE_*` solo para histórico o reconstrucción puntual
 
-## 📄 Licencia
+## Importaciones Excel
 
-Este proyecto está bajo la Licencia MIT.
+Los importadores oficiales de:
 
-## 👨‍💻 Autor
+- clientes;
+- servicios;
+- productos;
+- catálogo de bonos;
 
-**Sergio Hernández Lara**
-- Email: sergiohernandezlara07@gmail.com
+aceptan únicamente archivos `.xlsx`. La validación se hace tanto en frontend como en backend, con control de extensión, MIME y tamaño.
 
-## 🙏 Agradecimientos
+## Build y distribución local
 
-- Supabase por los backups y el histórico de restauración
-- Electron por hacer posible las apps de escritorio
-- La comunidad de React y TypeScript
+```bash
+npm run build
+```
 
----
+Esto:
 
-**¡Hecho con ❤️ para tiendas de estética!**
+- prepara la base empaquetada sin crear un admin por defecto;
+- compila renderer y backend;
+- genera el instalador en `release/`.
 
+En producción de escritorio, Electron:
+
+- copia una base SQLite inicial a la carpeta de usuario si todavía no existe;
+- genera un `JWT_SECRET` local si no existe;
+- arranca el backend empaquetado;
+- abre la SPA local en la ventana de la app.
+
+La guía de distribución local está en [DEPLOYMENT.md](DEPLOYMENT.md).
+
+## Documentación operativa
+
+- [ROADMAP.md](ROADMAP.md): estado real, deuda y prioridades.
+- [ARCHITECTURE.md](ARCHITECTURE.md): topología y módulos.
+- [DEPLOYMENT.md](DEPLOYMENT.md): build, empaquetado y distribución local del `.exe`.
+- [BACKUP_RESTORE.md](BACKUP_RESTORE.md): backups locales y restauración histórica.
+- [GOOGLE_CALENDAR_SETUP.md](GOOGLE_CALENDAR_SETUP.md): integración opcional con Google Calendar.
+
+## Contribución
+
+Si vas a tocar código o docs:
+
+- mantén alineados contrato API, validadores, frontend y tests;
+- usa `npm run test` y `npm run build` como puerta mínima antes de cerrar cambios;
+- no documentes como hecho nada que no haya sido verificado en código o ejecución real.
+
+## Licencia
+
+MIT.

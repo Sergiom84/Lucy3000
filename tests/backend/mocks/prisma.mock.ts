@@ -7,6 +7,7 @@ export const prismaMock: any = {
   $disconnect: vi.fn(),
 
   user: {
+    count: vi.fn(),
     findUnique: vi.fn(),
     create: vi.fn()
   },
@@ -25,7 +26,13 @@ export const prismaMock: any = {
     findMany: vi.fn(),
     count: vi.fn(),
     create: vi.fn(),
+    delete: vi.fn(),
     update: vi.fn()
+  },
+
+  clientHistory: {
+    findMany: vi.fn(),
+    create: vi.fn()
   },
 
   bonoPack: {
@@ -65,7 +72,15 @@ export const prismaMock: any = {
     delete: vi.fn()
   },
 
+  appointmentLegend: {
+    findMany: vi.fn(),
+    findUnique: vi.fn(),
+    create: vi.fn(),
+    delete: vi.fn()
+  },
+
   product: {
+    findFirst: vi.fn(),
     findMany: vi.fn(),
     findUnique: vi.fn(),
     create: vi.fn(),
@@ -110,6 +125,15 @@ export const prismaMock: any = {
     findUnique: vi.fn(),
     update: vi.fn(),
     upsert: vi.fn()
+  },
+
+  quote: {
+    findFirst: vi.fn(),
+    findMany: vi.fn(),
+    findUnique: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn()
   },
 
   googleCalendarConfig: {

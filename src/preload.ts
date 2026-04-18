@@ -4,6 +4,7 @@ import type { TicketPrinterConfig } from './shared/ticketPrinter'
 const electronAPI = {
   getVersion: () => ipcRenderer.invoke('app:getVersion'),
   getPath: (name: string) => ipcRenderer.invoke('app:getPath', name),
+  relaunch: () => ipcRenderer.invoke('app:relaunch'),
   quit: () => ipcRenderer.invoke('app:quit'),
   logs: {
     getFilePath: () => ipcRenderer.invoke('logs:getFilePath'),
@@ -18,7 +19,8 @@ const electronAPI = {
     setConfig: (config: { folder: string; autoEnabled: boolean; cronExpression: string }) =>
       ipcRenderer.invoke('backup:setConfig', config)
   },
-  printPDF: (data: any) => ipcRenderer.invoke('print:pdf', data),
+  printPDF: (data: { html: string; defaultFileName?: string; landscape?: boolean }) =>
+    ipcRenderer.invoke('print:pdf', data),
   clientAssets: {
     list: (payload: { clientId: string; clientName: string }) => ipcRenderer.invoke('clientAssets:list', payload),
     import: (
@@ -64,6 +66,7 @@ declare global {
     electronAPI?: {
       getVersion: () => Promise<string>
       getPath: (name: string) => Promise<string>
+      relaunch: () => Promise<{ success: boolean }>
       quit: () => Promise<void>
       logs: {
         getFilePath: () => Promise<string>
@@ -71,13 +74,17 @@ declare global {
       }
       backup: {
         create: (destFolder?: string) => Promise<{ success: boolean; message?: string; path?: string }>
-        restore: () => Promise<{ success: boolean; message?: string }>
+        restore: () => Promise<{ success: boolean; message?: string; requiresRelaunch?: boolean }>
         list: () => Promise<{ success: boolean; backups: Array<{ name: string; date: string; size: number }> }>
         selectFolder: () => Promise<{ canceled: boolean; folder?: string }>
         getConfig: () => Promise<{ folder: string; autoEnabled: boolean; cronExpression: string }>
         setConfig: (config: { folder: string; autoEnabled: boolean; cronExpression: string }) => Promise<{ success: boolean }>
       }
-      printPDF: (data: any) => Promise<{ success: boolean; error?: any }>
+      printPDF: (data: {
+        html: string
+        defaultFileName?: string
+        landscape?: boolean
+      }) => Promise<{ success: boolean; canceled?: boolean; filePath?: string; error?: string }>
       clientAssets: {
         list: (payload: { clientId: string; clientName: string }) => Promise<any>
         import: (

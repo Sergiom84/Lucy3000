@@ -146,6 +146,52 @@ const releaseReservedBonoSessions = async (appointmentId: string) => {
   })
 }
 
+const normalizeLegendName = (value: unknown) => String(value || '').trim()
+const normalizeLegendColor = (value: unknown) => String(value || '').trim().toUpperCase()
+const normalizeLegendMatch = (value: unknown) =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .trim()
+
+const mapAppointmentLegend = (legend: {
+  id: string
+  name: string
+  color: string
+  sortOrder: number
+}) => ({
+  id: legend.id,
+  category: legend.name,
+  color: legend.color,
+  sortOrder: legend.sortOrder
+})
+
+const getAppointmentLegendCategoriesCatalog = async () => {
+  const services = await prisma.service.findMany({
+    select: {
+      category: true
+    },
+    orderBy: {
+      category: 'asc'
+    }
+  })
+
+  const categoriesByKey = new Map<string, string>()
+
+  for (const service of services) {
+    const category = String(service.category || '').trim()
+    const key = normalizeLegendMatch(category)
+    if (!key || categoriesByKey.has(key)) continue
+    categoriesByKey.set(key, category)
+  }
+
+  return [...categoriesByKey.values()].sort((left, right) =>
+    left.localeCompare(right, 'es', { sensitivity: 'base' })
+  )
+}
+
 const persistCalendarSyncResult = async (appointmentId: string, syncResult: Awaited<ReturnType<typeof googleCalendarService.upsertAppointmentEvent>>) => {
   return prisma.appointment.update({
     where: { id: appointmentId },
@@ -234,6 +280,101 @@ export const getAppointmentById = async (req: Request, res: Response) => {
     res.json(appointment)
   } catch (error) {
     logError('Get appointment error', error, { params: req.params })
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const getAppointmentLegends = async (_req: Request, res: Response) => {
+  try {
+    const legends = await prisma.appointmentLegend.findMany({
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }]
+    })
+
+    res.json(legends.map(mapAppointmentLegend))
+  } catch (error) {
+    logError('Get appointment legends error', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const getAppointmentLegendCategories = async (_req: Request, res: Response) => {
+  try {
+    const categories = await getAppointmentLegendCategoriesCatalog()
+    res.json(categories)
+  } catch (error) {
+    logError('Get appointment legend categories error', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const createAppointmentLegend = async (req: Request, res: Response) => {
+  try {
+    const requestedCategory = normalizeLegendName(req.body.category)
+    const requestedCategoryKey = normalizeLegendMatch(requestedCategory)
+    const nextColor = normalizeLegendColor(req.body.color)
+    const availableCategories = await getAppointmentLegendCategoriesCatalog()
+    const matchedCategory =
+      availableCategories.find(
+        (category) => normalizeLegendMatch(category) === requestedCategoryKey
+      ) || null
+
+    if (!matchedCategory) {
+      return res.status(400).json({ error: 'La categoría seleccionada no existe en tratamientos' })
+    }
+
+    const existingLegends = await prisma.appointmentLegend.findMany({
+      select: {
+        id: true,
+        name: true,
+        sortOrder: true
+      }
+    })
+
+    const duplicateLegend = existingLegends.find(
+      (legend) => normalizeLegendMatch(legend.name) === requestedCategoryKey
+    )
+
+    if (duplicateLegend) {
+      return res.status(409).json({ error: 'Ya existe una leyenda para esa categoría' })
+    }
+
+    const nextSortOrder =
+      existingLegends.reduce((maxValue, legend) => Math.max(maxValue, Number(legend.sortOrder || 0)), -1) + 1
+
+    const legend = await prisma.appointmentLegend.create({
+      data: {
+        name: matchedCategory,
+        color: nextColor,
+        sortOrder: nextSortOrder
+      }
+    })
+
+    res.status(201).json(mapAppointmentLegend(legend))
+  } catch (error) {
+    logError('Create appointment legend error', error, { body: req.body })
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const deleteAppointmentLegend = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+
+    const legend = await prisma.appointmentLegend.findUnique({
+      where: { id }
+    })
+
+    if (!legend) {
+      return res.status(404).json({ error: 'Leyenda no encontrada' })
+    }
+
+    await prisma.appointmentLegend.delete({
+      where: { id }
+    })
+
+    res.json({ message: 'Leyenda eliminada correctamente' })
+  } catch (error) {
+    logError('Delete appointment legend error', error, { params: req.params })
     res.status(500).json({ error: 'Internal server error' })
   }
 }

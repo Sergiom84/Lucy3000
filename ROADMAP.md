@@ -1,79 +1,87 @@
 # Roadmap Lucy3000
 
-Estado actualizado: 2026-02-17
+Estado actualizado: 2026-04-16
 
-## Objetivo
-Consolidar Lucy3000 como herramienta de operación diaria para estética: clientes, servicios, ventas, caja, inventario y reportes, con app de escritorio estable y base de datos local SQLite en el runtime actual.
+## Objetivo actual
 
-## Hecho
-- Build TypeScript estabilizado (frontend + backend).
-- `build` ahora compila también backend antes de empaquetar Electron.
-- Carga de `index.html` corregida para producción en Electron.
-- Arranque automático de backend en producción desde Electron (sin requerir servidor externo manual).
-- Seguridad de auth reforzada:
-- Registro protegido por `auth + admin`.
-- Eliminado fallback inseguro de JWT (`'secret'`).
-- Validaciones mínimas en login/register.
-- Validación de payloads con Zod aplicada en `auth`, `sales`, `cash` y `products` (body/query/params).
-- Suite inicial de tests automáticos:
-- Unit tests backend para `sales`, `cash` y `products`.
-- Smoke tests API para salud, validación y flujos críticos de alta.
-- Auditoría del backup Supabase histórico (`db_cluster-08-11-2025@00-27-55.backup`) con inventario de esquema y conteo estimado de filas.
-- Scripts de recuperación añadidos:
-- `scripts/analyze-backup.ps1` (auditoría/inventario).
-- `scripts/restore-backup.ps1` (restauración adaptable `pg_restore`/`psql`).
-- `scripts/rebuild-supabase-db.ps1` (reconstrucción remota completa sin Docker).
-- Reconstrucción de BD ejecutada en Supabase (`mpyifvwqyakkmwdmtbhp`) con conteos validados:
-- `users: 1`, `clients: 2`, `services: 24`.
-- Usuario admin garantizado por upsert (`admin@lucy3000.com`).
-- Ventas con lógica transaccional:
-- Numeración de venta con lock transaccional.
-- Aplicación y reversión de efectos de stock/puntos en cambios de estado y eliminación.
-- Rango de fechas corregido a fin de día en reportes/ventas/caja.
-- Caja: listado de movimientos con usuario incluido (coherencia API/UI).
-- Stock:
-- Ajustes permiten positivos/negativos.
-- Bloqueo de stock negativo.
-- Notificaciones de stock bajo sin duplicación masiva.
-- Hash de `admin123` corregido en `scripts/create-admin.sql`.
-- Se habilita versionado de migraciones (quitando exclusión de `prisma/migrations` en `.gitignore`).
+Cerrar el lanzamiento de Lucy3000 como software de escritorio instalable por `.exe`, con backend embebido, SQLite local y documentación coherente con el producto real.
 
-## En Curso
-- Limpieza de documentación duplicada/obsoleta.
-- Alineación de docs con estado real del producto (sin marketing desfasado).
-- Endurecer validaciones de negocio por módulo (clientes, citas, caja, productos).
+La prioridad ya no es diseñar variantes remotas; la prioridad es reducir riesgo operativo en el canal que realmente se distribuye.
 
-## Pendiente (Prioridad Alta)
-- Ampliar cobertura de tests automáticos:
-- Unit tests restantes (`clients`, `appointments`, `services`, `reports`, `notifications`).
-- Smoke/E2E de flujos completos con BD de prueba real.
-- Control de permisos por rol en rutas sensibles (más allá de auth básica).
-- Extender validación de payloads con Zod al resto de módulos (`clients`, `appointments`, `services`, `reports`, `notifications`).
-- Auditoría de dependencias vulnerables (`npm audit`), especialmente:
-- `axios`, `react-router-dom`, `express/qs`, `xlsx`.
-- Resolver empaquetado Electron en Windows sin privilegios de symlink (problema local de entorno en `electron-builder`).
+## Estado del release
 
-## Pendiente (Prioridad Media)
-- Exportación real en Reportes (PDF/Excel), hoy es placeholder.
-- Página de Configuración funcional (empresa, impuestos, caja, backups, usuarios).
-- Backups operativos desde IPC (hoy stub).
-- Gestión de errores de negocio consistente (mensajes + códigos + trazas).
-- Mejorar performance del dashboard (evitar múltiples consultas secuenciales por día).
+Puerta de calidad verificada en esta pasada:
 
-## Pendiente (Prioridad Baja)
-- Optimización de bundle frontend (>500kB por chunk).
-- Mejoras UX (filtros avanzados, accesibilidad, confirmaciones).
-- Integración opcional con Google Calendar.
+- `npm run test` pasa.
+- `npm run build` pasa.
+- `npm audit --omit=dev` pasa sin vulnerabilidades abiertas.
 
-## Propuesta Técnica (sin romper continuidad)
-1. Mantener stack actual en Fase 1:
-- Prisma + SQLite local + Electron + React.
-- Motivo: es el runtime que usa hoy este repo para desarrollo y escritorio.
-2. Endurecer backend en Fase 2:
-- Capa de validación (Zod), capa de servicios y transacciones más explícitas.
-3. Evaluar alternativa a medio plazo (solo si el negocio escala):
-- Opción A: Electron -> Tauri (menos consumo, empaquetado más ligero).
-- Opción B: App web + PWA + acceso privado (si se prioriza movilidad).
-- Opción C: Prisma -> Drizzle/SQL nativo solo si se necesita control SQL fino.
+Resultado: el proyecto queda en estado de release candidate técnico para escritorio local. Falta validación manual completa del instalador y de los flujos de negocio en un entorno limpio.
 
-Recomendación actual: no cambiar Prisma ni Electron todavía. Primero consolidar operación y calidad sobre la base SQLite local existente.
+## Cerrado en esta pasada
+
+- Estabilización de tests sensibles al tiempo en citas y bonos.
+- Eliminación del admin precargado en la base empaquetada.
+- Flujo de bootstrap del primer admin por UI y por API:
+  - `GET /api/auth/bootstrap-status`
+  - `POST /api/auth/bootstrap-admin`
+- Sustitución de `xlsx` por `exceljs`.
+- Contrato oficial de importación reducido a `.xlsx`.
+- Actualización de dependencias críticas con fixes disponibles:
+  - `axios`
+  - `react-router-dom`
+  - `express`
+  - `multer`
+  - `jsonwebtoken`
+- Limpieza de dependencias muertas no usadas en producción.
+- Validación Zod añadida a `clients`, `services`, `notifications`, `reports` y `quotes`.
+- Validación explícita de uploads: presencia de fichero, extensión, MIME y tamaño.
+- Carga diferida del renderer en rutas pesadas y separación de chunks relevantes.
+- Corrección de la configuración PostCSS para evitar advertencias de formato.
+- Consolidación de la documentación raíz y eliminación de duplicados.
+
+## Pendiente de alta prioridad
+
+- Validación manual del instalador en entorno limpio:
+  - instalación;
+  - primer arranque;
+  - bootstrap del admin;
+  - login;
+  - cliente;
+  - servicio;
+  - cita;
+  - venta;
+  - importación `.xlsx`;
+  - backup y restore local;
+  - impresión de ticket si el hardware aplica.
+- Endurecer permisos por rol en rutas sensibles más allá de la autenticación básica.
+- Ampliar cobertura de integración y E2E con base de datos de prueba real.
+- Revisar si las compatibility migrations de `src/backend/db.ts` ya deben convertirse en migraciones Prisma definitivas.
+
+## Pendiente de prioridad media
+
+- Exportación real en reportes; hoy sigue siendo parcial o placeholder según módulo.
+- Más cobertura de tests sobre flujos completos de `appointments`, `notifications`, `reports` y `calendar`.
+- Mejorar observabilidad y consistencia de errores en runtime de escritorio.
+- Hacer más explícita la configuración funcional en `Settings` para negocio, impuestos y usuarios.
+- Sustituir el auto-backup semanal basado en `setInterval` por una programación más declarativa si se mantiene como funcionalidad crítica.
+
+## Pendiente de prioridad baja
+
+- Seguir reduciendo peso de chunks cargados bajo demanda.
+- Mejoras UX finas en filtros, accesibilidad y confirmaciones.
+- Revisar integraciones opcionales solo después de cerrar la base operativa local.
+
+## Decisiones vigentes
+
+- El producto distribuido no lleva credenciales conocidas.
+- El primer admin se crea siempre por bootstrap.
+- La importación masiva soportada es solo `.xlsx`.
+- El stack oficial actual sigue siendo Electron + React + Express + Prisma + SQLite.
+- No hay canal remoto oficial de release en esta versión.
+
+## Riesgos conocidos
+
+- SQLite es adecuada para la distribución local actual, pero obliga a ser rigurosos con migraciones y compatibilidad histórica.
+- La deuda de compatibilidad SQLite en runtime existe porque protege instalaciones previas; no debe crecer sin control.
+- El instalador pasa en build, pero sigue pendiente una validación manual completa de instalación limpia y operación real.

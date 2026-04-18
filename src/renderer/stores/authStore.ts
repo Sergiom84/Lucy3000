@@ -12,9 +12,13 @@ interface AuthState {
   user: User | null
   token: string | null
   isAuthenticated: boolean
+  bootstrapRequired: boolean
+  bootstrapChecked: boolean
   login: (user: User, token: string) => void
   logout: () => void
   updateUser: (user: User) => void
+  setBootstrapStatus: (required: boolean) => void
+  resetBootstrapStatus: () => void
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -23,12 +27,43 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       token: null,
       isAuthenticated: false,
-      login: (user, token) => set({ user, token, isAuthenticated: true }),
-      logout: () => set({ user: null, token: null, isAuthenticated: false }),
+      bootstrapRequired: false,
+      bootstrapChecked: false,
+      login: (user, token) =>
+        set({
+          user,
+          token,
+          isAuthenticated: true,
+          bootstrapRequired: false,
+          bootstrapChecked: true
+        }),
+      logout: () =>
+        set({
+          user: null,
+          token: null,
+          isAuthenticated: false,
+          bootstrapRequired: false,
+          bootstrapChecked: false
+        }),
       updateUser: (user) => set({ user }),
+      setBootstrapStatus: (required) =>
+        set({
+          bootstrapRequired: required,
+          bootstrapChecked: true
+        }),
+      resetBootstrapStatus: () =>
+        set({
+          bootstrapRequired: false,
+          bootstrapChecked: false
+        })
     }),
     {
       name: 'auth-storage',
+      partialize: (state) => ({
+        user: state.user,
+        token: state.token,
+        isAuthenticated: state.isAuthenticated
+      })
     }
   )
 )

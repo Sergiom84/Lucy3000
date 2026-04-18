@@ -1,6 +1,8 @@
 import express, { type NextFunction, type Request, type Response } from 'express'
 import cors from 'cors'
+import multer from 'multer'
 import path from 'path'
+import { FileValidationError, MAX_SPREADSHEET_FILE_SIZE_BYTES } from './middleware/upload.middleware'
 import { logError, logInfo, logWarn, sanitizeForLog } from './utils/logger'
 
 // Routes
@@ -99,6 +101,16 @@ app.get('*', (req, res, next) => {
 
 // Error handling
 app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
+  if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(400).json({
+      error: `Uploaded file exceeds the ${Math.round(MAX_SPREADSHEET_FILE_SIZE_BYTES / (1024 * 1024))}MB limit`
+    })
+  }
+
+  if (err instanceof FileValidationError) {
+    return res.status(err.statusCode).json({ error: err.message })
+  }
+
   logError('Unhandled API error', err, {
     method: req.method,
     path: req.originalUrl,

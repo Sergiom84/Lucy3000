@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken'
 import request from 'supertest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { app } from '../../../src/backend/app'
+import { MAX_SPREADSHEET_FILE_SIZE_BYTES } from '../../../src/backend/middleware/upload.middleware'
 import { prismaMock, resetPrismaMock } from '../mocks/prisma.mock'
 
 vi.mock('../../../src/backend/db', async () => import('../mocks/db.mock'))
@@ -41,6 +42,69 @@ describe('API smoke tests', () => {
         status: 'ok'
       })
     )
+  })
+
+  it('GET /api/auth/bootstrap-status returns required=true when there are no users', async () => {
+    prismaMock.user.count.mockResolvedValue(0)
+
+    const response = await request(app).get('/api/auth/bootstrap-status')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ required: true })
+  })
+
+  it('POST /api/auth/bootstrap-admin creates the first admin and returns auth payload', async () => {
+    const tx: any = {
+      user: {
+        count: vi.fn().mockResolvedValue(0),
+        create: vi.fn().mockResolvedValue({
+          id: 'admin-1',
+          email: 'owner@example.com',
+          name: 'Owner',
+          role: 'ADMIN'
+        })
+      }
+    }
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx))
+
+    const response = await request(app).post('/api/auth/bootstrap-admin').send({
+      email: 'owner@example.com',
+      name: 'Owner',
+      password: 'supersecure123'
+    })
+
+    expect(response.status).toBe(201)
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        token: expect.any(String),
+        user: expect.objectContaining({
+          id: 'admin-1',
+          email: 'owner@example.com',
+          name: 'Owner',
+          role: 'ADMIN'
+        })
+      })
+    )
+  })
+
+  it('POST /api/auth/bootstrap-admin returns 409 when bootstrap was already completed', async () => {
+    const tx: any = {
+      user: {
+        count: vi.fn().mockResolvedValue(1),
+        create: vi.fn()
+      }
+    }
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx))
+
+    const response = await request(app).post('/api/auth/bootstrap-admin').send({
+      email: 'owner@example.com',
+      name: 'Owner',
+      password: 'supersecure123'
+    })
+
+    expect(response.status).toBe(409)
+    expect(response.body.error).toBe('Bootstrap already completed')
+    expect(tx.user.create).not.toHaveBeenCalled()
   })
 
   it('POST /api/sales rejects invalid payload with 400', async () => {
@@ -90,6 +154,38 @@ describe('API smoke tests', () => {
       .send({
         type: 'ADJUSTMENT',
         quantity: 0
+      })
+
+    expect(response.status).toBe(400)
+    expect(response.body.error).toBe('Validation error')
+  })
+
+  it('GET /api/notifications rejects invalid isRead query', async () => {
+    const response = await request(app)
+      .get('/api/notifications?isRead=maybe')
+      .set('Authorization', createAuthHeader())
+
+    expect(response.status).toBe(400)
+    expect(response.body.error).toBe('Validation error')
+  })
+
+  it('GET /api/reports/sales rejects partial date ranges', async () => {
+    const response = await request(app)
+      .get('/api/reports/sales?startDate=2026-01-01')
+      .set('Authorization', createAuthHeader())
+
+    expect(response.status).toBe(400)
+    expect(response.body.error).toBe('Validation error')
+  })
+
+  it('POST /api/quotes rejects empty items payload through Zod validation', async () => {
+    const response = await request(app)
+      .post('/api/quotes')
+      .set('Authorization', createAuthHeader())
+      .send({
+        clientId: '3adf3ca8-c749-4f40-9f2e-54a8ff0f8f57',
+        professional: 'LUCY',
+        items: []
       })
 
     expect(response.status).toBe(400)
@@ -274,6 +370,41 @@ describe('API smoke tests', () => {
 
     expect(response.status).toBe(201)
     expect(response.body).toEqual(expect.objectContaining({ id: 'appointment-from-bono-1' }))
+  })
+
+  it('POST /api/clients/import rejects missing file uploads', async () => {
+    const response = await request(app)
+      .post('/api/clients/import')
+      .set('Authorization', createAuthHeader())
+
+    expect(response.status).toBe(400)
+    expect(response.body.error).toBe('Spreadsheet file "file" is required')
+  })
+
+  it('POST /api/clients/import rejects invalid spreadsheet file types', async () => {
+    const response = await request(app)
+      .post('/api/clients/import')
+      .set('Authorization', createAuthHeader())
+      .attach('file', Buffer.from('not-a-spreadsheet'), {
+        filename: 'clientes.txt',
+        contentType: 'text/plain'
+      })
+
+    expect(response.status).toBe(400)
+    expect(response.body.error).toBe('Only .xlsx spreadsheet files are supported')
+  })
+
+  it('POST /api/clients/import rejects spreadsheets larger than the allowed limit', async () => {
+    const response = await request(app)
+      .post('/api/clients/import')
+      .set('Authorization', createAuthHeader())
+      .attach('file', Buffer.alloc(MAX_SPREADSHEET_FILE_SIZE_BYTES + 1, 0), {
+        filename: 'clientes.xlsx',
+        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      })
+
+    expect(response.status).toBe(400)
+    expect(response.body.error).toContain('5MB limit')
   })
 
   it('POST /api/sales accepts guest appointment charge with null clientId', async () => {

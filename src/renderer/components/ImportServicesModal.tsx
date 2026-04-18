@@ -2,7 +2,13 @@ import { useState } from 'react'
 import { Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle, X } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
-import * as XLSX from 'xlsx'
+import {
+  XLSX_FILE_ACCEPT,
+  assertSupportedSpreadsheetFile,
+  downloadWorkbook,
+  markFirstRowAsHeader,
+  setWorksheetColumnWidths
+} from '../utils/excel'
 
 interface ImportServicesModalProps {
   onSuccess: () => void
@@ -18,8 +24,10 @@ export default function ImportServicesModal({ onSuccess, onCancel }: ImportServi
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0]
 
-      if (!selectedFile.name.match(/\.(xlsx|xls)$/)) {
-        toast.error('Por favor selecciona un archivo Excel valido (.xlsx o .xls)')
+      try {
+        assertSupportedSpreadsheetFile(selectedFile)
+      } catch (error: any) {
+        toast.error(error.message)
         return
       }
 
@@ -28,33 +36,21 @@ export default function ImportServicesModal({ onSuccess, onCancel }: ImportServi
     }
   }
 
-  const handleDownloadTemplate = () => {
-    const template = [
-      {
-        'Categoria': 'Cejas y pestañas',
-        'Codigo': 'MTP',
-        'Descripcion': 'Lifting + tinte de pestanas',
-        'Tarifa': '50',
-        'IVA': '0,21',
-        'Tiempo': "90'"
-      }
-    ]
+  const handleDownloadTemplate = async () => {
+    try {
+      await downloadWorkbook('plantilla_tratamientos.xlsx', (workbook) => {
+        const worksheet = workbook.addWorksheet('Tratamientos')
+        worksheet.addRow(['Categoria', 'Codigo', 'Descripcion', 'Tarifa', 'IVA', 'Tiempo'])
+        worksheet.addRow(['Cejas y pestanas', 'MTP', 'Lifting + tinte de pestanas', '50', '0,21', "90'"])
+        markFirstRowAsHeader(worksheet)
+        setWorksheetColumnWidths(worksheet, [22, 12, 40, 10, 8, 10])
+      })
 
-    const ws = XLSX.utils.json_to_sheet(template)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Tratamientos')
-
-    ws['!cols'] = [
-      { wch: 22 },
-      { wch: 12 },
-      { wch: 40 },
-      { wch: 10 },
-      { wch: 8 },
-      { wch: 10 }
-    ]
-
-    XLSX.writeFile(wb, 'plantilla_tratamientos.xlsx')
-    toast.success('Plantilla descargada')
+      toast.success('Plantilla descargada')
+    } catch (error) {
+      console.error('Error generating services template:', error)
+      toast.error('No se pudo generar la plantilla')
+    }
   }
 
   const handleImport = async () => {
@@ -133,11 +129,11 @@ export default function ImportServicesModal({ onSuccess, onCancel }: ImportServi
                   <p className="text-sm text-gray-600 dark:text-gray-400">
                     <span className="font-semibold">Haz clic para subir</span> o arrastra el archivo
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">Excel (XLSX, XLS)</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">Excel (.xlsx)</p>
                 </>
               )}
             </div>
-            <input type="file" className="hidden" accept=".xlsx,.xls" onChange={handleFileChange} />
+            <input type="file" className="hidden" accept={XLSX_FILE_ACCEPT} onChange={handleFileChange} />
           </label>
         </div>
       </div>

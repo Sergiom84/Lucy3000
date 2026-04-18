@@ -13,6 +13,7 @@ const appointmentStatusSchema = z.enum([
 const cabinSchema = z.enum(['LUCY', 'TAMARA', 'CABINA_1', 'CABINA_2'])
 const professionalSchema = z.enum(['LUCY', 'TAMARA', 'CHEMA', 'OTROS'])
 const userIdSchema = z.string().trim().min(1, 'Invalid userId')
+const legendColorSchema = z.string().trim().regex(/^#[0-9A-Fa-f]{6}$/, 'Color de leyenda no válido')
 
 const timeSchema = z
   .string()
@@ -73,6 +74,8 @@ export const appointmentDateParamSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must use yyyy-mm-dd format')
 })
 
+export const appointmentLegendIdParamSchema = uuidParamSchema
+
 export const appointmentsQuerySchema = z
   .object({
     startDate: dateQuerySchema.optional(),
@@ -125,3 +128,10 @@ export const updateAppointmentBodySchema = z
   .refine((payload) => Object.keys(payload).length > 0, {
     message: 'At least one field is required'
   })
+
+export const createAppointmentLegendBodySchema = z
+  .object({
+    category: z.string().trim().min(1, 'La categoría es obligatoria').max(120, 'La categoría es demasiado larga'),
+    color: legendColorSchema
+  })
+  .strict()

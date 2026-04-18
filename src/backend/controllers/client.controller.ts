@@ -1,7 +1,14 @@
 import { Request, Response } from 'express'
 import { Prisma } from '@prisma/client'
-import * as XLSX from 'xlsx'
 import { prisma } from '../db'
+import { loadWorkbookFromBuffer, worksheetToObjects } from '../utils/spreadsheet'
+
+const buildSearchTerms = (value: string) =>
+  value
+    .trim()
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter(Boolean)
 
 const parseDecimalValue = (value: unknown): number | null => {
   if (value === null || value === undefined || String(value).trim() === '') return null
@@ -220,26 +227,31 @@ export const getClients = async (req: Request, res: Response) => {
   try {
     const { search, isActive, paginated, page, limit, includeCounts } = req.query
     const normalizedSearch = typeof search === 'string' ? search.trim() : ''
-    const shouldPaginate = paginated === 'true'
-    const shouldIncludeCounts = includeCounts !== 'false'
+    const shouldPaginate = typeof paginated === 'boolean' ? paginated : paginated === 'true'
+    const shouldIncludeCounts =
+      typeof includeCounts === 'boolean' ? includeCounts : includeCounts !== 'false'
 
     const where: Prisma.ClientWhereInput = {}
 
     if (normalizedSearch) {
-      where.OR = [
-        { firstName: { contains: normalizedSearch } },
-        { lastName: { contains: normalizedSearch } },
-        { externalCode: { contains: normalizedSearch } },
-        { dni: { contains: normalizedSearch } },
-        { email: { contains: normalizedSearch } },
-        { phone: { contains: normalizedSearch } },
-        { mobilePhone: { contains: normalizedSearch } },
-        { landlinePhone: { contains: normalizedSearch } }
-      ]
+      const searchTerms = buildSearchTerms(normalizedSearch)
+
+      where.AND = searchTerms.map((term) => ({
+        OR: [
+          { firstName: { contains: term } },
+          { lastName: { contains: term } },
+          { externalCode: { contains: term } },
+          { dni: { contains: term } },
+          { email: { contains: term } },
+          { phone: { contains: term } },
+          { mobilePhone: { contains: term } },
+          { landlinePhone: { contains: term } }
+        ]
+      }))
     }
 
     if (isActive !== undefined) {
-      where.isActive = isActive === 'true'
+      where.isActive = typeof isActive === 'boolean' ? isActive : isActive === 'true'
     }
 
     const include: Prisma.ClientInclude = {
@@ -760,10 +772,14 @@ export const importClientsFromExcel = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'No file uploaded' })
     }
 
-    const workbook = XLSX.read(req.file.buffer, { type: 'buffer' })
-    const sheetName = workbook.SheetNames[0]
-    const worksheet = workbook.Sheets[sheetName]
-    const data = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '' })
+    const workbook = await loadWorkbookFromBuffer(req.file.buffer)
+    const worksheet = workbook.worksheets[0]
+
+    if (!worksheet) {
+      return res.status(400).json({ error: 'No worksheet found in the uploaded file' })
+    }
+
+    const data = worksheetToObjects(worksheet)
 
     const results = {
       success: 0,

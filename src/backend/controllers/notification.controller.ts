@@ -8,11 +8,11 @@ export const getNotifications = async (req: Request, res: Response) => {
     const where: any = {}
 
     if (isRead !== undefined) {
-      where.isRead = isRead === 'true'
+      where.isRead = typeof isRead === 'boolean' ? isRead : isRead === 'true'
     }
 
     if (type) {
-      where.type = type
+      where.type = String(type)
     }
 
     const notifications = await prisma.notification.findMany({

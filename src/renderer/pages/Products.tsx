@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Plus, Search, Edit, Trash2, Package, AlertTriangle, TrendingUp, TrendingDown, Upload, ChevronDown, ChevronUp } from 'lucide-react'
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
+import { Search, Edit, Trash2, Package, AlertTriangle, TrendingUp, TrendingDown, ChevronDown, ChevronUp } from 'lucide-react'
 import api from '../utils/api'
 import { formatCurrency } from '../utils/format'
 import toast from 'react-hot-toast'
 import Modal from '../components/Modal'
 import ProductForm from '../components/ProductForm'
-import ImportProductsModal from '../components/ImportProductsModal'
+import { buildSearchTokens, filterRankedItems } from '../utils/searchableOptions'
+
+const ImportProductsModal = lazy(() => import('../components/ImportProductsModal'))
 
 const formatFamilyLabel = (value: string): string =>
   value
@@ -15,6 +17,10 @@ const formatFamilyLabel = (value: string): string =>
     .join(' ')
 
 type ViewMode = 'all' | 'lowStock' | null
+
+function LazyPanelLoader() {
+  return <div className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">Cargando...</div>
+}
 
 export default function Products() {
   const [products, setProducts] = useState<any[]>([])
@@ -87,11 +93,6 @@ export default function Products() {
     [products]
   )
 
-  const activeCount = useMemo(
-    () => products.filter(p => p.isActive).length,
-    [products]
-  )
-
   const familyCards = useMemo(() => {
     const grouped = products.reduce<Record<string, number>>((acc, product) => {
       const family = String(product.category || '').trim() || 'Sin categoría'
@@ -109,23 +110,29 @@ export default function Products() {
   }, [products])
 
   const filteredProducts = useMemo(() => {
-    const searchLower = search.toLowerCase().trim()
-
     // If search has text, filter all products by search (+ optional family filter)
-    if (searchLower) {
-      return products
-        .filter((product) => {
-          const matchesSearch =
-            String(product.name || '').toLowerCase().includes(searchLower) ||
-            String(product.sku || '').toLowerCase().includes(searchLower) ||
-            String(product.brand || '').toLowerCase().includes(searchLower) ||
-            String(product.category || '').toLowerCase().includes(searchLower)
-          const matchesFamily = selectedFamily
-            ? String(product.category || '') === selectedFamily
-            : true
-          return matchesSearch && matchesFamily
-        })
-        .sort((a, b) => String(a.sku || '').localeCompare(b.sku || ''))
+    if (search.trim()) {
+      const familyFiltered = selectedFamily
+        ? products.filter((product) => String(product.category || '') === selectedFamily)
+        : products
+
+      return filterRankedItems(familyFiltered, search, (product) => {
+        const label = String(product.name || '')
+
+        return {
+          label,
+          labelTokens: buildSearchTokens(label),
+          searchText: [
+            product.name,
+            product.sku,
+            product.brand,
+            product.category,
+            product.description
+          ]
+            .filter(Boolean)
+            .join(' ')
+        }
+      }).sort((a, b) => String(a.sku || '').localeCompare(b.sku || ''))
     }
 
     // viewMode takes priority over family
@@ -189,16 +196,12 @@ export default function Products() {
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
             Productos y Almacén
           </h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">
-            Control de inventario y stock
-          </p>
         </div>
         <div className="flex space-x-3">
           <button
             onClick={() => setShowImportModal(true)}
             className="btn btn-secondary"
           >
-            <Upload className="w-5 h-5 mr-2" />
             Importar Excel
           </button>
           <button
@@ -208,7 +211,6 @@ export default function Products() {
             }}
             className="btn btn-primary"
           >
-            <Plus className="w-5 h-5 mr-2" />
             Nuevo Producto
           </button>
         </div>
@@ -285,23 +287,6 @@ export default function Products() {
             </div>
           </div>
         </button>
-
-        {/* Productos Activos - not clickable */}
-        <div className="card border border-gray-200 dark:border-gray-700">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                Productos Activos
-              </p>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
-                {activeCount}
-              </p>
-            </div>
-            <div className="w-12 h-12 bg-green-500 rounded-lg flex items-center justify-center">
-              <TrendingUp className="w-6 h-6 text-white" />
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Collapsible family section */}
@@ -512,13 +497,17 @@ export default function Products() {
         title="Importar Productos desde Excel"
         maxWidth="xl"
       >
-        <ImportProductsModal
-          onSuccess={() => {
-            setShowImportModal(false)
-            fetchProducts()
-          }}
-          onCancel={() => setShowImportModal(false)}
-        />
+        {showImportModal ? (
+          <Suspense fallback={<LazyPanelLoader />}>
+            <ImportProductsModal
+              onSuccess={() => {
+                setShowImportModal(false)
+                fetchProducts()
+              }}
+              onCancel={() => setShowImportModal(false)}
+            />
+          </Suspense>
+        ) : null}
       </Modal>
     </div>
   )

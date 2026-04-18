@@ -3,6 +3,8 @@ import { Save, X } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
 import Modal from './Modal'
+import { loadAppointmentServices, loadBonoTemplates } from '../utils/appointmentCatalogs'
+import { buildSearchTokens, filterRankedItems } from '../utils/searchableOptions'
 
 interface BonoPackModalProps {
   isOpen: boolean
@@ -11,17 +13,22 @@ interface BonoPackModalProps {
   onSuccess: () => void
 }
 
-const normalizeText = (value: unknown) =>
-  String(value ?? '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim()
+type BonoSearchOption = {
+  type: 'template' | 'service'
+  id: string
+  label: string
+  detail: string
+  searchText: string
+  labelTokens: string[]
+  template?: any
+  service?: any
+}
 
 export default function BonoPackModal({ isOpen, onClose, clientId, onSuccess }: BonoPackModalProps) {
   const [loading, setLoading] = useState(false)
   const [services, setServices] = useState<any[]>([])
   const [templates, setTemplates] = useState<any[]>([])
+  const [catalogLoading, setCatalogLoading] = useState(false)
   const [bonoSearchQuery, setBonoSearchQuery] = useState('')
   const [isBonoDropdownOpen, setIsBonoDropdownOpen] = useState(false)
   const [formData, setFormData] = useState({
@@ -35,12 +42,15 @@ export default function BonoPackModal({ isOpen, onClose, clientId, onSuccess }: 
 
   useEffect(() => {
     if (isOpen) {
-      api.get('/services?isActive=true')
-        .then(res => setServices(res.data || []))
-        .catch(() => {})
-      api.get('/bonos/templates')
-        .then(res => setTemplates(res.data || []))
-        .catch(() => setTemplates([]))
+      setCatalogLoading(true)
+      Promise.allSettled([loadAppointmentServices(), loadBonoTemplates()])
+        .then(([servicesResult, templatesResult]) => {
+          setServices(servicesResult.status === 'fulfilled' ? servicesResult.value || [] : [])
+          setTemplates(templatesResult.status === 'fulfilled' ? templatesResult.value || [] : [])
+        })
+        .finally(() => {
+          setCatalogLoading(false)
+        })
       setFormData({ name: '', serviceId: '', totalSessions: '5', price: '', expiryDate: '', notes: '' })
       setBonoSearchQuery('')
       setIsBonoDropdownOpen(false)
@@ -55,33 +65,34 @@ export default function BonoPackModal({ isOpen, onClose, clientId, onSuccess }: 
   const hasTemplateCatalog = templates.length > 0
 
   const filteredOptions = useMemo(() => {
-    const term = normalizeText(bonoSearchQuery)
-    const templateOptions = templates.map((template) => ({
+    const templateOptions: BonoSearchOption[] = templates.map((template) => ({
       type: 'template' as const,
       id: `template-${template.id}`,
       label: `${template.description} - ${template.serviceName}`,
       detail: `${template.serviceLookup ? `Código: ${template.serviceLookup} · ` : ''}${template.category || 'Bonos'} · ${template.totalSessions} sesiones`,
       searchText: `${template.description} ${template.serviceName} ${template.serviceLookup || ''} ${template.category || ''} ${template.totalSessions}`,
+      labelTokens: buildSearchTokens(`${template.description} ${template.serviceName}`),
       template
     }))
-    const serviceOptions = services.map((service) => ({
+    const serviceOptions: BonoSearchOption[] = services.map((service) => ({
       type: 'service' as const,
       id: `service-${service.id}`,
       label: String(service.name || ''),
       detail: `${service.serviceCode ? `Código: ${service.serviceCode} · ` : ''}${service.category || 'Sin categoría'}`,
       searchText: `${service.name || ''} ${service.serviceCode || ''} ${service.category || ''}`,
+      labelTokens: buildSearchTokens(service.name || ''),
       service
     }))
 
-    const source = (hasTemplateCatalog ? templateOptions : serviceOptions).sort((a, b) =>
+    const source: BonoSearchOption[] = (hasTemplateCatalog ? templateOptions : serviceOptions).sort((a, b) =>
       a.label.localeCompare(b.label, 'es', { sensitivity: 'base' })
     )
 
-    if (!term) return source
-
-    return source.filter((option) =>
-      normalizeText(`${option.label} ${option.detail} ${option.searchText}`).includes(term)
-    )
+    return filterRankedItems(source, bonoSearchQuery, (option) => ({
+      label: option.label,
+      labelTokens: option.labelTokens,
+      searchText: `${option.label} ${option.detail} ${option.searchText}`
+    }))
   }, [services, templates, bonoSearchQuery, hasTemplateCatalog])
 
   const handleSelectServiceFromSearch = (service: any) => {
@@ -190,7 +201,11 @@ export default function BonoPackModal({ isOpen, onClose, clientId, onSuccess }: 
 
           {isBonoDropdownOpen && (
             <div className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800">
-              {filteredOptions.length === 0 ? (
+              {catalogLoading ? (
+                <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+                  Cargando catálogo...
+                </div>
+              ) : filteredOptions.length === 0 ? (
                 <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
                   {hasTemplateCatalog
                     ? 'No se encontraron bonos del catálogo'

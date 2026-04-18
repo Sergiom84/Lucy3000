@@ -227,11 +227,7 @@ if (-not $SkipDataImport) {
   Write-Host "Skipping backup data import (--SkipDataImport)."
 }
 
-Write-Host "Ensuring admin user exists..."
-& $psqlExe -h $creds.host -p $creds.port -U $creds.user -d $creds.db --set ON_ERROR_STOP=1 --file=scripts\create-admin.sql
-if ($LASTEXITCODE -ne 0) {
-  throw "Failed creating/updating admin user."
-}
+Write-Host "Skipping admin seed. Create the first admin through the bootstrap flow if the restored database has no users."
 
 Write-Host "Validating public table counts..."
 & $psqlExe -h $creds.host -p $creds.port -U $creds.user -d $creds.db --set ON_ERROR_STOP=1 --file=scripts\public-data-counts.sql

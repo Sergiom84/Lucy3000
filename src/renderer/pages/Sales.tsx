@@ -18,9 +18,17 @@ import { es } from 'date-fns/locale'
 import toast from 'react-hot-toast'
 import Modal from '../components/Modal'
 import api from '../utils/api'
+import {
+  loadActiveProducts,
+  loadAppointmentClients,
+  loadAppointmentServices,
+  loadBonoTemplates,
+  preloadPointOfSaleCatalogs
+} from '../utils/appointmentCatalogs'
 import { printTicket } from '../utils/desktop'
 import { getPrintTicketSuccessMessage } from '../utils/desktop'
 import { formatCurrency } from '../utils/format'
+import { buildSearchTokens, filterRankedItems } from '../utils/searchableOptions'
 import {
   buildSaleTicketPayload,
   buildQuoteHtml,
@@ -59,6 +67,9 @@ interface Product {
   price: number
   stock: number
   category: string
+  sku?: string | null
+  brand?: string | null
+  description?: string | null
 }
 
 interface Service {
@@ -67,6 +78,8 @@ interface Service {
   price: number
   duration: number
   category: string
+  serviceCode?: string | null
+  description?: string | null
 }
 
 interface BonoTemplate {
@@ -194,6 +207,7 @@ export default function Sales() {
   const [clientModalOpen, setClientModalOpen] = useState(false)
   const [clients, setClients] = useState<Client[]>([])
   const [clientSearch, setClientSearch] = useState('')
+  const [clientsLoading, setClientsLoading] = useState(false)
 
   const [sales, setSales] = useState<Sale[]>([])
   const [accountBalanceHistory, setAccountBalanceHistory] = useState<AccountBalanceHistoryRow[]>([])
@@ -218,6 +232,7 @@ export default function Sales() {
   useEffect(() => {
     if (view === 'pos') {
       void loadCatalog()
+      void preloadPointOfSaleCatalogs()
       if (prefilledClientId) {
         void loadClients()
       }
@@ -256,18 +271,28 @@ export default function Sales() {
 
   const loadCatalog = async () => {
     try {
-      const [productsRes, servicesRes] = await Promise.all([
-        api.get('/products?isActive=true'),
-        api.get('/services?isActive=true')
+      const [productsResult, servicesResult, bonosResult] = await Promise.allSettled([
+        loadActiveProducts(),
+        loadAppointmentServices(),
+        loadBonoTemplates()
       ])
-      setProducts(productsRes.data)
-      setServices(servicesRes.data)
 
-      try {
-        const bonosRes = await api.get('/bonos/templates')
-        setBonoTemplates(bonosRes.data)
-      } catch (bonusError) {
-        console.error('Error loading bono templates:', bonusError)
+      if (productsResult.status === 'fulfilled') {
+        setProducts(productsResult.value as Product[])
+      } else {
+        console.error('Error loading products:', productsResult.reason)
+      }
+
+      if (servicesResult.status === 'fulfilled') {
+        setServices(servicesResult.value as Service[])
+      } else {
+        console.error('Error loading services:', servicesResult.reason)
+      }
+
+      if (bonosResult.status === 'fulfilled') {
+        setBonoTemplates(bonosResult.value as BonoTemplate[])
+      } else {
+        console.error('Error loading bono templates:', bonosResult.reason)
         setBonoTemplates([])
       }
     } catch (error) {
@@ -278,11 +303,14 @@ export default function Sales() {
 
   const loadClients = async () => {
     try {
-      const response = await api.get('/clients?isActive=true')
-      setClients(response.data)
+      setClientsLoading(true)
+      const nextClients = await loadAppointmentClients()
+      setClients(nextClients as Client[])
     } catch (error) {
       console.error('Error loading clients:', error)
       toast.error('Error al cargar clientes')
+    } finally {
+      setClientsLoading(false)
     }
   }
 
@@ -748,13 +776,40 @@ export default function Sales() {
     }
 
     if (catalogSearch.trim()) {
-      const term = catalogSearch.toLowerCase().trim()
-      items = items.filter(
-        (item) =>
-          item.name.toLowerCase().includes(term) ||
-          String(item.category || '').toLowerCase().includes(term) ||
-          (item.type === 'bono' && String(item.serviceName || '').toLowerCase().includes(term))
-      )
+      items = filterRankedItems(items, catalogSearch, (item) => ({
+        label: item.name,
+        labelTokens: buildSearchTokens(item.name),
+        searchText:
+          item.type === 'product'
+            ? [
+                item.name,
+                item.category,
+                item.sku,
+                item.brand,
+                item.description
+              ]
+                .filter(Boolean)
+                .join(' ')
+            : item.type === 'service'
+              ? [
+                  item.name,
+                  item.category,
+                  item.serviceCode,
+                  item.description,
+                  item.duration
+                ]
+                  .filter(Boolean)
+                  .join(' ')
+              : [
+                  item.description,
+                  item.category,
+                  item.serviceName,
+                  item.serviceLookup,
+                  item.totalSessions
+                ]
+                  .filter(Boolean)
+                  .join(' ')
+      }))
     }
 
     return items.sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }))
@@ -788,49 +843,62 @@ export default function Sales() {
 
   const filteredClients = useMemo(
     () =>
-      clients.filter((client) =>
-        `${client.firstName} ${client.lastName}`.toLowerCase().includes(clientSearch.toLowerCase()) ||
-        client.phone.includes(clientSearch) ||
-        (client.email && client.email.toLowerCase().includes(clientSearch.toLowerCase()))
-      ),
+      filterRankedItems(clients, clientSearch, (client) => {
+        const fullName = `${client.firstName} ${client.lastName}`.trim()
+
+        return {
+          label: fullName,
+          labelTokens: buildSearchTokens(fullName),
+          searchText: [fullName, client.phone, client.email].filter(Boolean).join(' ')
+        }
+      }),
     [clientSearch, clients]
   )
 
   const filteredSales = useMemo(
     () =>
-      sales.filter(
-        (sale) =>
-          sale.saleNumber.toLowerCase().includes(historySearch.toLowerCase()) ||
-          getSaleDisplayName(sale).toLowerCase().includes(historySearch.toLowerCase())
-      ),
+      filterRankedItems(sales, historySearch, (sale) => {
+        const displayName = getSaleDisplayName(sale)
+
+        return {
+          label: displayName,
+          labelTokens: buildSearchTokens(displayName),
+          searchText: [sale.saleNumber, displayName, salePaymentMethodLabel(sale), sale.status]
+            .filter(Boolean)
+            .join(' ')
+        }
+      }),
     [historySearch, sales]
   )
 
   const filteredAccountBalanceHistory = useMemo(() => {
-    const normalizedSearch = historySearch.trim().toLowerCase()
     const startTimestamp = dateFilter.startDate ? new Date(`${dateFilter.startDate}T00:00:00`).getTime() : null
     const endTimestamp = dateFilter.endDate ? new Date(`${dateFilter.endDate}T23:59:59`).getTime() : null
 
-    return accountBalanceHistory.filter((movement) => {
+    const dateFiltered = accountBalanceHistory.filter((movement) => {
       const movementTimestamp = new Date(movement.operationDate).getTime()
       if (startTimestamp !== null && movementTimestamp < startTimestamp) return false
       if (endTimestamp !== null && movementTimestamp > endTimestamp) return false
 
-      if (!normalizedSearch) return true
+      return true
+    })
 
-      const searchableText = [
-        movement.client?.firstName,
-        movement.client?.lastName,
-        movement.description,
-        movement.referenceItem,
-        movement.sale?.saleNumber,
-        salePaymentMethodLabel(movement.sale ? { ...movement.sale, accountBalanceMovements: [movement] } : null)
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
+    return filterRankedItems(dateFiltered, historySearch, (movement) => {
+      const clientName = `${movement.client?.firstName || ''} ${movement.client?.lastName || ''}`.trim()
 
-      return searchableText.includes(normalizedSearch)
+      return {
+        label: clientName || movement.description,
+        labelTokens: buildSearchTokens(clientName || movement.description),
+        searchText: [
+          clientName,
+          movement.description,
+          movement.referenceItem,
+          movement.sale?.saleNumber,
+          salePaymentMethodLabel(movement.sale ? { ...movement.sale, accountBalanceMovements: [movement] } : null)
+        ]
+          .filter(Boolean)
+          .join(' ')
+      }
     })
   }, [accountBalanceHistory, dateFilter.endDate, dateFilter.startDate, historySearch])
 
@@ -937,9 +1005,6 @@ export default function Sales() {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Ventas</h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">
-            Cobro rápido desde clientes y agenda.
-          </p>
         </div>
 
         <div className="flex gap-2 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg">
@@ -1181,8 +1246,10 @@ export default function Sales() {
                 <div className="space-y-3">
                   <button
                     onClick={() => {
-                      void loadClients()
                       setClientModalOpen(true)
+                      if (clients.length === 0 && !clientsLoading) {
+                        void loadClients()
+                      }
                     }}
                     className="btn btn-secondary w-full"
                   >
@@ -1754,23 +1821,33 @@ export default function Sales() {
           </div>
 
           <div className="max-h-96 overflow-y-auto space-y-2">
-            {filteredClients.map((client) => (
-              <button
-                key={client.id}
-                type="button"
-                onClick={() => {
-                  setSelectedClient(client)
-                  setClientModalOpen(false)
-                  setClientSearch('')
-                }}
-                className="w-full p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-blue-500 text-left transition-colors"
-              >
-                <p className="font-semibold text-gray-900 dark:text-white">
-                  {client.firstName} {client.lastName}
-                </p>
-                <p className="text-sm text-gray-600 dark:text-gray-400">{client.phone}</p>
-              </button>
-            ))}
+            {clientsLoading ? (
+              <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-700 p-4 text-sm text-gray-500 dark:text-gray-400">
+                Cargando clientes...
+              </div>
+            ) : filteredClients.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-700 p-4 text-sm text-gray-500 dark:text-gray-400">
+                No se han encontrado clientes con esa búsqueda.
+              </div>
+            ) : (
+              filteredClients.map((client) => (
+                <button
+                  key={client.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedClient(client)
+                    setClientModalOpen(false)
+                    setClientSearch('')
+                  }}
+                  className="w-full p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-blue-500 text-left transition-colors"
+                >
+                  <p className="font-semibold text-gray-900 dark:text-white">
+                    {client.firstName} {client.lastName}
+                  </p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">{client.phone}</p>
+                </button>
+              ))
+            )}
           </div>
         </div>
       </Modal>

@@ -13,7 +13,16 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../utils/api'
-import { getAppointmentColorTheme, TREATMENT_CATEGORY_LABELS } from '../utils/appointmentColors'
+import { getAppointmentColorTheme } from '../utils/appointmentColors'
+import {
+  loadAppointmentLegendItems,
+  type AppointmentLegendCatalogItem
+} from '../utils/appointmentCatalogs'
+import {
+  BUSINESS_END_MINUTES,
+  BUSINESS_START_MINUTES,
+  getTimeInputValueFromDate
+} from '../utils/appointmentTime'
 import Modal from './Modal'
 import AppointmentForm from './AppointmentForm'
 import { getAppointmentDisplayName, getNameInitials } from '../../shared/customerDisplay'
@@ -97,17 +106,23 @@ export default function ClientCalendarDock({
   selectedClientId = null
 }: ClientCalendarDockProps) {
   const [appointments, setAppointments] = useState<any[]>([])
+  const [legendItems, setLegendItems] = useState<AppointmentLegendCatalogItem[]>([])
   const [loading, setLoading] = useState(true)
   const [currentDate, setCurrentDate] = useState(new Date())
   const [view, setView] = useState<View>('day')
   const [showAppointmentModal, setShowAppointmentModal] = useState(false)
   const [editingAppointment, setEditingAppointment] = useState<any>(null)
   const [selectedDate, setSelectedDate] = useState<Date | undefined>()
+  const [preselectedStartTime, setPreselectedStartTime] = useState<string | undefined>()
   const [initialCabin, setInitialCabin] = useState<'LUCY' | 'TAMARA' | 'CABINA_1' | 'CABINA_2'>('LUCY')
 
   useEffect(() => {
     fetchAppointments()
   }, [currentDate, view])
+
+  useEffect(() => {
+    void fetchAppointmentLegends()
+  }, [])
 
   useEffect(() => {
     const resizeTimeout = window.setTimeout(() => {
@@ -144,6 +159,16 @@ export default function ClientCalendarDock({
       toast.error('No se pudo cargar la agenda integrada')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchAppointmentLegends = async () => {
+    try {
+      const nextLegendItems = await loadAppointmentLegendItems()
+      setLegendItems(nextLegendItems)
+    } catch (error) {
+      console.error('Error fetching integrated calendar legends:', error)
+      toast.error('No se pudo cargar la leyenda de citas')
     }
   }
 
@@ -189,12 +214,14 @@ export default function ClientCalendarDock({
     return Array.from({ length: 42 }, (_, index) => monthStart.clone().add(index, 'days'))
   }, [currentDateMoment])
 
+  const getThemeForAppointment = useCallback(
+    (appointment: any) => getAppointmentColorTheme(legendItems, appointment.service?.category),
+    [legendItems]
+  )
+
   const eventStyleGetter = useCallback(
     (event: any) => {
-      const theme = getAppointmentColorTheme(
-        event.appointment.service?.category,
-        event.appointment.service?.name
-      )
+      const theme = getThemeForAppointment(event.appointment)
       const isHighlighted = event.isHighlighted
       const durationMinutes = event.durationMinutes ?? 0
       const isTiny = durationMinutes <= 30
@@ -218,11 +245,17 @@ export default function ClientCalendarDock({
         }
       }
     },
-    []
+    [getThemeForAppointment]
   )
 
   const handleSelectSlot = ({ start, resourceId }: { start: Date; resourceId?: string | number }) => {
     setSelectedDate(start)
+    const slotMinutes = start.getHours() * 60 + start.getMinutes()
+    setPreselectedStartTime(
+      slotMinutes >= BUSINESS_START_MINUTES && slotMinutes < BUSINESS_END_MINUTES
+        ? getTimeInputValueFromDate(start)
+        : undefined
+    )
     const selectedCabin = String(resourceId || 'LUCY') as typeof initialCabin
     setInitialCabin(selectedCabin)
     setEditingAppointment(null)
@@ -233,6 +266,7 @@ export default function ClientCalendarDock({
     setEditingAppointment(event.appointment)
     setInitialCabin(event.appointment.cabin || 'LUCY')
     setSelectedDate(undefined)
+    setPreselectedStartTime(undefined)
     setShowAppointmentModal(true)
   }
 
@@ -240,6 +274,7 @@ export default function ClientCalendarDock({
     setShowAppointmentModal(false)
     setEditingAppointment(null)
     setSelectedDate(undefined)
+    setPreselectedStartTime(undefined)
     setInitialCabin('LUCY')
   }
 
@@ -418,7 +453,8 @@ export default function ClientCalendarDock({
 
                 <button
                   onClick={() => {
-                    setSelectedDate(new Date())
+                    setSelectedDate(new Date(currentDate))
+                    setPreselectedStartTime(undefined)
                     setInitialCabin('LUCY')
                     setEditingAppointment(null)
                     setShowAppointmentModal(true)
@@ -478,22 +514,23 @@ export default function ClientCalendarDock({
         <div className="border-t border-white/10 bg-slate-900/50 px-5 py-3">
           <p className="mb-2 text-[10px] uppercase tracking-[0.2em] text-slate-500">Tratamientos</p>
           <div className="flex flex-wrap gap-2">
-            {TREATMENT_CATEGORY_LABELS.map((item) => {
-              const theme = getAppointmentColorTheme(item.label, item.label)
-              return (
-                <div key={item.key} className="flex items-center gap-1.5">
-                <span
-                  className="h-2.5 w-2.5 rounded-full"
-                  style={{ backgroundColor: theme.background }}
-                />
-                <span className="text-[11px] text-slate-400">{item.label}</span>
-              </div>
-              )
-            })}
+            {legendItems.length === 0 ? (
+              <span className="text-[11px] text-slate-400">No hay leyendas configuradas.</span>
+            ) : (
+              legendItems.map((item) => {
+                const theme = getAppointmentColorTheme(legendItems, item.category)
+                return (
+                  <div key={item.id} className="flex items-center gap-1.5">
+                    <span
+                      className="h-2.5 w-2.5 rounded-full"
+                      style={{ backgroundColor: theme.background }}
+                    />
+                    <span className="text-[11px] text-slate-400">{item.category}</span>
+                  </div>
+                )
+              })
+            )}
           </div>
-          <p className="mt-3 text-[11px] text-slate-400">
-            Cada cita toma el color de la categoria del tratamiento.
-          </p>
         </div>
       </div>
 
@@ -509,40 +546,41 @@ export default function ClientCalendarDock({
             <div
               className="flex items-center justify-between rounded-lg p-4"
               style={{
-                backgroundColor: getAppointmentColorTheme(editingAppointment.service?.category, editingAppointment.service?.name).softBackground,
-                border: `1px solid ${getAppointmentColorTheme(editingAppointment.service?.category, editingAppointment.service?.name).border}`
+                backgroundColor: getThemeForAppointment(editingAppointment).softBackground,
+                border: `1px solid ${getThemeForAppointment(editingAppointment).border}`
               }}
             >
               <div className="flex items-center gap-4">
                 {(() => {
                   const appointmentName = getAppointmentDisplayName(editingAppointment)
+                  const theme = getThemeForAppointment(editingAppointment)
                   return (
                     <>
-                <div
-                  className="h-10 w-10 rounded-full flex items-center justify-center text-white font-semibold"
-                  style={{ backgroundColor: getAppointmentColorTheme(editingAppointment.service?.category, editingAppointment.service?.name).background }}
-                >
-                  {getNameInitials(appointmentName)}
-                </div>
-                <div>
-                  <p className="font-medium text-slate-900 dark:text-white">
-                    {appointmentName}
-                  </p>
-                  <div className="mt-2 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-                    <div>
-                      <p className="text-slate-500 dark:text-slate-400">Profesional</p>
-                      <p className="font-medium text-slate-900 dark:text-white">
-                        {professionalLabels[editingAppointment.professional] || editingAppointment.professional || 'Lucy'}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-slate-500 dark:text-slate-400">Hora de inicio</p>
-                      <p className="font-medium text-slate-900 dark:text-white">
-                        {editingAppointment.startTime}
-                      </p>
-                    </div>
-                  </div>
-                </div>
+                      <div
+                        className="h-10 w-10 rounded-full flex items-center justify-center text-white font-semibold"
+                        style={{ backgroundColor: theme.background }}
+                      >
+                        {getNameInitials(appointmentName)}
+                      </div>
+                      <div>
+                        <p className="font-medium text-slate-900 dark:text-white">
+                          {appointmentName}
+                        </p>
+                        <div className="mt-2 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+                          <div>
+                            <p className="text-slate-500 dark:text-slate-400">Profesional</p>
+                            <p className="font-medium text-slate-900 dark:text-white">
+                              {professionalLabels[editingAppointment.professional] || editingAppointment.professional || 'Lucy'}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-slate-500 dark:text-slate-400">Hora de inicio</p>
+                            <p className="font-medium text-slate-900 dark:text-white">
+                              {editingAppointment.startTime}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
                     </>
                   )
                 })()}
@@ -561,6 +599,7 @@ export default function ClientCalendarDock({
             onSuccess={handleAppointmentSuccess}
             onCancel={handleCloseAppointmentModal}
             preselectedDate={selectedDate}
+            preselectedStartTime={preselectedStartTime}
             initialCabin={initialCabin}
           />
         </div>

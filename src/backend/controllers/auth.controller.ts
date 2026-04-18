@@ -7,6 +7,76 @@ import { getJwtSecret } from '../utils/jwt'
 
 const USER_ROLES: string[] = ['ADMIN', 'MANAGER', 'EMPLOYEE']
 
+const normalizeEmail = (value: unknown) => String(value || '').trim().toLowerCase()
+
+const buildAuthResponse = (user: {
+  id: string
+  email: string
+  name: string
+  role: string
+}) => {
+  const token = jwt.sign(
+    { id: user.id, email: user.email, role: user.role },
+    getJwtSecret(),
+    { expiresIn: '7d' }
+  )
+
+  return {
+    token,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role
+    }
+  }
+}
+
+const isBootstrapRequired = async () => {
+  const userCount = await prisma.user.count()
+  return userCount === 0
+}
+
+export const getBootstrapStatus = async (_req: Request, res: Response) => {
+  try {
+    res.json({ required: await isBootstrapRequired() })
+  } catch (error) {
+    console.error('Get bootstrap status error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const bootstrapAdmin = async (req: Request, res: Response) => {
+  try {
+    const { email, password, name } = req.body
+
+    const createdUser = await prisma.$transaction(async (tx) => {
+      const userCount = await tx.user.count()
+      if (userCount > 0) {
+        return null
+      }
+
+      return tx.user.create({
+        data: {
+          email: normalizeEmail(email),
+          password: await bcrypt.hash(password, 10),
+          name: String(name).trim(),
+          role: 'ADMIN'
+        }
+      })
+    })
+
+    if (!createdUser) {
+      return res.status(409).json({ error: 'Bootstrap already completed' })
+    }
+
+    res.status(201).json(buildAuthResponse(createdUser))
+  } catch (error) {
+    console.error('Bootstrap admin error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
 export const login = async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body
@@ -15,7 +85,7 @@ export const login = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Email and password are required' })
     }
 
-    const normalizedEmail = String(email).trim().toLowerCase()
+    const normalizedEmail = normalizeEmail(email)
 
     const user = await prisma.user.findUnique({
       where: { email: normalizedEmail }
@@ -35,21 +105,7 @@ export const login = async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'User is inactive' })
     }
 
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
-      getJwtSecret(),
-      { expiresIn: '7d' }
-    )
-
-    res.json({
-      token,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role
-      }
-    })
+    res.json(buildAuthResponse(user))
   } catch (error) {
     console.error('Login error:', error)
     res.status(500).json({ error: 'Internal server error' })
@@ -68,7 +124,7 @@ export const register = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Password must be at least 8 characters long' })
     }
 
-    const normalizedEmail = String(email).trim().toLowerCase()
+    const normalizedEmail = normalizeEmail(email)
     const sanitizedRole: string =
       USER_ROLES.includes(role as string) ? (role as string) : 'EMPLOYEE'
 
@@ -91,21 +147,7 @@ export const register = async (req: Request, res: Response) => {
       }
     })
 
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
-      getJwtSecret(),
-      { expiresIn: '7d' }
-    )
-
-    res.status(201).json({
-      token,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role
-      }
-    })
+    res.status(201).json(buildAuthResponse(user))
   } catch (error) {
     console.error('Register error:', error)
     res.status(500).json({ error: 'Internal server error' })

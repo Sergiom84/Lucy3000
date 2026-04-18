@@ -8,6 +8,7 @@ const NETWORK_RETRY_DELAY_MS = 500
 type RetryableAxiosConfig = {
   _networkRetryCount?: number
   method?: string
+  url?: string
 }
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -23,6 +24,23 @@ const serializeAxiosError = (error: any) => ({
   requestData: error?.config?.data ?? null,
   responseData: error?.response?.data ?? null
 })
+
+const isBootstrapOrLoginRequest = (url: string | undefined) => {
+  if (!url) return false
+
+  return ['/auth/login', '/auth/bootstrap-admin', '/auth/bootstrap-status'].some((path) =>
+    url.includes(path)
+  )
+}
+
+const redirectToLogin = () => {
+  if (window.location.protocol === 'file:') {
+    window.location.hash = '#/login'
+    return
+  }
+
+  window.location.assign('/login')
+}
 
 const api = axios.create({
   baseURL: API_URL,
@@ -65,9 +83,11 @@ api.interceptors.response.use(
 
     console.error('[api] Request failed', serializeAxiosError(error))
 
-    if (error.response?.status === 401) {
+    const hasActiveSession = Boolean(useAuthStore.getState().token)
+
+    if (error.response?.status === 401 && hasActiveSession && !isBootstrapOrLoginRequest(config?.url)) {
       useAuthStore.getState().logout()
-      window.location.href = '/login'
+      redirectToLogin()
     }
     return Promise.reject(error)
   }

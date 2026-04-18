@@ -49,6 +49,26 @@ export const accountBalanceConsumeBodySchema = z
   })
   .strict()
 
+export const createBonoTemplateBodySchema = z
+  .object({
+    category: z.string().trim().max(120, 'La categoría es demasiado larga').optional(),
+    description: z
+      .string()
+      .trim()
+      .min(1, 'La descripción es obligatoria')
+      .max(200, 'La descripción es demasiado larga'),
+    serviceId: z.string().uuid('Tratamiento base no válido'),
+    totalSessions: z
+      .coerce
+      .number()
+      .int()
+      .min(1, 'Las sesiones deben ser al menos 1')
+      .max(200, 'Las sesiones son demasiadas'),
+    price: z.coerce.number().finite().min(0, 'El precio no puede ser negativo'),
+    isActive: z.boolean().optional().default(true)
+  })
+  .strict()
+
 const professionalSchema = z.enum(['LUCY', 'TAMARA', 'CHEMA', 'OTROS'])
 
 export const createBonoAppointmentBodySchema = z

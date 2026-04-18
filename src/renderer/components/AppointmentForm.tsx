@@ -1,9 +1,27 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
-import { ChevronDown, Clock, Save, X } from 'lucide-react'
+import { useState, useEffect, useMemo } from 'react'
+import { Clock, Save, X } from 'lucide-react'
 import api from '../utils/api'
+import { loadAppointmentClients, loadAppointmentServices } from '../utils/appointmentCatalogs'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '../stores/authStore'
 import { formatCurrency } from '../utils/format'
+import {
+  buildTimeOptions,
+  BUSINESS_BREAK_END_MINUTES,
+  BUSINESS_BREAK_START_MINUTES,
+  BUSINESS_END_MINUTES,
+  BUSINESS_START_MINUTES,
+  getAppointmentTimeInputState,
+  padTime,
+  TIME_STEP_MINUTES,
+  timeToMinutes,
+  minutesToTime
+} from '../utils/appointmentTime'
+import {
+  buildSearchTokens,
+  filterSearchableOptions,
+  type SearchableOption
+} from '../utils/searchableOptions'
 
 interface BonoAppointmentContext {
   bonoPackId: string
@@ -18,15 +36,9 @@ interface AppointmentFormProps {
   onSuccess: () => void
   onCancel: () => void
   preselectedDate?: Date
+  preselectedStartTime?: string
   initialCabin?: 'LUCY' | 'TAMARA' | 'CABINA_1' | 'CABINA_2'
   fromBono?: BonoAppointmentContext | null
-}
-
-type SearchableOption = {
-  id: string
-  label: string
-  detail?: string
-  searchText: string
 }
 
 type ClientBonoSummary = {
@@ -37,11 +49,7 @@ type ClientBonoSummary = {
   sessions: Array<{ status: 'AVAILABLE' | 'CONSUMED' }>
 }
 
-const TIME_STEP_MINUTES = 15
-const BUSINESS_START_MINUTES = 9 * 60
-const BUSINESS_END_MINUTES = 21 * 60
-const BUSINESS_BREAK_START_MINUTES = 14 * 60
-const BUSINESS_BREAK_END_MINUTES = 16 * 60
+const SEARCH_RESULTS_LIMIT = 50
 
 const professionalOptions = [
   { value: 'LUCY', label: 'Lucy' },
@@ -50,41 +58,6 @@ const professionalOptions = [
   { value: 'OTROS', label: 'Otros' }
 ]
 
-const normalizeText = (value: unknown) =>
-  String(value ?? '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim()
-
-const padTime = (value: number) => String(value).padStart(2, '0')
-
-const timeToMinutes = (value: string) => {
-  const [hours, minutes] = value.split(':').map(Number)
-  return (Number.isFinite(hours) ? hours : 0) * 60 + (Number.isFinite(minutes) ? minutes : 0)
-}
-
-const minutesToTime = (value: number) => {
-  const safeMinutes = Math.max(0, Math.floor(value))
-  const hours = Math.floor(safeMinutes / 60)
-  const minutes = safeMinutes % 60
-  return `${padTime(hours)}:${padTime(minutes)}`
-}
-
-const buildTimeOptions = (startMinutes: number, endMinutes: number) => {
-  const options: string[] = []
-  for (let minutes = startMinutes; minutes <= endMinutes; minutes += TIME_STEP_MINUTES) {
-    options.push(minutesToTime(minutes))
-  }
-  return options
-}
-
-const roundUpToTimeStep = (value: string) => {
-  const minutes = timeToMinutes(value)
-  const rounded = Math.ceil(minutes / TIME_STEP_MINUTES) * TIME_STEP_MINUTES
-  return rounded <= BUSINESS_END_MINUTES ? minutesToTime(rounded) : ''
-}
-
 const getLocalDateInputValue = (value: Date) => {
   const year = value.getFullYear()
   const month = padTime(value.getMonth() + 1)
@@ -92,67 +65,43 @@ const getLocalDateInputValue = (value: Date) => {
   return `${year}-${month}-${day}`
 }
 
-function TimeSelect({
+function TimeInput({
   value,
-  options,
   onChange,
+  onBlur,
   placeholder
 }: {
   value: string
-  options: string[]
   onChange: (value: string) => void
+  onBlur: () => void
   placeholder: string
 }) {
-  const [isOpen, setIsOpen] = useState(false)
-  const containerRef = useRef<HTMLDivElement | null>(null)
-
-  useEffect(() => {
-    const handleOutsideClick = (event: MouseEvent) => {
-      if (!containerRef.current || containerRef.current.contains(event.target as Node)) return
-      setIsOpen(false)
-    }
-
-    document.addEventListener('mousedown', handleOutsideClick)
-    return () => document.removeEventListener('mousedown', handleOutsideClick)
-  }, [])
+  const listId = placeholder === '08:00' ? 'appointment-start-time-options' : 'appointment-end-time-options'
+  const options = useMemo(() => {
+    return listId === 'appointment-start-time-options'
+      ? buildTimeOptions(BUSINESS_START_MINUTES, BUSINESS_END_MINUTES - TIME_STEP_MINUTES)
+      : buildTimeOptions(BUSINESS_START_MINUTES + TIME_STEP_MINUTES, BUSINESS_END_MINUTES)
+  }, [listId])
 
   return (
-    <div ref={containerRef} className="relative">
-      <button
-        type="button"
-        className="input flex items-center justify-between gap-3 text-left disabled:cursor-not-allowed disabled:opacity-70"
-        onClick={() => setIsOpen((prev) => !prev)}
-        aria-expanded={isOpen}
-      >
-        <span className={value ? 'text-gray-900 dark:text-white' : 'text-gray-400 dark:text-gray-500'}>
-          {value || placeholder}
-        </span>
-        <span className="flex items-center gap-2 text-gray-400 dark:text-gray-500">
-          <Clock className="h-4 w-4" />
-          <ChevronDown className="h-4 w-4" />
-        </span>
-      </button>
-
-      {isOpen && (
-        <div className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800">
-          {options.map((option) => (
-            <button
-              key={option}
-              type="button"
-              onMouseDown={(event) => {
-                event.preventDefault()
-                onChange(option)
-                setIsOpen(false)
-              }}
-              className={`w-full border-b border-gray-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700 ${
-                option === value ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-200' : 'text-gray-900 dark:text-white'
-              }`}
-            >
-              {option}
-            </button>
-          ))}
-        </div>
-      )}
+    <div className="relative">
+      <Clock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+      <input
+        type="text"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onBlur={onBlur}
+        className="input pl-10"
+        placeholder={placeholder}
+        list={listId}
+        inputMode="numeric"
+        autoComplete="off"
+      />
+      <datalist id={listId}>
+        {options.map((option) => (
+          <option key={option} value={option} />
+        ))}
+      </datalist>
     </div>
   )
 }
@@ -163,7 +112,9 @@ function SearchableSelect({
   onSelect,
   placeholder,
   emptyText,
-  disabled = false
+  disabled = false,
+  loading = false,
+  loadingText = 'Cargando opciones...'
 }: {
   value: string
   options: SearchableOption[]
@@ -171,6 +122,8 @@ function SearchableSelect({
   placeholder: string
   emptyText: string
   disabled?: boolean
+  loading?: boolean
+  loadingText?: string
 }) {
   const [query, setQuery] = useState('')
   const [isOpen, setIsOpen] = useState(false)
@@ -202,11 +155,13 @@ function SearchableSelect({
     }
   }, [disabled, selectedOption])
 
-  const filteredOptions = useMemo(() => {
-    const term = normalizeText(query)
-    if (!term) return options
-    return options.filter((option) => normalizeText(option.searchText).includes(term))
-  }, [options, query])
+  const filteredOptions = useMemo(() => filterSearchableOptions(options, query), [options, query])
+  const visibleOptions = useMemo(
+    () => filteredOptions.slice(0, SEARCH_RESULTS_LIMIT),
+    [filteredOptions]
+  )
+  const hiddenResultsCount = Math.max(filteredOptions.length - visibleOptions.length, 0)
+  const hasQuery = buildSearchTokens(query).length > 0
 
   const handleSelect = (option: SearchableOption) => {
     onSelect(option.id)
@@ -242,31 +197,45 @@ function SearchableSelect({
 
       {!disabled && isOpen && (
         <div className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800">
-          {filteredOptions.length === 0 ? (
+          {loading ? (
+            <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+              {loadingText}
+            </div>
+          ) : filteredOptions.length === 0 ? (
             <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
               {emptyText}
             </div>
           ) : (
-            filteredOptions.map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  handleSelect(option)
-                }}
-                className="w-full border-b border-gray-100 px-3 py-2 text-left last:border-b-0 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700"
-              >
-                <p className="text-sm font-medium text-gray-900 dark:text-white">
-                  {option.label}
-                </p>
-                {option.detail && (
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {option.detail}
+            <>
+              {visibleOptions.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    handleSelect(option)
+                  }}
+                  className="w-full border-b border-gray-100 px-3 py-2 text-left last:border-b-0 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700"
+                >
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">
+                    {option.label}
                   </p>
-                )}
-              </button>
-            ))
+                  {option.detail && (
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {option.detail}
+                    </p>
+                  )}
+                </button>
+              ))}
+
+              {(hiddenResultsCount > 0 || !hasQuery) && (
+                <div className="border-t border-gray-100 px-3 py-2 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                  {hiddenResultsCount > 0
+                    ? `Mostrando ${visibleOptions.length} resultados. Escribe mas para afinar la busqueda.`
+                    : 'Escribe varias letras para encontrar antes al cliente.'}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -281,9 +250,6 @@ const cabinOptions = [
   { value: 'CABINA_2', label: 'Cabina 2' }
 ]
 
-const startTimeOptions = buildTimeOptions(BUSINESS_START_MINUTES, BUSINESS_END_MINUTES - TIME_STEP_MINUTES)
-const endTimeOptions = buildTimeOptions(BUSINESS_START_MINUTES + TIME_STEP_MINUTES, BUSINESS_END_MINUTES)
-
 const getRemainingSessions = (bonoPack: ClientBonoSummary) => {
   const consumed = bonoPack.sessions.filter((session) => session.status === 'CONSUMED').length
   return Math.max(Number(bonoPack.totalSessions || 0) - consumed, 0)
@@ -294,11 +260,14 @@ export default function AppointmentForm({
   onSuccess,
   onCancel,
   preselectedDate,
+  preselectedStartTime,
   initialCabin = 'LUCY',
   fromBono = null
 }: AppointmentFormProps) {
   const { user } = useAuthStore()
   const [loading, setLoading] = useState(false)
+  const [clientsLoading, setClientsLoading] = useState(true)
+  const [servicesLoading, setServicesLoading] = useState(true)
   const [clients, setClients] = useState<any[]>([])
   const [services, setServices] = useState<any[]>([])
   const [selectedService, setSelectedService] = useState<any>(null)
@@ -320,24 +289,63 @@ export default function AppointmentForm({
     cabin: initialCabin,
     professional: 'LUCY',
     date: '',
-    startTime: '',
-    endTime: '',
     status: 'SCHEDULED',
     notes: '',
     reminder: true
   })
+  const [startTimeInput, setStartTimeInput] = useState('')
+  const [endTimeInput, setEndTimeInput] = useState('')
 
-  const timeSelectStartOptions = useMemo(() => startTimeOptions, [])
+  const startTimeState = useMemo(
+    () => getAppointmentTimeInputState(startTimeInput, 'start'),
+    [startTimeInput]
+  )
 
-  const timeSelectEndOptions = useMemo(() => {
-    return formData.startTime
-      ? endTimeOptions.filter((option) => option > formData.startTime)
-      : endTimeOptions
-  }, [formData.startTime])
+  const endTimeState = useMemo(
+    () => getAppointmentTimeInputState(endTimeInput, 'end', startTimeState.normalized || undefined),
+    [endTimeInput, startTimeState.normalized]
+  )
+
+  const normalizedStartTime = startTimeState.error ? '' : startTimeState.normalized
+  const normalizedEndTime = endTimeState.error ? '' : endTimeState.normalized
 
   useEffect(() => {
-    fetchClients()
-    fetchServices()
+    let cancelled = false
+
+    const loadCatalogs = async () => {
+      setClientsLoading(true)
+      setServicesLoading(true)
+
+      const [clientsResult, servicesResult] = await Promise.allSettled([
+        loadAppointmentClients(),
+        loadAppointmentServices()
+      ])
+
+      if (cancelled) {
+        return
+      }
+
+      if (clientsResult.status === 'fulfilled') {
+        setClients(clientsResult.value)
+      } else {
+        console.error('Error fetching clients:', clientsResult.reason)
+      }
+
+      if (servicesResult.status === 'fulfilled') {
+        setServices(servicesResult.value)
+      } else {
+        console.error('Error fetching services:', servicesResult.reason)
+      }
+
+      setClientsLoading(false)
+      setServicesLoading(false)
+    }
+
+    void loadCatalogs()
+
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
@@ -353,12 +361,12 @@ export default function AppointmentForm({
         cabin: appointment.cabin || initialCabin,
         professional: appointment.professional || 'LUCY',
         date: getLocalDateInputValue(appointmentDate),
-        startTime: appointment.startTime || '',
-        endTime: appointment.endTime || '',
         status: appointment.status || 'SCHEDULED',
         notes: appointment.notes || '',
         reminder: appointment.reminder ?? true
       })
+      setStartTimeInput(appointment.startTime || '')
+      setEndTimeInput(appointment.endTime || '')
       if (appointment.service) {
         setSelectedService(appointment.service)
       }
@@ -380,7 +388,13 @@ export default function AppointmentForm({
       professional: prev.professional || 'LUCY',
       date: preselectedDate ? getLocalDateInputValue(preselectedDate) : prev.date
     }))
-  }, [appointment, preselectedDate, user, initialCabin, fromBono, isCreatingFromBono])
+    setStartTimeInput(preselectedStartTime || '')
+    setEndTimeInput(
+      preselectedStartTime
+        ? minutesToTime(Math.min(timeToMinutes(preselectedStartTime) + TIME_STEP_MINUTES, BUSINESS_END_MINUTES))
+        : ''
+    )
+  }, [appointment, preselectedDate, preselectedStartTime, user, initialCabin, fromBono, isCreatingFromBono])
 
   useEffect(() => {
     if (!formData.clientId) {
@@ -419,32 +433,6 @@ export default function AppointmentForm({
     setSelectedService(matchedService)
   }, [formData.serviceId, services])
 
-  const fetchClients = async () => {
-    try {
-      const response = await api.get('/clients?isActive=true')
-      const sortedClients = response.data.sort((a: any, b: any) => {
-        const fullNameA = `${a.firstName} ${a.lastName}`
-        const fullNameB = `${b.firstName} ${b.lastName}`
-        return fullNameA.localeCompare(fullNameB, 'es', { sensitivity: 'base' })
-      })
-      setClients(sortedClients)
-    } catch (error) {
-      console.error('Error fetching clients:', error)
-    }
-  }
-
-  const fetchServices = async () => {
-    try {
-      const response = await api.get('/services?isActive=true')
-      const sortedServices = response.data.sort((a: any, b: any) =>
-        a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })
-      )
-      setServices(sortedServices)
-    } catch (error) {
-      console.error('Error fetching services:', error)
-    }
-  }
-
   const selectedClient = useMemo(
     () => clients.find((client) => client.id === formData.clientId) || null,
     [clients, formData.clientId]
@@ -475,7 +463,9 @@ export default function AppointmentForm({
         id: client.id,
         label: fullName,
         detail,
-        searchText: `${fullName} ${phone} ${email}`
+        labelTokens: buildSearchTokens(fullName),
+        searchText: `${fullName} ${phone} ${email}`,
+        searchTokens: buildSearchTokens(`${fullName} ${phone} ${email}`)
       }
     })
   }, [clients])
@@ -490,22 +480,20 @@ export default function AppointmentForm({
         id: service.id,
         label: name,
         detail: `${duration} min${category ? ` · ${category}` : ''}`,
-        searchText: `${name} ${category} ${duration}`
+        labelTokens: buildSearchTokens(name),
+        searchText: `${name} ${category} ${duration}`,
+        searchTokens: buildSearchTokens(`${name} ${category} ${duration}`)
       }
     })
   }, [services])
 
   const calculateEndTime = (startTime: string, duration: number) => {
-    const [hours, minutes] = startTime.split(':')
-    const startDate = new Date()
-    startDate.setHours(parseInt(hours, 10), parseInt(minutes, 10))
-    startDate.setMinutes(startDate.getMinutes() + duration)
-    return `${startDate.getHours().toString().padStart(2, '0')}:${startDate.getMinutes().toString().padStart(2, '0')}`
+    return minutesToTime(timeToMinutes(startTime) + Math.max(0, Number(duration || 0)))
   }
 
   const getServiceEndTime = (startTime: string, duration: number) => {
-    const roundedEndTime = roundUpToTimeStep(calculateEndTime(startTime, duration))
-    return timeToMinutes(roundedEndTime) > BUSINESS_END_MINUTES ? '' : roundedEndTime
+    const exactEndTime = calculateEndTime(startTime, duration)
+    return timeToMinutes(exactEndTime) > BUSINESS_END_MINUTES ? '' : exactEndTime
   }
 
   const getSuggestedEndTime = (startTime: string) => {
@@ -517,6 +505,42 @@ export default function AppointmentForm({
 
     const startMinutes = timeToMinutes(startTime)
     return minutesToTime(Math.min(startMinutes + TIME_STEP_MINUTES, BUSINESS_END_MINUTES))
+  }
+
+  const handleStartTimeInputChange = (value: string) => {
+    setStartTimeInput(value)
+
+    const nextStartState = getAppointmentTimeInputState(value, 'start')
+    const nextStartTime = nextStartState.error ? '' : nextStartState.normalized
+
+    if (!nextStartTime) {
+      setEndTimeInput('')
+      return
+    }
+
+    const nextSuggestedEndTime = selectedService
+      ? getServiceEndTime(nextStartTime, Number(selectedService.duration || 0))
+      : getSuggestedEndTime(nextStartTime)
+
+    if (selectedService || !normalizedEndTime || timeToMinutes(normalizedEndTime) <= timeToMinutes(nextStartTime)) {
+      setEndTimeInput(nextSuggestedEndTime)
+    }
+  }
+
+  const handleStartTimeBlur = () => {
+    if (startTimeState.normalized) {
+      setStartTimeInput(startTimeState.normalized)
+    }
+  }
+
+  const handleEndTimeInputChange = (value: string) => {
+    setEndTimeInput(value)
+  }
+
+  const handleEndTimeBlur = () => {
+    if (endTimeState.normalized) {
+      setEndTimeInput(endTimeState.normalized)
+    }
   }
 
   const handleClientSelect = (clientId: string) => {
@@ -555,9 +579,12 @@ export default function AppointmentForm({
 
     setFormData((prev) => ({
       ...prev,
-      serviceId,
-      endTime: service && prev.startTime ? getServiceEndTime(prev.startTime, service.duration) : prev.endTime
+      serviceId
     }))
+
+    if (service && normalizedStartTime) {
+      setEndTimeInput(getServiceEndTime(normalizedStartTime, Number(service.duration || 0)))
+    }
   }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -565,22 +592,6 @@ export default function AppointmentForm({
     setFormData((prev) => ({
       ...prev,
       [name]: type === 'checkbox' ? (e.target as HTMLInputElement).checked : value
-    }))
-  }
-
-  const handleStartTimeSelect = (value: string) => {
-    const nextEndTime = getSuggestedEndTime(value)
-    setFormData((prev) => ({
-      ...prev,
-      startTime: value,
-      endTime: selectedService ? nextEndTime : (!prev.endTime || prev.endTime <= value ? nextEndTime : prev.endTime)
-    }))
-  }
-
-  const handleEndTimeSelect = (value: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      endTime: value
     }))
   }
 
@@ -631,23 +642,29 @@ export default function AppointmentForm({
         return
       }
 
-      if (!formData.startTime || !formData.endTime) {
-        toast.error('Debe seleccionar horario de inicio y fin')
+      if (startTimeState.error || endTimeState.error) {
+        toast.error(startTimeState.error || endTimeState.error || 'Debe indicar un horario valido')
+        setLoading(false)
+        return
+      }
+
+      if (!normalizedStartTime || !normalizedEndTime) {
+        toast.error('Debe indicar horario de inicio y fin')
         setLoading(false)
         return
       }
 
       // Validate start < end
-      if (formData.startTime >= formData.endTime) {
+      if (normalizedStartTime >= normalizedEndTime) {
         toast.error('La hora de inicio debe ser anterior a la hora de fin')
         setLoading(false)
         return
       }
 
-      const startMinutes = timeToMinutes(formData.startTime)
-      const endMinutes = timeToMinutes(formData.endTime)
-      if (startMinutes < BUSINESS_START_MINUTES || endMinutes > BUSINESS_END_MINUTES) {
-        toast.error('El horario debe estar entre 09:00 y 21:00')
+      const startMinutes = timeToMinutes(normalizedStartTime)
+      const endMinutes = timeToMinutes(normalizedEndTime)
+      if (startMinutes < BUSINESS_START_MINUTES || startMinutes >= BUSINESS_END_MINUTES || endMinutes > BUSINESS_END_MINUTES) {
+        toast.error('El horario debe estar entre 08:00 y 22:00')
         setLoading(false)
         return
       }
@@ -680,8 +697,8 @@ export default function AppointmentForm({
         cabin: formData.cabin,
         professional: formData.professional,
         date: new Date(formData.date).toISOString(),
-        startTime: formData.startTime,
-        endTime: formData.endTime,
+        startTime: normalizedStartTime,
+        endTime: normalizedEndTime,
         status: formData.status,
         notes: formData.notes.trim() || null,
         reminder: formData.reminder
@@ -795,6 +812,8 @@ export default function AppointmentForm({
                   onSelect={handleClientSelect}
                   placeholder="Buscar cliente por nombre, telefono o email..."
                   emptyText="No se encontraron clientes"
+                  loading={clientsLoading}
+                  loadingText="Cargando clientes..."
                   disabled={lockClient}
                 />
                 {lockClient && (
@@ -816,6 +835,8 @@ export default function AppointmentForm({
               onSelect={handleServiceSelect}
               placeholder="Buscar servicio por nombre o categoria..."
               emptyText="No se encontraron servicios"
+              loading={servicesLoading}
+              loadingText="Cargando servicios..."
               disabled={lockService}
             />
             {lockService && (
@@ -888,24 +909,34 @@ export default function AppointmentForm({
             <label className="label">
               Hora Inicio <span className="text-red-500">*</span>
             </label>
-            <TimeSelect
-              value={formData.startTime}
-              options={timeSelectStartOptions}
-              onChange={handleStartTimeSelect}
-              placeholder="09:00"
+            <TimeInput
+              value={startTimeInput}
+              onChange={handleStartTimeInputChange}
+              onBlur={handleStartTimeBlur}
+              placeholder="08:00"
             />
+            {startTimeState.error && (
+              <p className="mt-1 text-sm text-red-600 dark:text-red-400">
+                {startTimeState.error}
+              </p>
+            )}
           </div>
 
           <div>
             <label className="label">
               Hora Fin <span className="text-red-500">*</span>
             </label>
-            <TimeSelect
-              value={formData.endTime}
-              options={timeSelectEndOptions}
-              onChange={handleEndTimeSelect}
-              placeholder="09:15"
+            <TimeInput
+              value={endTimeInput}
+              onChange={handleEndTimeInputChange}
+              onBlur={handleEndTimeBlur}
+              placeholder="08:15"
             />
+            {endTimeState.error && (
+              <p className="mt-1 text-sm text-red-600 dark:text-red-400">
+                {endTimeState.error}
+              </p>
+            )}
           </div>
           <div>
             <label className="label">
@@ -926,8 +957,8 @@ export default function AppointmentForm({
             </select>
           </div>
         </div>
-        {formData.startTime && (() => {
-          const mins = timeToMinutes(formData.startTime)
+        {normalizedStartTime && (() => {
+          const mins = timeToMinutes(normalizedStartTime)
           if (mins >= BUSINESS_BREAK_START_MINUTES && mins < BUSINESS_BREAK_END_MINUTES) {
             return (
               <p className="mt-2 text-sm text-amber-600 dark:text-amber-400">
@@ -937,7 +968,7 @@ export default function AppointmentForm({
           }
           return null
         })()}
-        {selectedService?.duration && formData.startTime && !formData.endTime && (
+        {selectedService?.duration && normalizedStartTime && !normalizedEndTime && (
           <p className="mt-2 text-sm text-red-600 dark:text-red-400">
             La duracion del servicio supera el horario de cierre. Elige una hora de inicio anterior.
           </p>
