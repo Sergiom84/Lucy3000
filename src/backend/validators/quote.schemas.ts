@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { optionalNullableTextSchema } from './common.schemas'
 
 const quoteStatusSchema = z.enum(['ISSUED', 'ACCEPTED', 'EXPIRED', 'CANCELLED'])
-const professionalSchema = z.enum(['LUCY', 'TAMARA', 'CHEMA', 'OTROS'])
+const professionalSchema = z.string().trim().min(1, 'Professional is required').max(120, 'Professional is too long')
 
 const nullableUuidSchema = z
   .union([z.string(), z.null(), z.undefined()])

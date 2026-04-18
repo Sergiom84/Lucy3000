@@ -17,6 +17,7 @@ const Cash = lazy(() => import('./pages/Cash'))
 const Reports = lazy(() => import('./pages/Reports'))
 const Settings = lazy(() => import('./pages/Settings'))
 const ClientRanking = lazy(() => import('./pages/ClientRanking'))
+const Accounts = lazy(() => import('./pages/Accounts'))
 
 function RouteLoader() {
   return (
@@ -24,6 +25,16 @@ function RouteLoader() {
       Cargando Lucy3000...
     </div>
   )
+}
+
+function AdminOnlyRoute({ children }: { children: JSX.Element }) {
+  const { user } = useAuthStore()
+
+  if (user?.role !== 'ADMIN') {
+    return <Navigate to="/" replace />
+  }
+
+  return children
 }
 
 function App() {
@@ -111,7 +122,22 @@ function App() {
             <Route path="/products" element={<Products />} />
             <Route path="/sales" element={<Sales />} />
             <Route path="/cash" element={<Cash />} />
-            <Route path="/reports" element={<Reports />} />
+            <Route
+              path="/reports"
+              element={
+                <AdminOnlyRoute>
+                  <Reports />
+                </AdminOnlyRoute>
+              }
+            />
+            <Route
+              path="/accounts"
+              element={
+                <AdminOnlyRoute>
+                  <Accounts />
+                </AdminOnlyRoute>
+              }
+            />
             <Route path="/ranking" element={<ClientRanking />} />
             <Route path="/settings" element={<Settings />} />
           </Route>

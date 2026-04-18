@@ -8,9 +8,10 @@ import toast from 'react-hot-toast'
 export default function Login() {
   const navigate = useNavigate()
   const { login, bootstrapChecked, bootstrapRequired, setBootstrapStatus } = useAuthStore()
-  const [email, setEmail] = useState('')
+  const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
   const [bootstrapName, setBootstrapName] = useState('')
+  const [bootstrapUsername, setBootstrapUsername] = useState('')
   const [bootstrapEmail, setBootstrapEmail] = useState('')
   const [bootstrapPassword, setBootstrapPassword] = useState('')
   const [bootstrapPasswordConfirm, setBootstrapPasswordConfirm] = useState('')
@@ -52,7 +53,7 @@ export default function Login() {
     setLoading(true)
 
     try {
-      const response = await api.post('/auth/login', { email, password })
+      const response = await api.post('/auth/login', { identifier, password })
       const { token, user } = response.data
       
       login(user, token)
@@ -78,6 +79,7 @@ export default function Login() {
     try {
       const response = await api.post('/auth/bootstrap-admin', {
         name: bootstrapName,
+        username: bootstrapUsername || undefined,
         email: bootstrapEmail,
         password: bootstrapPassword
       })
@@ -152,8 +154,22 @@ export default function Login() {
 
               <div>
                 <label className="label">
+                  <User className="w-4 h-4 inline mr-2" />
+                  Usuario para iniciar sesion
+                </label>
+                <input
+                  type="text"
+                  value={bootstrapUsername}
+                  onChange={(e) => setBootstrapUsername(e.target.value)}
+                  className="input"
+                  placeholder="Opcional"
+                />
+              </div>
+
+              <div>
+                <label className="label">
                   <Mail className="w-4 h-4 inline mr-2" />
-                  Email
+                  Correo electronico
                 </label>
                 <input
                   type="email"
@@ -209,15 +225,14 @@ export default function Login() {
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
                 <label className="label">
-                  <Mail className="w-4 h-4 inline mr-2" />
-                  Email
+                  <User className="w-4 h-4 inline mr-2" />
+                  Usuario o correo
                 </label>
                 <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  type="text"
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
                   className="input"
-                  placeholder="tu@email.com"
                   required
                 />
               </div>
@@ -232,7 +247,6 @@ export default function Login() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="input"
-                  placeholder="••••••••"
                   required
                 />
               </div>

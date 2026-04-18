@@ -3,6 +3,7 @@ import request from 'supertest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { app } from '../../../src/backend/app'
 import { MAX_SPREADSHEET_FILE_SIZE_BYTES } from '../../../src/backend/middleware/upload.middleware'
+import { createWorkbookBuffer } from '../helpers/spreadsheet'
 import { prismaMock, resetPrismaMock } from '../mocks/prisma.mock'
 
 vi.mock('../../../src/backend/db', async () => import('../mocks/db.mock'))
@@ -31,6 +32,22 @@ describe('API smoke tests', () => {
   beforeEach(() => {
     resetPrismaMock()
     process.env.JWT_SECRET = 'test-jwt-secret'
+    prismaMock.appointment.findMany.mockResolvedValue([])
+    prismaMock.agendaBlock.findMany.mockResolvedValue([])
+    prismaMock.agendaDayNote.findMany.mockResolvedValue([])
+    prismaMock.setting.findUnique.mockResolvedValue(null)
+    prismaMock.sale.findMany.mockResolvedValue([])
+    prismaMock.quote.findMany.mockResolvedValue([])
+    prismaMock.user.findUnique.mockResolvedValue({ id: 'user-1', name: 'Lucy' })
+    prismaMock.service.findMany.mockResolvedValue([
+      {
+        id: '3adf3ca8-c749-4f40-9f2e-54a8ff0f8f59',
+        name: 'Limpieza facial',
+        duration: 30,
+        category: 'Facial',
+        serviceCode: 'FAC-01'
+      }
+    ])
   })
 
   it('GET /health responds with ok status', async () => {
@@ -178,6 +195,193 @@ describe('API smoke tests', () => {
     expect(response.body.error).toBe('Validation error')
   })
 
+  it('GET /api/reports/clients rejects non-admin users', async () => {
+    const response = await request(app)
+      .get('/api/reports/clients')
+      .set('Authorization', createEmployeeAuthHeader())
+
+    expect(response.status).toBe(403)
+    expect(response.body.error).toBe('Admin access required')
+  })
+
+  it('GET /api/users rejects non-admin users', async () => {
+    const response = await request(app)
+      .get('/api/users')
+      .set('Authorization', createEmployeeAuthHeader())
+
+    expect(response.status).toBe(403)
+    expect(response.body.error).toBe('Admin access required')
+  })
+
+  it('POST /api/clients/import rejects non-admin users', async () => {
+    const response = await request(app)
+      .post('/api/clients/import')
+      .set('Authorization', createEmployeeAuthHeader())
+
+    expect(response.status).toBe(403)
+    expect(response.body.error).toBe('Admin access required')
+  })
+
+  it('POST /api/services/import rejects non-admin users', async () => {
+    const response = await request(app)
+      .post('/api/services/import')
+      .set('Authorization', createEmployeeAuthHeader())
+
+    expect(response.status).toBe(403)
+    expect(response.body.error).toBe('Admin access required')
+  })
+
+  it('POST /api/products/import rejects non-admin users', async () => {
+    const response = await request(app)
+      .post('/api/products/import')
+      .set('Authorization', createEmployeeAuthHeader())
+
+    expect(response.status).toBe(403)
+    expect(response.body.error).toBe('Admin access required')
+  })
+
+  it('POST /api/users creates a managed account for admin users', async () => {
+    prismaMock.user.findMany.mockResolvedValue([])
+    prismaMock.user.create.mockResolvedValue({
+      id: 'user-3',
+      email: 'equipo@example.com',
+      name: 'Equipo',
+      role: 'EMPLOYEE',
+      isActive: true,
+      createdAt: new Date('2026-04-18T10:00:00.000Z'),
+      updatedAt: new Date('2026-04-18T10:00:00.000Z')
+    })
+
+    const response = await request(app)
+      .post('/api/users')
+      .set('Authorization', createAuthHeader())
+      .send({
+        email: 'equipo@example.com',
+        name: 'Equipo',
+        password: 'supersecure123',
+        role: 'EMPLOYEE'
+      })
+
+    expect(response.status).toBe(201)
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        id: 'user-3',
+        email: 'equipo@example.com',
+        name: 'Equipo',
+        role: 'EMPLOYEE',
+        isActive: true
+      })
+    )
+  })
+
+  it('GET /api/users/:id/account-settings accepts legacy non-uuid user ids', async () => {
+    prismaMock.user.findUnique.mockResolvedValue({
+      id: 'admin-001',
+      email: 'admin@lucy3000.com',
+      username: 'admin',
+      name: 'Administrador',
+      role: 'ADMIN',
+      isActive: true,
+      createdAt: new Date('2026-04-18T10:00:00.000Z'),
+      updatedAt: new Date('2026-04-18T10:00:00.000Z')
+    })
+
+    const response = await request(app)
+      .get('/api/users/admin-001/account-settings')
+      .set('Authorization', createAuthHeader())
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        id: 'admin-001',
+        username: 'admin',
+        professionalNames: expect.any(Array)
+      })
+    )
+    expect(prismaMock.user.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'admin-001' }
+      })
+    )
+  })
+
+  it('GET /api/appointments/day-notes returns notes for a valid day key', async () => {
+    prismaMock.agendaDayNote.findMany.mockResolvedValue([
+      {
+        id: 'note-1',
+        dayKey: '2026-04-18',
+        text: 'Preparar cabina',
+        isCompleted: false,
+        completedAt: null,
+        createdAt: new Date('2026-04-18T08:00:00.000Z'),
+        updatedAt: new Date('2026-04-18T08:00:00.000Z')
+      }
+    ])
+
+    const response = await request(app)
+      .get('/api/appointments/day-notes?dayKey=2026-04-18')
+      .set('Authorization', createAuthHeader())
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'note-1',
+          text: 'Preparar cabina'
+        })
+      ])
+    )
+  })
+
+  it('POST /api/appointments/day-notes creates a note for the selected day', async () => {
+    prismaMock.agendaDayNote.create.mockResolvedValue({
+      id: 'note-1',
+      dayKey: '2026-04-18',
+      text: 'Recordar cierre',
+      isCompleted: false,
+      completedAt: null,
+      createdAt: new Date('2026-04-18T08:00:00.000Z'),
+      updatedAt: new Date('2026-04-18T08:00:00.000Z')
+    })
+
+    const response = await request(app)
+      .post('/api/appointments/day-notes')
+      .set('Authorization', createAuthHeader())
+      .send({
+        dayKey: '2026-04-18',
+        text: 'Recordar cierre'
+      })
+
+    expect(response.status).toBe(201)
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        id: 'note-1',
+        dayKey: '2026-04-18',
+        text: 'Recordar cierre'
+      })
+    )
+  })
+
+  it('GET /api/notifications hides admin-only activity notifications for non-admin users', async () => {
+    prismaMock.notification.findMany.mockResolvedValue([])
+
+    const response = await request(app)
+      .get('/api/notifications?isRead=false')
+      .set('Authorization', createEmployeeAuthHeader())
+
+    expect(response.status).toBe(200)
+    expect(prismaMock.notification.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          isRead: false,
+          NOT: {
+            type: 'ADMIN_ACTIVITY'
+          }
+        })
+      })
+    )
+  })
+
   it('POST /api/quotes rejects empty items payload through Zod validation', async () => {
     const response = await request(app)
       .post('/api/quotes')
@@ -228,6 +432,7 @@ describe('API smoke tests', () => {
         userId: '4adf3ca8-c749-4f40-9f2e-54a8ff0f8f58',
         serviceId: '3adf3ca8-c749-4f40-9f2e-54a8ff0f8f59',
         cabin: 'TAMARA',
+        professional: 'Tamara',
         date: '2099-03-07T10:00:00.000Z',
         startTime: '10:00',
         endTime: '10:30',
@@ -284,6 +489,7 @@ describe('API smoke tests', () => {
         userId: '4adf3ca8-c749-4f40-9f2e-54a8ff0f8f58',
         serviceId: '3adf3ca8-c749-4f40-9f2e-54a8ff0f8f59',
         cabin: 'LUCY',
+        professional: 'Lucy',
         date: '2099-03-07T10:00:00.000Z',
         startTime: '10:00',
         endTime: '10:30',
@@ -405,6 +611,84 @@ describe('API smoke tests', () => {
 
     expect(response.status).toBe(400)
     expect(response.body.error).toContain('5MB limit')
+  })
+
+  it('POST /api/appointments/import accepts a valid Excel file for admins', async () => {
+    prismaMock.client.findMany.mockResolvedValue([
+      {
+        id: 'client-1',
+        externalCode: '143',
+        firstName: 'CLARA',
+        lastName: 'RUIZ CALCERRADA',
+        phone: '670312806',
+        email: 'clara@example.com'
+      }
+    ])
+    prismaMock.service.findMany.mockResolvedValue([
+      {
+        id: 'service-1',
+        serviceCode: 'SHRMEN',
+        name: 'Menton shr',
+        duration: 20
+      }
+    ])
+    prismaMock.appointment.findMany.mockResolvedValue([])
+    prismaMock.appointment.create.mockResolvedValue({ id: 'appointment-1' })
+
+    const buffer = await createWorkbookBuffer(
+      [
+        [
+          'Fecha',
+          'Hora',
+          'Minutos',
+          'cliente',
+          'Nombre',
+          'Código',
+          'Descripción',
+          'Cabina',
+          'Profesional',
+          'Teléfono',
+          'Mail',
+          'Notas'
+        ],
+        [
+          '20-04-26',
+          '10:45',
+          20,
+          143,
+          'CLARA RUIZ CALCERRADA',
+          'SHRMEN',
+          'Menton shr',
+          'CABINA',
+          'LUCY',
+          670312806,
+          'clara@example.com',
+          'Primera cita'
+        ]
+      ],
+      'Citas'
+    )
+
+    const response = await request(app)
+      .post('/api/appointments/import')
+      .set('Authorization', createAuthHeader())
+      .attach('file', buffer, {
+        filename: 'citas.xlsx',
+        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      })
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        stage: 'commit',
+        results: expect.objectContaining({
+          success: 1,
+          skipped: 0,
+          errors: []
+        })
+      })
+    )
+    expect(prismaMock.appointment.create).toHaveBeenCalledTimes(1)
   })
 
   it('POST /api/sales accepts guest appointment charge with null clientId', async () => {

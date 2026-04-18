@@ -19,11 +19,15 @@ import ClientForm from '../components/ClientForm'
 import Modal from '../components/Modal'
 import api from '../utils/api'
 import { getPrintTicketSuccessMessage, printTicket } from '../utils/desktop'
+import { exportClientsWorkbook } from '../utils/exports'
 import { formatCurrency, formatDate, formatPhone } from '../utils/format'
+import { invalidateAppointmentClientsCache } from '../utils/appointmentCatalogs'
 import { buildSaleTicketPayload, paymentMethodLabel } from '../utils/tickets'
+import { useAuthStore } from '../stores/authStore'
 
 const PAGE_SIZE = 50
 const ClientCalendarDock = lazy(() => import('../components/ClientCalendarDock'))
+const ImportClientsModal = lazy(() => import('../components/ImportClientsModal'))
 
 type ClientListPagination = {
   page: number
@@ -43,6 +47,7 @@ function LazyPanelLoader() {
 }
 
 export default function Clients() {
+  const { user } = useAuthStore()
   const navigate = useNavigate()
   const [clients, setClients] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -61,12 +66,14 @@ export default function Clients() {
     debtAlerts: 0
   })
   const [showModal, setShowModal] = useState(false)
+  const [showImportModal, setShowImportModal] = useState(false)
   const [editingClient, setEditingClient] = useState<any>(null)
   const [billingModalClient, setBillingModalClient] = useState<any>(null)
   const [clientSales, setClientSales] = useState<any[]>([])
   const [billingLoading, setBillingLoading] = useState(false)
   const [showCalendarDock, setShowCalendarDock] = useState(false)
   const [highlightedClientId, setHighlightedClientId] = useState<string | null>(null)
+  const isAdmin = user?.role === 'ADMIN'
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -133,6 +140,7 @@ export default function Clients() {
 
     try {
       await api.delete(`/clients/${id}`)
+      invalidateAppointmentClientsCache()
       toast.success('Cliente eliminado')
       void fetchClients(currentPage, debouncedSearch)
     } catch (error) {
@@ -187,6 +195,32 @@ export default function Clients() {
     setShowCalendarDock(true)
   }
 
+  const handleExportClients = async () => {
+    try {
+      const params = new URLSearchParams({
+        includeCounts: 'false'
+      })
+
+      if (debouncedSearch) {
+        params.set('search', debouncedSearch)
+      }
+
+      const response = await api.get(`/clients?${params.toString()}`)
+      const rows = Array.isArray(response.data) ? response.data : []
+
+      if (rows.length === 0) {
+        toast.error('No hay clientes para exportar con el filtro actual')
+        return
+      }
+
+      await exportClientsWorkbook(rows)
+      toast.success('Clientes exportados a Excel')
+    } catch (error) {
+      console.error('Clients export error:', error)
+      toast.error('No se pudo exportar el listado de clientes')
+    }
+  }
+
   const handleCloseCalendarDock = () => {
     setShowCalendarDock(false)
     setHighlightedClientId(null)
@@ -225,6 +259,24 @@ export default function Clients() {
               >
                 {showCalendarDock ? 'Ocultar agenda' : 'Mostrar agenda'}
               </button>
+
+              {isAdmin ? (
+                <>
+                  <button
+                    onClick={() => setShowImportModal(true)}
+                    className="btn btn-secondary"
+                  >
+                    Importar
+                  </button>
+
+                  <button
+                    onClick={() => void handleExportClients()}
+                    className="btn btn-secondary"
+                  >
+                    Exportar
+                  </button>
+                </>
+              ) : null}
 
               <button
                 onClick={() => {
@@ -275,6 +327,9 @@ export default function Clients() {
                       Cliente
                     </th>
                     <th className="px-4 py-3 text-left text-sm font-medium text-gray-600 dark:text-gray-400">
+                      Nº Cliente
+                    </th>
+                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-600 dark:text-gray-400">
                       Contacto
                     </th>
                     <th className="px-4 py-3 text-left text-sm font-medium text-gray-600 dark:text-gray-400">
@@ -300,7 +355,7 @@ export default function Clients() {
                 <tbody>
                   {clients.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="py-8 text-center text-gray-500 dark:text-gray-400">
+                      <td colSpan={9} className="py-8 text-center text-gray-500 dark:text-gray-400">
                         {debouncedSearch ? 'No se encontraron clientes para esta búsqueda' : 'No hay clientes registrados'}
                       </td>
                     </tr>
@@ -318,10 +373,13 @@ export default function Clients() {
                               {client.firstName} {client.lastName}
                             </p>
                             <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                              {client.externalCode && <span>#{client.externalCode}</span>}
                               <span>{client._count?.appointments ?? 0} citas • {client._count?.sales ?? 0} ventas</span>
                             </div>
                           </div>
+                        </td>
+
+                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                          {client.externalCode ? `#${client.externalCode}` : '-'}
                         </td>
 
                         <td className="px-4 py-3">
@@ -498,6 +556,27 @@ export default function Clients() {
           onCancel={handleCloseModal}
         />
       </Modal>
+
+      {isAdmin ? (
+        <Modal
+          isOpen={showImportModal}
+          onClose={() => setShowImportModal(false)}
+          title="Importar Clientes desde Excel"
+          maxWidth="xl"
+        >
+          {showImportModal ? (
+            <Suspense fallback={<LazyPanelLoader />}>
+              <ImportClientsModal
+                onSuccess={() => {
+                  setShowImportModal(false)
+                  void fetchClients(currentPage, debouncedSearch)
+                }}
+                onCancel={() => setShowImportModal(false)}
+              />
+            </Suspense>
+          ) : null}
+        </Modal>
+      ) : null}
 
       <Modal
         isOpen={!!billingModalClient}

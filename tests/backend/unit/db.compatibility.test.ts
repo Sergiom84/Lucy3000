@@ -91,4 +91,20 @@ describe('ensureSqliteCompatibilityMigrations', () => {
       'ALTER TABLE "appointments" ADD COLUMN "guestPhone" TEXT'
     )
   })
+
+  it('creates the agenda day notes table when it does not exist yet', async () => {
+    const { ensureSqliteCompatibilityMigrations, executeRawUnsafe } = await loadDbModule({
+      "name='account_balance_movements'": [],
+      "name='appointments'": [],
+      "name='appointment_legends'": [],
+      "name='agenda_blocks'": [],
+      "name='agenda_day_notes'": []
+    })
+
+    await ensureSqliteCompatibilityMigrations()
+
+    const executedSql = executeRawUnsafe.mock.calls.map(([sql]) => String(sql)).join('\n')
+    expect(executedSql).toContain('CREATE TABLE "agenda_day_notes"')
+    expect(executedSql).toContain('CREATE INDEX "agenda_day_notes_dayKey_createdAt_idx"')
+  })
 })

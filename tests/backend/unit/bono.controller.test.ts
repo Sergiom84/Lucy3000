@@ -218,6 +218,15 @@ describe('bono.controller account balance', () => {
 describe('bono.controller bono appointments and sessions', () => {
   beforeEach(() => {
     resetPrismaMock()
+    prismaMock.agendaBlock.findMany.mockResolvedValue([])
+    prismaMock.user.findUnique.mockResolvedValue({ id: 'user-1', name: 'Lucy' })
+    prismaMock.service.findMany.mockResolvedValue([
+      {
+        id: 'service-1',
+        name: 'Limpieza facial',
+        duration: 30
+      }
+    ])
   })
 
   it('creates appointment from bono and reserves next available session', async () => {
@@ -295,6 +304,17 @@ describe('bono.controller bono appointments and sessions', () => {
 
     await createBonoAppointment(req as any, res)
 
+    expect(tx.appointment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          serviceId: 'service-1',
+          endTime: '10:30',
+          appointmentServices: {
+            create: [{ serviceId: 'service-1', sortOrder: 0 }]
+          }
+        })
+      })
+    )
     expect(tx.bonoSession.updateMany).toHaveBeenCalledWith({
       where: {
         id: 'session-1',

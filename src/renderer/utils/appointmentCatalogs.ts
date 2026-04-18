@@ -13,7 +13,10 @@ export type AppointmentServiceCatalogItem = {
   name?: string | null
   serviceCode?: string | null
   category?: string | null
+  duration?: number | null
 }
+
+export type AppointmentProfessionalCatalogItem = string
 
 type AppointmentProductCatalogItem = {
   id: string
@@ -44,21 +47,59 @@ export type AppointmentLegendCategoryCatalogItem = string
 
 let clientsCache: AppointmentClientCatalogItem[] | null = null
 let clientsPromise: Promise<AppointmentClientCatalogItem[]> | null = null
+let clientsCacheVersion = 0
 
 let servicesCache: AppointmentServiceCatalogItem[] | null = null
 let servicesPromise: Promise<AppointmentServiceCatalogItem[]> | null = null
+let servicesCacheVersion = 0
 
 let productsCache: AppointmentProductCatalogItem[] | null = null
 let productsPromise: Promise<AppointmentProductCatalogItem[]> | null = null
+let productsCacheVersion = 0
+
+let professionalsCache: AppointmentProfessionalCatalogItem[] | null = null
+let professionalsPromise: Promise<AppointmentProfessionalCatalogItem[]> | null = null
+let professionalsCacheVersion = 0
 
 let bonoTemplatesCache: BonoTemplateCatalogItem[] | null = null
 let bonoTemplatesPromise: Promise<BonoTemplateCatalogItem[]> | null = null
+let bonoTemplatesCacheVersion = 0
 
 let appointmentLegendsCache: AppointmentLegendCatalogItem[] | null = null
 let appointmentLegendsPromise: Promise<AppointmentLegendCatalogItem[]> | null = null
 
 let appointmentLegendCategoriesCache: AppointmentLegendCategoryCatalogItem[] | null = null
 let appointmentLegendCategoriesPromise: Promise<AppointmentLegendCategoryCatalogItem[]> | null = null
+
+export const invalidateAppointmentClientsCache = () => {
+  clientsCacheVersion += 1
+  clientsCache = null
+  clientsPromise = null
+}
+
+export const invalidateAppointmentServicesCache = () => {
+  servicesCacheVersion += 1
+  servicesCache = null
+  servicesPromise = null
+}
+
+export const invalidateBonoTemplatesCache = () => {
+  bonoTemplatesCacheVersion += 1
+  bonoTemplatesCache = null
+  bonoTemplatesPromise = null
+}
+
+export const invalidateActiveProductsCache = () => {
+  productsCacheVersion += 1
+  productsCache = null
+  productsPromise = null
+}
+
+export const invalidateAppointmentProfessionalsCache = () => {
+  professionalsCacheVersion += 1
+  professionalsCache = null
+  professionalsPromise = null
+}
 
 const sortClients = (clients: AppointmentClientCatalogItem[]) =>
   [...clients].sort((left, right) => {
@@ -100,84 +141,154 @@ const sortAppointmentLegends = (items: AppointmentLegendCatalogItem[]) =>
 const sortAppointmentLegendCategories = (items: AppointmentLegendCategoryCatalogItem[]) =>
   [...items].sort((left, right) => left.localeCompare(right, 'es', { sensitivity: 'base' }))
 
-export const loadAppointmentClients = async () => {
+export const loadAppointmentClients = async (options?: { forceRefresh?: boolean }) => {
+  if (options?.forceRefresh) {
+    invalidateAppointmentClientsCache()
+  }
+
   if (clientsCache) {
     return clientsCache
   }
 
   if (!clientsPromise) {
+    const requestVersion = clientsCacheVersion
     clientsPromise = api
       .get('/clients?isActive=true&includeCounts=false')
       .then((response) => {
         const nextClients = Array.isArray(response.data) ? sortClients(response.data) : []
-        clientsCache = nextClients
+        if (requestVersion === clientsCacheVersion) {
+          clientsCache = nextClients
+        }
         return nextClients
       })
       .finally(() => {
-        clientsPromise = null
+        if (requestVersion === clientsCacheVersion) {
+          clientsPromise = null
+        }
       })
   }
 
   return clientsPromise
 }
 
-export const loadAppointmentServices = async () => {
+export const loadAppointmentServices = async (options?: { forceRefresh?: boolean }) => {
+  if (options?.forceRefresh) {
+    invalidateAppointmentServicesCache()
+  }
+
   if (servicesCache) {
     return servicesCache
   }
 
   if (!servicesPromise) {
+    const requestVersion = servicesCacheVersion
     servicesPromise = api
       .get('/services?isActive=true')
       .then((response) => {
         const nextServices = Array.isArray(response.data) ? sortServices(response.data) : []
-        servicesCache = nextServices
+        if (requestVersion === servicesCacheVersion) {
+          servicesCache = nextServices
+        }
         return nextServices
       })
       .finally(() => {
-        servicesPromise = null
+        if (requestVersion === servicesCacheVersion) {
+          servicesPromise = null
+        }
       })
   }
 
   return servicesPromise
 }
 
-export const loadActiveProducts = async () => {
+export const loadActiveProducts = async (options?: { forceRefresh?: boolean }) => {
+  if (options?.forceRefresh) {
+    invalidateActiveProductsCache()
+  }
+
   if (productsCache) {
     return productsCache
   }
 
   if (!productsPromise) {
+    const requestVersion = productsCacheVersion
     productsPromise = api
       .get('/products?isActive=true')
       .then((response) => {
         const nextProducts = Array.isArray(response.data) ? sortServices(response.data) : []
-        productsCache = nextProducts
+        if (requestVersion === productsCacheVersion) {
+          productsCache = nextProducts
+        }
         return nextProducts
       })
       .finally(() => {
-        productsPromise = null
+        if (requestVersion === productsCacheVersion) {
+          productsPromise = null
+        }
       })
   }
 
   return productsPromise
 }
 
-export const loadBonoTemplates = async () => {
+export const loadAppointmentProfessionals = async (options?: { forceRefresh?: boolean }) => {
+  if (options?.forceRefresh) {
+    invalidateAppointmentProfessionalsCache()
+  }
+
+  if (professionalsCache) {
+    return professionalsCache
+  }
+
+  if (!professionalsPromise) {
+    const requestVersion = professionalsCacheVersion
+    professionalsPromise = api
+      .get('/appointments/professionals')
+      .then((response) => {
+        const nextProfessionals = Array.isArray(response.data)
+          ? response.data.filter(
+              (item): item is string => typeof item === 'string' && item.trim().length > 0
+            )
+          : []
+        if (requestVersion === professionalsCacheVersion) {
+          professionalsCache = nextProfessionals
+        }
+        return nextProfessionals
+      })
+      .finally(() => {
+        if (requestVersion === professionalsCacheVersion) {
+          professionalsPromise = null
+        }
+      })
+  }
+
+  return professionalsPromise
+}
+
+export const loadBonoTemplates = async (options?: { forceRefresh?: boolean }) => {
+  if (options?.forceRefresh) {
+    invalidateBonoTemplatesCache()
+  }
+
   if (bonoTemplatesCache) {
     return bonoTemplatesCache
   }
 
   if (!bonoTemplatesPromise) {
+    const requestVersion = bonoTemplatesCacheVersion
     bonoTemplatesPromise = api
       .get('/bonos/templates')
       .then((response) => {
         const nextTemplates = Array.isArray(response.data) ? sortBonoTemplates(response.data) : []
-        bonoTemplatesCache = nextTemplates
+        if (requestVersion === bonoTemplatesCacheVersion) {
+          bonoTemplatesCache = nextTemplates
+        }
         return nextTemplates
       })
       .finally(() => {
-        bonoTemplatesPromise = null
+        if (requestVersion === bonoTemplatesCacheVersion) {
+          bonoTemplatesPromise = null
+        }
       })
   }
 
@@ -192,11 +303,8 @@ export const createBonoTemplateItem = async (payload: {
   price: number
   isActive: boolean
 }) => {
-  const response = await api.post('/bonos/templates', payload)
-  const nextItem = response.data as BonoTemplateCatalogItem
-  const nextTemplates = sortBonoTemplates([...(bonoTemplatesCache || []), nextItem])
-  bonoTemplatesCache = nextTemplates
-  return nextTemplates
+  await api.post('/bonos/templates', payload)
+  return loadBonoTemplates({ forceRefresh: true })
 }
 
 export const loadAppointmentLegendItems = async () => {
@@ -261,7 +369,11 @@ export const deleteAppointmentLegendItem = async (id: string) => {
 }
 
 export const preloadAppointmentFormCatalogs = async () => {
-  await Promise.allSettled([loadAppointmentClients(), loadAppointmentServices()])
+  await Promise.allSettled([
+    loadAppointmentClients(),
+    loadAppointmentServices(),
+    loadAppointmentProfessionals()
+  ])
 }
 
 export const preloadPointOfSaleCatalogs = async () => {

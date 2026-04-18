@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle, X } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
+import { invalidateBonoTemplatesCache } from '../utils/appointmentCatalogs'
 import {
   XLSX_FILE_ACCEPT,
   assertSupportedSpreadsheetFile,
@@ -70,13 +71,27 @@ export default function ImportBonosModal({ onSuccess, onCancel }: ImportBonosMod
         headers: { 'Content-Type': 'multipart/form-data' }
       })
 
-      setResults(response.data.results)
+      const nextResults = response.data.results
+      const successCount = Number(nextResults?.success || 0)
+      const createdCount = Number(nextResults?.created || 0)
+      const updatedCount = Number(nextResults?.updated || 0)
+      const skippedCount = Number(nextResults?.skipped || 0)
+      const errorCount = Array.isArray(nextResults?.errors) ? nextResults.errors.length : 0
 
-      if (response.data.results.success > 0) {
-        toast.success(`${response.data.results.success} bonos importados al catálogo`)
-        if (response.data.results.errors.length === 0) {
+      setResults(nextResults)
+
+      if (successCount > 0) {
+        invalidateBonoTemplatesCache()
+        toast.success(
+          `Importación completada: ${createdCount} nuevos, ${updatedCount} actualizados${
+            skippedCount > 0 ? ` y ${skippedCount} omitidos` : ''
+          }.`
+        )
+        if (errorCount === 0) {
           setTimeout(() => onSuccess(), 2000)
         }
+      } else if (skippedCount > 0 && errorCount === 0) {
+        toast.success(`No había bonos nuevos. ${skippedCount} filas se omitieron por duplicadas.`)
       } else {
         toast.error('No se pudo importar ningun bono')
       }
@@ -102,6 +117,7 @@ export default function ImportBonosModal({ onSuccess, onCancel }: ImportBonosMod
               <li>Columnas recomendadas: <strong>Categoria, Codigo, Descripcion, Tarifa 1</strong></li>
               <li>En <strong>Codigo</strong> debe ir el nombre o código del tratamiento base existente en Lucy3000</li>
               <li>En <strong>Descripcion</strong> puede ir algo como <strong>Bono de 6 sesiones</strong></li>
+              <li>Si el bono ya existe para ese tratamiento y número de sesiones, Lucy3000 lo actualiza; si no existe, lo crea</li>
             </ol>
           </div>
         </div>

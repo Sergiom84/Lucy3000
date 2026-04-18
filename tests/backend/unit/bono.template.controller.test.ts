@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createBonoTemplate } from '../../../src/backend/controllers/bono.controller'
+import {
+  createBonoTemplate,
+  importBonoTemplatesFromExcel
+} from '../../../src/backend/controllers/bono.controller'
 import { createMockRequest, createMockResponse } from '../helpers/http'
+import { createWorkbookBuffer } from '../helpers/spreadsheet'
 import { prismaMock, resetPrismaMock } from '../mocks/prisma.mock'
 
 vi.mock('../../../src/backend/db', async () => import('../mocks/db.mock'))
@@ -98,5 +102,145 @@ describe('bono.template.controller', () => {
       error: 'Ya existe un bono con ese tratamiento, descripción y número de sesiones'
     })
     expect(prismaMock.setting.upsert).not.toHaveBeenCalled()
+  })
+
+  it('merges imported bonus templates with the existing catalog', async () => {
+    prismaMock.service.findMany.mockResolvedValue([
+      {
+        id: 'service-1',
+        name: 'Maderoterapia',
+        serviceCode: 'MAD-01',
+        category: 'Corporal'
+      },
+      {
+        id: 'service-2',
+        name: 'Presoterapia',
+        serviceCode: 'PRE-01',
+        category: 'Corporal'
+      }
+    ])
+    prismaMock.setting.findUnique.mockResolvedValue({
+      key: 'bono_templates_catalog',
+      value: JSON.stringify([
+        {
+          id: 'template-1',
+          category: 'Corporal',
+          description: 'Bono de 4 sesiones',
+          serviceId: 'service-1',
+          serviceName: 'Maderoterapia',
+          serviceLookup: 'MAD-01',
+          totalSessions: 4,
+          price: 220,
+          isActive: true,
+          createdAt: '2026-01-10T10:00:00.000Z'
+        }
+      ])
+    })
+    prismaMock.setting.upsert.mockResolvedValue(undefined)
+
+    const buffer = await createWorkbookBuffer([
+      ['Categoria', 'Codigo', 'Descripcion', 'Tarifa 1'],
+      ['Corporal', 'PRE-01', 'Bono de 6 sesiones', '354']
+    ], 'Bonos')
+
+    const req = createMockRequest({
+      file: { buffer } as any
+    })
+    const res = createMockResponse()
+
+    await importBonoTemplatesFromExcel(req as any, res)
+
+    expect(prismaMock.setting.upsert).toHaveBeenCalledTimes(1)
+    const storedCatalog = JSON.parse(prismaMock.setting.upsert.mock.calls[0][0].update.value)
+    expect(storedCatalog).toHaveLength(2)
+    expect(storedCatalog).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'template-1',
+          description: 'Bono de 4 sesiones',
+          serviceId: 'service-1'
+        }),
+        expect.objectContaining({
+          description: 'Bono de 6 sesiones',
+          serviceId: 'service-2',
+          serviceLookup: 'PRE-01',
+          totalSessions: 6,
+          price: 354
+        })
+      ])
+    )
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        results: expect.objectContaining({
+          success: 1,
+          created: 1,
+          updated: 0,
+          skipped: 0
+        })
+      })
+    )
+  })
+
+  it('updates existing bonus templates and skips duplicate rows inside the Excel', async () => {
+    prismaMock.service.findMany.mockResolvedValue([
+      {
+        id: 'service-1',
+        name: 'Maderoterapia',
+        serviceCode: 'MAD-01',
+        category: 'Corporal'
+      }
+    ])
+    prismaMock.setting.findUnique.mockResolvedValue({
+      key: 'bono_templates_catalog',
+      value: JSON.stringify([
+        {
+          id: 'template-1',
+          category: 'Corporal',
+          description: 'Bono de 6 sesiones',
+          serviceId: 'service-1',
+          serviceName: 'Maderoterapia',
+          serviceLookup: 'MAD-01',
+          totalSessions: 6,
+          price: 320,
+          isActive: true,
+          createdAt: '2026-01-10T10:00:00.000Z'
+        }
+      ])
+    })
+    prismaMock.setting.upsert.mockResolvedValue(undefined)
+
+    const buffer = await createWorkbookBuffer([
+      ['Categoria', 'Codigo', 'Descripcion', 'Tarifa 1'],
+      ['Corporal', 'MAD-01', 'Bono de 6 sesiones', '354'],
+      ['Corporal', 'MAD-01', 'Bono de 6 sesiones', '354']
+    ], 'Bonos')
+
+    const req = createMockRequest({
+      file: { buffer } as any
+    })
+    const res = createMockResponse()
+
+    await importBonoTemplatesFromExcel(req as any, res)
+
+    const storedCatalog = JSON.parse(prismaMock.setting.upsert.mock.calls[0][0].update.value)
+    expect(storedCatalog).toHaveLength(1)
+    expect(storedCatalog[0]).toEqual(
+      expect.objectContaining({
+        id: 'template-1',
+        description: 'Bono de 6 sesiones',
+        serviceId: 'service-1',
+        price: 354
+      })
+    )
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        results: expect.objectContaining({
+          success: 1,
+          created: 0,
+          updated: 1,
+          skipped: 1
+        })
+      })
+    )
   })
 })

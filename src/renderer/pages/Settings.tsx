@@ -1,28 +1,34 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
-import { AlertCircle, Calendar, CheckCircle2, Database, FolderOpen, HardDrive, Link2, Printer, RefreshCw, RotateCcw, Save, Unlink, Upload } from 'lucide-react'
+import { AlertCircle, Calendar, CheckCircle2, Database, Download, FolderOpen, HardDrive, Link2, Printer, RefreshCw, RotateCcw, Save, Unlink, Upload } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Modal from '../components/Modal'
 import {
   getPrintTicketSuccessMessage,
   getDebugLogFilePath,
+  getRuntimeDataPaths,
   isDesktop,
   getTicketPrinterConfig,
   listTicketPrinters,
   openDebugLogFolder,
+  openRuntimeDataFolder,
   printTicket,
+  resetRuntimeData,
   saveTicketPrinterConfig,
   TicketPrinter
 } from '../utils/desktop'
 import type { TicketPrinterConfig } from '../utils/desktop'
 import api from '../utils/api'
 import { useAuthStore } from '../stores/authStore'
+import { downloadAppointmentImportTemplateWorkbook } from '../utils/exports'
 import { buildTestTicketPayload } from '../utils/tickets'
 import { DEFAULT_NETWORK_TICKET_PORT } from '../../shared/ticketPrinter'
 
+const ImportAppointmentsModal = lazy(() => import('../components/ImportAppointmentsModal'))
 const ImportProductsModal = lazy(() => import('../components/ImportProductsModal'))
 const ImportServicesModal = lazy(() => import('../components/ImportServicesModal'))
 const ImportClientsModal = lazy(() => import('../components/ImportClientsModal'))
-const ImportBonosModal = lazy(() => import('../components/ImportBonosModal'))
+const ImportAbonosModal = lazy(() => import('../components/ImportAbonosModal'))
+const ImportClientBonosModal = lazy(() => import('../components/ImportClientBonosModal'))
 
 type GoogleCalendarConfig = {
   connected: boolean
@@ -67,8 +73,11 @@ export default function Settings() {
   const [calendarId, setCalendarId] = useState(DEFAULT_CALENDAR_CONFIG.calendarId)
   const [desktopExePath, setDesktopExePath] = useState('')
   const [desktopUserDataPath, setDesktopUserDataPath] = useState('')
+  const [desktopDbPath, setDesktopDbPath] = useState('')
 
-  const [importModal, setImportModal] = useState<'clients' | 'services' | 'products' | 'bonos' | null>(null)
+  const [importModal, setImportModal] = useState<
+    'appointments' | 'clients' | 'services' | 'products' | 'abonos' | 'clientBonos' | null
+  >(null)
 
   const [backupFolder, setBackupFolder] = useState('')
   const [autoBackupEnabled, setAutoBackupEnabled] = useState(true)
@@ -231,10 +240,12 @@ export default function Settings() {
     if (!desktopMode || !window.electronAPI) return
 
     try {
-      const userDataPath = await window.electronAPI.getPath('userData')
-      setDesktopUserDataPath(userDataPath)
+      const runtimeInfo = await getRuntimeDataPaths()
+      setDesktopUserDataPath(runtimeInfo.userDataPath)
+      setDesktopDbPath(runtimeInfo.dbPath)
     } catch {
       setDesktopUserDataPath('')
+      setDesktopDbPath('')
     }
   }
 
@@ -319,6 +330,52 @@ export default function Settings() {
       toast.success(`Carpeta de logs abierta: ${folderPath}`)
     } catch (error: any) {
       toast.error(error.message || 'No se pudo abrir la carpeta de logs')
+    }
+  }
+
+  const handleOpenRuntimeFolder = async () => {
+    if (!desktopMode) return
+
+    try {
+      const folderPath = await openRuntimeDataFolder()
+      toast.success(`Carpeta abierta: ${folderPath}`)
+    } catch (error: any) {
+      toast.error(error.message || 'No se pudo abrir la carpeta de datos')
+    }
+  }
+
+  const handleDownloadAppointmentTemplate = async () => {
+    try {
+      await downloadAppointmentImportTemplateWorkbook()
+      toast.success('Plantilla de citas descargada')
+    } catch (error) {
+      console.error('Error downloading appointment template:', error)
+      toast.error('No se pudo generar la plantilla de citas')
+    }
+  }
+
+  const handleResetLocalInstall = async () => {
+    if (!desktopMode) return
+
+    const accepted = window.confirm(
+      'Esto moverá la base activa a una copia de seguridad dentro de la carpeta de datos y reiniciará la app para volver al bootstrap del primer administrador. ¿Continuar?'
+    )
+
+    if (!accepted) return
+
+    try {
+      const result = await resetRuntimeData()
+      toast.success('Instalación local restablecida')
+      setDesktopDbPath(result.dbPath)
+
+      if (result.requiresRelaunch && window.electronAPI) {
+        logout()
+        setTimeout(() => {
+          void window.electronAPI!.relaunch()
+        }, 600)
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'No se pudo restablecer la instalación local')
     }
   }
 
@@ -721,50 +778,119 @@ export default function Settings() {
           )}
         </div>
 
-        <div className="card space-y-5">
-          <div className="flex items-center gap-3">
-            <Database className="h-5 w-5 text-primary-600" />
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Importar datos</h2>
+        {isAdmin ? (
+          <div className="card space-y-5">
+            <div className="flex items-center gap-3">
+              <Database className="h-5 w-5 text-primary-600" />
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Importar datos</h2>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Citas</h3>
+                <p className="mt-1 text-xs text-gray-700 dark:text-gray-300">
+                  Importa citas con la plantilla de Lucy3000 o adapta el Excel del otro software a las columnas canónicas.
+                </p>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  <button
+                    onClick={() => setImportModal('appointments')}
+                    className="btn btn-secondary w-full justify-start sm:flex-1"
+                  >
+                    <Upload className="mr-2 h-4 w-4" />
+                    Importar Citas
+                  </button>
+                  <button
+                    onClick={handleDownloadAppointmentTemplate}
+                    className="btn btn-secondary w-full justify-start sm:flex-1"
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    Descargar Plantilla
+                  </button>
+                </div>
+                <p className="mt-3 text-xs text-gray-700 dark:text-gray-300">
+                  Columnas canónicas: <span className="font-mono">Fecha</span>, <span className="font-mono">Hora</span>, <span className="font-mono">Minutos</span>, <span className="font-mono">cliente</span>, <span className="font-mono">Nombre</span>, <span className="font-mono">Código</span>, <span className="font-mono">Descripción</span>, <span className="font-mono">Cabina</span>, <span className="font-mono">Profesional</span>, <span className="font-mono">Teléfono</span>, <span className="font-mono">Mail</span> y <span className="font-mono">Notas</span>.
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Clientes</h3>
+                <p className="mt-1 text-xs text-gray-700 dark:text-gray-300">
+                  Alta masiva y actualización de fichas de clientes.
+                </p>
+                <button
+                  onClick={() => setImportModal('clients')}
+                  className="btn btn-secondary mt-3 w-full justify-start"
+                >
+                  <Upload className="mr-2 h-4 w-4" />
+                  Importar Clientes
+                </button>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Tratamientos</h3>
+                <p className="mt-1 text-xs text-gray-700 dark:text-gray-300">
+                  Importa el catálogo de tratamientos disponible en Lucy3000.
+                </p>
+                <button
+                  onClick={() => setImportModal('services')}
+                  className="btn btn-secondary mt-3 w-full justify-start"
+                >
+                  <Upload className="mr-2 h-4 w-4" />
+                  Importar Tratamientos
+                </button>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Productos</h3>
+                <p className="mt-1 text-xs text-gray-700 dark:text-gray-300">
+                  Importa el inventario inicial y el catálogo de productos.
+                </p>
+                <button
+                  onClick={() => setImportModal('products')}
+                  className="btn btn-secondary mt-3 w-full justify-start"
+                >
+                  <Upload className="mr-2 h-4 w-4" />
+                  Importar Productos
+                </button>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Bonos de clientes</h3>
+                <p className="mt-1 text-xs text-gray-700 dark:text-gray-300">
+                  Importa bonos ya comprados por clientes para reflejarlos en su ficha, sin tocar caja.
+                </p>
+                <button
+                  onClick={() => setImportModal('clientBonos')}
+                  className="btn btn-secondary mt-3 w-full justify-start"
+                >
+                  <Upload className="mr-2 h-4 w-4" />
+                  Importar Bonos de clientes
+                </button>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Abonos</h3>
+                <p className="mt-1 text-xs text-gray-700 dark:text-gray-300">
+                  Importa el saldo disponible de abonos legacy para reflejarlo en la ficha del cliente.
+                </p>
+                <button
+                  onClick={() => setImportModal('abonos')}
+                  className="btn btn-secondary mt-3 w-full justify-start"
+                >
+                  <Upload className="mr-2 h-4 w-4" />
+                  Importar Abonos
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+              La importacion no borra datos existentes. Los nuevos registros se anaden a los actuales.
+              En citas, Lucy3000 localiza cliente por numero de cliente y tratamiento por codigo + descripcion + minutos.
             </div>
           </div>
-
-          <div className="space-y-3">
-            <button
-              onClick={() => setImportModal('clients')}
-              className="btn btn-secondary w-full justify-start"
-            >
-              <Upload className="mr-2 h-4 w-4" />
-              Importar Clientes
-            </button>
-            <button
-              onClick={() => setImportModal('services')}
-              className="btn btn-secondary w-full justify-start"
-            >
-              <Upload className="mr-2 h-4 w-4" />
-              Importar Tratamientos
-            </button>
-            <button
-              onClick={() => setImportModal('products')}
-              className="btn btn-secondary w-full justify-start"
-            >
-              <Upload className="mr-2 h-4 w-4" />
-              Importar Productos
-            </button>
-            <button
-              onClick={() => setImportModal('bonos')}
-              className="btn btn-secondary w-full justify-start"
-            >
-              <Upload className="mr-2 h-4 w-4" />
-              Importar Bonos
-            </button>
-          </div>
-
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-            La importacion no borra datos existentes. Los nuevos registros se anaden a los actuales.
-            Si un registro ya existe (por SKU en productos), se omite.
-          </div>
-        </div>
+        ) : null}
 
         {desktopMode && (
           <div className="card space-y-5">
@@ -858,17 +984,45 @@ export default function Settings() {
             </div>
 
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200">
+              <p className="font-medium text-gray-900 dark:text-white">Carpeta de datos local</p>
+              <p className="mt-2 break-all font-mono">{desktopUserDataPath || 'No disponible todavia'}</p>
+              <p className="mt-4 font-medium text-gray-900 dark:text-white">Base de datos activa</p>
+              <p className="mt-2 break-all font-mono">{desktopDbPath || 'No disponible todavia'}</p>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200">
               <p className="font-medium text-gray-900 dark:text-white">Archivo actual de log</p>
               <p className="mt-2 break-all font-mono">{debugLogPath || 'No disponible todavia'}</p>
             </div>
 
-            <button onClick={handleOpenLogsFolder} className="btn btn-secondary w-full">
-              <FolderOpen className="mr-2 h-4 w-4" />
-              Abrir carpeta de logs
-            </button>
+            <div className="flex flex-wrap gap-3">
+              <button onClick={handleOpenLogsFolder} className="btn btn-secondary">
+                <FolderOpen className="mr-2 h-4 w-4" />
+                Abrir carpeta de logs
+              </button>
+              <button onClick={handleOpenRuntimeFolder} className="btn btn-secondary">
+                <FolderOpen className="mr-2 h-4 w-4" />
+                Abrir carpeta de datos
+              </button>
+              <button onClick={handleResetLocalInstall} className="btn btn-secondary">
+                <RotateCcw className="mr-2 h-4 w-4" />
+                Restablecer instalación local
+              </button>
+            </div>
           </div>
         )}
       </div>
+
+      <Modal isOpen={importModal === 'appointments'} title="Importar Citas" onClose={() => setImportModal(null)}>
+        {importModal === 'appointments' ? (
+          <Suspense fallback={<LazyPanelLoader />}>
+            <ImportAppointmentsModal
+              onSuccess={() => { setImportModal(null) }}
+              onCancel={() => setImportModal(null)}
+            />
+          </Suspense>
+        ) : null}
+      </Modal>
 
       <Modal isOpen={importModal === 'clients'} title="Importar Clientes" onClose={() => setImportModal(null)}>
         {importModal === 'clients' ? (
@@ -903,10 +1057,25 @@ export default function Settings() {
         ) : null}
       </Modal>
 
-      <Modal isOpen={importModal === 'bonos'} title="Importar Bonos" onClose={() => setImportModal(null)}>
-        {importModal === 'bonos' ? (
+      <Modal isOpen={importModal === 'abonos'} title="Importar Abonos" onClose={() => setImportModal(null)}>
+        {importModal === 'abonos' ? (
           <Suspense fallback={<LazyPanelLoader />}>
-            <ImportBonosModal
+            <ImportAbonosModal
+              onSuccess={() => { setImportModal(null) }}
+              onCancel={() => setImportModal(null)}
+            />
+          </Suspense>
+        ) : null}
+      </Modal>
+
+      <Modal
+        isOpen={importModal === 'clientBonos'}
+        title="Importar Bonos de clientes"
+        onClose={() => setImportModal(null)}
+      >
+        {importModal === 'clientBonos' ? (
+          <Suspense fallback={<LazyPanelLoader />}>
+            <ImportClientBonosModal
               onSuccess={() => { setImportModal(null) }}
               onCancel={() => setImportModal(null)}
             />

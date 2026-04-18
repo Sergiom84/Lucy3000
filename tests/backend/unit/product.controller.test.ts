@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { addStockMovement, getProducts } from '../../../src/backend/controllers/product.controller'
+import {
+  addStockMovement,
+  getProducts,
+  importProductsFromExcel
+} from '../../../src/backend/controllers/product.controller'
 import { createMockRequest, createMockResponse } from '../helpers/http'
+import { createWorkbookBuffer } from '../helpers/spreadsheet'
 import { prismaMock, resetPrismaMock } from '../mocks/prisma.mock'
 
 vi.mock('../../../src/backend/db', async () => import('../mocks/db.mock'))
@@ -114,5 +119,116 @@ describe('product.controller.addStockMovement', () => {
       })
     )
     expect(res.status).toHaveBeenCalledWith(201)
+  })
+
+  it('updates an existing product when the imported SKU already exists', async () => {
+    prismaMock.product.findMany.mockResolvedValue([
+      {
+        id: 'product-1',
+        sku: 'CHAMP-001'
+      }
+    ])
+    prismaMock.product.update.mockResolvedValue({})
+
+    const buffer = await createWorkbookBuffer([
+      ['ID', 'Marca', 'Familia', 'Descripcion', 'Cantidad', 'PVP'],
+      ['CHAMP-001', "L'Oréal", 'Cuidado del Cabello', 'Champu hidratante 500ml', 40, '15,99']
+    ], 'Productos')
+
+    const req = createMockRequest({
+      file: { buffer } as any
+    })
+    const res = createMockResponse()
+
+    await importProductsFromExcel(req as any, res)
+
+    expect(prismaMock.product.create).not.toHaveBeenCalled()
+    expect(prismaMock.product.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'product-1' },
+        data: expect.objectContaining({
+          name: 'Champu hidratante 500ml',
+          category: 'Cuidado del Cabello',
+          brand: "L'Oréal",
+          price: 15.99,
+          stock: 40,
+          isActive: true
+        })
+      })
+    )
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        results: expect.objectContaining({
+          success: 1,
+          created: 0,
+          updated: 1,
+          skipped: 0
+        })
+      })
+    )
+  })
+
+  it('creates only one product when the same SKU is repeated inside the Excel', async () => {
+    prismaMock.product.findMany.mockResolvedValue([])
+    prismaMock.product.create.mockResolvedValue({
+      id: 'product-1',
+      sku: 'CHAMP-001'
+    })
+
+    const buffer = await createWorkbookBuffer([
+      ['ID', 'Marca', 'Familia', 'Descripcion', 'Cantidad', 'PVP'],
+      ['CHAMP-001', "L'Oréal", 'Cuidado del Cabello', 'Champu hidratante 500ml', 50, '15,99'],
+      ['CHAMP-001', "L'Oréal", 'Cuidado del Cabello', 'Champu hidratante 500ml', 50, '15,99']
+    ], 'Productos')
+
+    const req = createMockRequest({
+      file: { buffer } as any
+    })
+    const res = createMockResponse()
+
+    await importProductsFromExcel(req as any, res)
+
+    expect(prismaMock.product.create).toHaveBeenCalledTimes(1)
+    expect(prismaMock.product.update).not.toHaveBeenCalled()
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        results: expect.objectContaining({
+          success: 1,
+          created: 1,
+          updated: 0,
+          skipped: 1
+        })
+      })
+    )
+  })
+
+  it('skips rows with invalid price instead of creating products', async () => {
+    prismaMock.product.findMany.mockResolvedValue([])
+
+    const buffer = await createWorkbookBuffer([
+      ['ID', 'Marca', 'Familia', 'Descripcion', 'Cantidad', 'PVP'],
+      ['CHAMP-001', "L'Oréal", 'Cuidado del Cabello', 'Champu hidratante 500ml', 50, 'abc']
+    ], 'Productos')
+
+    const req = createMockRequest({
+      file: { buffer } as any
+    })
+    const res = createMockResponse()
+
+    await importProductsFromExcel(req as any, res)
+
+    expect(prismaMock.product.create).not.toHaveBeenCalled()
+    expect(prismaMock.product.update).not.toHaveBeenCalled()
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        results: expect.objectContaining({
+          success: 0,
+          created: 0,
+          updated: 0,
+          skipped: 1,
+          errors: [expect.objectContaining({ error: expect.stringContaining('PVP inválido') })]
+        })
+      })
+    )
   })
 })

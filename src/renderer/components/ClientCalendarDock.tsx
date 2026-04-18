@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
-import { Calendar as BigCalendar, momentLocalizer, View } from 'react-big-calendar'
+import { Calendar as BigCalendar, View } from 'react-big-calendar'
 import moment from 'moment'
-import 'moment/locale/es'
 import 'react-big-calendar/lib/css/react-big-calendar.css'
 import {
   ChevronLeft,
@@ -26,26 +25,17 @@ import {
 import Modal from './Modal'
 import AppointmentForm from './AppointmentForm'
 import { getAppointmentDisplayName, getNameInitials } from '../../shared/customerDisplay'
-
-moment.locale('es')
-
-const localizer = momentLocalizer(moment)
-
-const messages = {
-  allDay: 'Todo el dia',
-  previous: 'Anterior',
-  next: 'Siguiente',
-  today: 'Hoy',
-  month: 'Mes',
-  week: 'Semana',
-  day: 'Dia',
-  agenda: 'Agenda',
-  date: 'Fecha',
-  time: 'Hora',
-  event: 'Cita',
-  noEventsInRange: 'No hay citas en este rango',
-  showMore: (total: number) => `+${total}`
-}
+import { getAppointmentPrimaryService, getAppointmentServiceLabel } from '../utils/appointmentServices'
+import {
+  calendarCulture,
+  calendarFormats,
+  calendarLocalizer,
+  calendarMessages,
+  calendarWeekDays,
+  endOfCalendarWeek,
+  formatCalendarText,
+  startOfCalendarWeek
+} from '../utils/calendarLocale'
 
 const cabinResources = [
   { resourceId: 'LUCY', resourceTitle: 'Lucy' },
@@ -73,7 +63,8 @@ function AppointmentEvent({ event }: { event: any }) {
   const isTiny = durationMinutes <= 30
   const isCompact = durationMinutes > 30 && durationMinutes <= 60
   const clientName = getAppointmentDisplayName(event.appointment)
-  const serviceName = event.appointment.service.name
+  const serviceName =
+    getAppointmentServiceLabel(event.appointment) || event.appointment.service?.name || ''
   const timeRange = `${event.appointment.startTime} - ${event.appointment.endTime}`
 
   return (
@@ -139,8 +130,8 @@ export default function ClientCalendarDock({
       let endDate
 
       if (view === 'week') {
-        startDate = moment(currentDate).startOf('week').toDate()
-        endDate = moment(currentDate).endOf('week').toDate()
+        startDate = startOfCalendarWeek(currentDate)
+        endDate = endOfCalendarWeek(currentDate)
       } else {
         startDate = moment(currentDate).startOf('day').toDate()
         endDate = moment(currentDate).endOf('day').toDate()
@@ -205,17 +196,17 @@ export default function ClientCalendarDock({
   )
 
   const currentDateMoment = useMemo(() => moment(currentDate), [currentDate])
-  const calendarWeekDays = useMemo(
-    () => moment.weekdaysMin(true).map((day) => day.replace('.', '')),
-    []
-  )
   const monthGridDays = useMemo(() => {
-    const monthStart = currentDateMoment.clone().startOf('month').startOf('week')
+    const monthStart = currentDateMoment.clone().startOf('month').startOf('isoWeek')
     return Array.from({ length: 42 }, (_, index) => monthStart.clone().add(index, 'days'))
   }, [currentDateMoment])
 
   const getThemeForAppointment = useCallback(
-    (appointment: any) => getAppointmentColorTheme(legendItems, appointment.service?.category),
+    (appointment: any) =>
+      getAppointmentColorTheme(
+        legendItems,
+        getAppointmentPrimaryService(appointment)?.category || appointment.service?.category
+      ),
     [legendItems]
   )
 
@@ -352,7 +343,7 @@ export default function ClientCalendarDock({
                   <ChevronLeft className="h-3.5 w-3.5" />
                 </button>
                 <p className="text-[10px] font-semibold capitalize tracking-[0.08em] text-slate-200">
-                  {currentDateMoment.format('MMMM YYYY')}
+                  {formatCalendarText(currentDate, 'MMMM YYYY')}
                 </p>
                 <button
                   onClick={goToNextMonth}
@@ -407,7 +398,7 @@ export default function ClientCalendarDock({
                         : 'text-slate-300 hover:text-white'
                     }`}
                   >
-                    Dia
+                    Día
                   </button>
                   <button
                     onClick={() => setView('week')}
@@ -435,8 +426,8 @@ export default function ClientCalendarDock({
                   </button>
                   <div className="min-w-[10rem] text-center text-sm font-medium text-white">
                     {view === 'week'
-                      ? `${moment(currentDate).startOf('week').format('D MMM')} - ${moment(currentDate).endOf('week').format('D MMM')}`
-                      : moment(currentDate).format('dddd D [de] MMMM')}
+                      ? `${formatCalendarText(startOfCalendarWeek(currentDate), 'D MMM')} - ${formatCalendarText(endOfCalendarWeek(currentDate), 'D MMM')}`
+                      : formatCalendarText(currentDate, 'dddd D [de] MMMM')}
                   </div>
                   <button
                     onClick={() =>
@@ -480,14 +471,16 @@ export default function ClientCalendarDock({
               ) : (
                 <BigCalendar
                   className="client-calendar-dock-calendar"
-                  localizer={localizer}
+                  localizer={calendarLocalizer}
+                  culture={calendarCulture}
+                  formats={calendarFormats}
                   events={events}
                   startAccessor="start"
                   endAccessor="end"
                   resources={view === 'day' ? cabinResources : undefined}
                   resourceIdAccessor="resourceId"
                   resourceTitleAccessor="resourceTitle"
-                  messages={messages}
+                  messages={calendarMessages}
                   components={{ event: AppointmentEvent }}
                   toolbar={false}
                   views={['day', 'week']}

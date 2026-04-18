@@ -3,7 +3,7 @@ import { dateQuerySchema, optionalNullableTextSchema, uuidParamSchema } from './
 
 const saleStatusSchema = z.enum(['PENDING', 'COMPLETED', 'CANCELLED', 'REFUNDED'])
 const paymentMethodSchema = z.enum(['CASH', 'CARD', 'BIZUM', 'ABONO', 'OTHER'])
-const professionalSchema = z.enum(['LUCY', 'TAMARA', 'CHEMA', 'OTROS'])
+const professionalSchema = z.string().trim().min(1, 'Professional is required').max(120, 'Professional is too long')
 const createSaleStatusSchema = z.enum(['PENDING', 'COMPLETED']).default('COMPLETED')
 
 const moneySchema = z.coerce.number().finite().min(0, 'Value cannot be negative')
@@ -61,7 +61,7 @@ export const createSaleBodySchema = z
     tax: moneySchema.optional().default(0),
     paymentMethod: paymentMethodSchema,
     status: createSaleStatusSchema,
-    professional: professionalSchema.default('LUCY'),
+    professional: professionalSchema.default('Lucy'),
     accountBalanceUsage: accountBalanceUsageSchema.optional(),
     showInOfficialCash: z.boolean().optional().default(true),
     notes: optionalNullableTextSchema(1000),

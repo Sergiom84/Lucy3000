@@ -1,8 +1,10 @@
-import { Request, Response } from 'express'
+import { Response } from 'express'
 import { prisma } from '../db'
 import { getAppointmentDisplayName, getSaleDisplayName } from '../utils/customer-display'
+import type { AuthRequest } from '../middleware/auth.middleware'
+import { getNotificationVisibilityWhere } from '../utils/notifications'
 
-export const getDashboardStats = async (req: Request, res: Response) => {
+export const getDashboardStats = async (req: AuthRequest, res: Response) => {
   try {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
@@ -68,7 +70,10 @@ export const getDashboardStats = async (req: Request, res: Response) => {
 
     // Notificaciones no leídas
     const unreadNotifications = await prisma.notification.count({
-      where: { isRead: false }
+      where: {
+        isRead: false,
+        ...getNotificationVisibilityWhere(req.user?.role)
+      }
     })
 
     // Caja abierta

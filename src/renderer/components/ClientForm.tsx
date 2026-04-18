@@ -2,7 +2,10 @@ import { useState, useEffect, useMemo } from 'react'
 import { Save, X } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
-import { loadAppointmentClients } from '../utils/appointmentCatalogs'
+import {
+  invalidateAppointmentClientsCache,
+  loadAppointmentClients
+} from '../utils/appointmentCatalogs'
 import { buildSearchTokens, filterRankedItems } from '../utils/searchableOptions'
 
 interface ClientFormProps {
@@ -232,9 +235,11 @@ export default function ClientForm({ client, onSuccess, onCancel }: ClientFormPr
 
       if (client) {
         await api.put(`/clients/${client.id}`, dataToSend)
+        invalidateAppointmentClientsCache()
         toast.success('Cliente actualizado exitosamente')
       } else {
         await api.post('/clients', dataToSend)
+        invalidateAppointmentClientsCache()
         toast.success('Cliente creado exitosamente')
       }
 

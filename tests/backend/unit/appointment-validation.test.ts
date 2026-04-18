@@ -10,6 +10,7 @@ describe('validateAppointmentSlot', () => {
     vi.setSystemTime(fixedNow)
     resetPrismaMock()
     prismaMock.appointment.findMany.mockResolvedValue([])
+    prismaMock.agendaBlock.findMany.mockResolvedValue([])
   })
 
   afterEach(() => {
@@ -155,5 +156,23 @@ describe('validateAppointmentSlot', () => {
     const [professionalCall, cabinCall] = prismaMock.appointment.findMany.mock.calls
     expect(professionalCall?.[0].where.status).toEqual({ in: ['SCHEDULED', 'CONFIRMED', 'IN_PROGRESS'] })
     expect(cabinCall?.[0].where.status).toEqual({ in: ['SCHEDULED', 'CONFIRMED', 'IN_PROGRESS'] })
+  })
+
+  it('detecta conflicto con un bloqueo de agenda existente', async () => {
+    prismaMock.agendaBlock.findMany
+      .mockResolvedValueOnce([{ startTime: '10:15', endTime: '10:45' }])
+      .mockResolvedValueOnce([])
+
+    const result = await validateAppointmentSlot(
+      { ...baseInput, startTime: '10:30', endTime: '11:30' },
+      prismaMock
+    )
+
+    expect(result.errors).toEqual([
+      {
+        code: 'PROFESSIONAL_CONFLICT',
+        message: 'Lucy tiene un bloqueo de 10:15 a 10:45'
+      }
+    ])
   })
 })

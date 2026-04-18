@@ -1,11 +1,15 @@
-import { Request, Response } from 'express'
+import { Response } from 'express'
 import { prisma } from '../db'
+import type { AuthRequest } from '../middleware/auth.middleware'
+import { getNotificationVisibilityWhere } from '../utils/notifications'
 
-export const getNotifications = async (req: Request, res: Response) => {
+export const getNotifications = async (req: AuthRequest, res: Response) => {
   try {
     const { isRead, type } = req.query
 
-    const where: any = {}
+    const where: any = {
+      ...getNotificationVisibilityWhere(req.user?.role)
+    }
 
     if (isRead !== undefined) {
       where.isRead = typeof isRead === 'boolean' ? isRead : isRead === 'true'
@@ -30,9 +34,19 @@ export const getNotifications = async (req: Request, res: Response) => {
   }
 }
 
-export const markAsRead = async (req: Request, res: Response) => {
+export const markAsRead = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params
+    const existingNotification = await prisma.notification.findFirst({
+      where: {
+        id,
+        ...getNotificationVisibilityWhere(req.user?.role)
+      }
+    })
+
+    if (!existingNotification) {
+      return res.status(404).json({ error: 'Notification not found' })
+    }
 
     const notification = await prisma.notification.update({
       where: { id },
@@ -46,10 +60,13 @@ export const markAsRead = async (req: Request, res: Response) => {
   }
 }
 
-export const markAllAsRead = async (req: Request, res: Response) => {
+export const markAllAsRead = async (req: AuthRequest, res: Response) => {
   try {
     await prisma.notification.updateMany({
-      where: { isRead: false },
+      where: {
+        isRead: false,
+        ...getNotificationVisibilityWhere(req.user?.role)
+      },
       data: { isRead: true }
     })
 
@@ -60,9 +77,19 @@ export const markAllAsRead = async (req: Request, res: Response) => {
   }
 }
 
-export const deleteNotification = async (req: Request, res: Response) => {
+export const deleteNotification = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params
+    const existingNotification = await prisma.notification.findFirst({
+      where: {
+        id,
+        ...getNotificationVisibilityWhere(req.user?.role)
+      }
+    })
+
+    if (!existingNotification) {
+      return res.status(404).json({ error: 'Notification not found' })
+    }
 
     await prisma.notification.delete({
       where: { id }

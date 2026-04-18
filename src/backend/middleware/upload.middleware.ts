@@ -19,6 +19,11 @@ const ALLOWED_SPREADSHEET_MIME_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/octet-stream'
 ])
+const ALLOWED_LEGACY_SPREADSHEET_EXTENSIONS = new Set(['.xls', '.xlsx'])
+const ALLOWED_LEGACY_SPREADSHEET_MIME_TYPES = new Set([
+  ...ALLOWED_SPREADSHEET_MIME_TYPES,
+  'application/vnd.ms-excel'
+])
 
 export const spreadsheetUpload = multer({
   storage: multer.memoryStorage(),
@@ -27,7 +32,12 @@ export const spreadsheetUpload = multer({
   }
 })
 
-export const validateSpreadsheetUpload = (fieldName = 'file') => {
+const createSpreadsheetValidator = (
+  allowedExtensions: Set<string>,
+  allowedMimeTypes: Set<string>,
+  errorLabel: string,
+  fieldName = 'file'
+) => {
   return (req: Request, _res: Response, next: NextFunction) => {
     const file = req.file
 
@@ -37,12 +47,12 @@ export const validateSpreadsheetUpload = (fieldName = 'file') => {
     }
 
     const extension = path.extname(file.originalname || '').toLowerCase()
-    if (!ALLOWED_SPREADSHEET_EXTENSIONS.has(extension)) {
-      next(new FileValidationError('Only .xlsx spreadsheet files are supported'))
+    if (!allowedExtensions.has(extension)) {
+      next(new FileValidationError(errorLabel))
       return
     }
 
-    if (file.mimetype && !ALLOWED_SPREADSHEET_MIME_TYPES.has(file.mimetype)) {
+    if (file.mimetype && !allowedMimeTypes.has(file.mimetype)) {
       next(new FileValidationError('Invalid spreadsheet content type'))
       return
     }
@@ -55,3 +65,19 @@ export const validateSpreadsheetUpload = (fieldName = 'file') => {
     next()
   }
 }
+
+export const validateSpreadsheetUpload = (fieldName = 'file') =>
+  createSpreadsheetValidator(
+    ALLOWED_SPREADSHEET_EXTENSIONS,
+    ALLOWED_SPREADSHEET_MIME_TYPES,
+    'Only .xlsx spreadsheet files are supported',
+    fieldName
+  )
+
+export const validateLegacySpreadsheetUpload = (fieldName = 'file') =>
+  createSpreadsheetValidator(
+    ALLOWED_LEGACY_SPREADSHEET_EXTENSIONS,
+    ALLOWED_LEGACY_SPREADSHEET_MIME_TYPES,
+    'Only .xls or .xlsx spreadsheet files are supported',
+    fieldName
+  )

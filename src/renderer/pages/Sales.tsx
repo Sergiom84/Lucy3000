@@ -21,6 +21,7 @@ import api from '../utils/api'
 import {
   loadActiveProducts,
   loadAppointmentClients,
+  loadAppointmentProfessionals,
   loadAppointmentServices,
   loadBonoTemplates,
   preloadPointOfSaleCatalogs
@@ -185,7 +186,8 @@ export default function Sales() {
   const [selectedClient, setSelectedClient] = useState<Client | null>(null)
   const [discount, setDiscount] = useState(0)
   const [paymentMethod, setPaymentMethod] = useState<SalePaymentMethod>('CASH')
-  const [professional, setProfessional] = useState<'LUCY' | 'TAMARA' | 'CHEMA' | 'OTROS'>('LUCY')
+  const [professional, setProfessional] = useState('')
+  const [professionals, setProfessionals] = useState<string[]>([])
   const [saleMode, setSaleMode] = useState<SaleMode>('NORMAL')
   const [notes, setNotes] = useState('')
   const [lastCompletedQuote, setLastCompletedQuote] = useState<any>(null)
@@ -269,12 +271,21 @@ export default function Sales() {
     prefillApplied.current.sale = true
   }, [view, prefilledSaleId])
 
+  useEffect(() => {
+    if (professional || professionals.length === 0) {
+      return
+    }
+
+    setProfessional(professionals[0])
+  }, [professional, professionals])
+
   const loadCatalog = async () => {
     try {
-      const [productsResult, servicesResult, bonosResult] = await Promise.allSettled([
+      const [productsResult, servicesResult, bonosResult, professionalsResult] = await Promise.allSettled([
         loadActiveProducts(),
         loadAppointmentServices(),
-        loadBonoTemplates()
+        loadBonoTemplates(),
+        loadAppointmentProfessionals()
       ])
 
       if (productsResult.status === 'fulfilled') {
@@ -294,6 +305,13 @@ export default function Sales() {
       } else {
         console.error('Error loading bono templates:', bonosResult.reason)
         setBonoTemplates([])
+      }
+
+      if (professionalsResult.status === 'fulfilled') {
+        setProfessionals(professionalsResult.value)
+      } else {
+        console.error('Error loading professionals:', professionalsResult.reason)
+        setProfessionals([])
       }
     } catch (error) {
       console.error('Error loading catalog:', error)
@@ -492,7 +510,7 @@ export default function Sales() {
       setDiscount(0)
       setNotes('')
       setPaymentMethod('CASH')
-      setProfessional('LUCY')
+      setProfessional(professionals[0] || '')
       setSaleMode('NORMAL')
       setLastCompletedQuote(null)
       setLinkedAppointmentId(null)
@@ -669,7 +687,7 @@ export default function Sales() {
       setDiscount(0)
       setNotes('')
       setSaleMode('NORMAL')
-      setProfessional('LUCY')
+      setProfessional(professionals[0] || '')
       if (!prefilledClientId) setSelectedClient(null)
       toast.success(`Presupuesto ${createdQuote.quoteNumber} generado`)
     } catch (error: any) {
@@ -1347,13 +1365,20 @@ export default function Sales() {
                   <label className="label">Profesional</label>
                   <select
                     value={professional}
-                    onChange={(event) => setProfessional(event.target.value as typeof professional)}
+                    onChange={(event) => setProfessional(event.target.value)}
                     className="input"
                   >
-                    <option value="LUCY">Lucy</option>
-                    <option value="TAMARA">Tamara</option>
-                    <option value="CHEMA">Chema</option>
-                    <option value="OTROS">Otros</option>
+                    {professionals.length === 0 ? (
+                      <option value="">Sin profesionales configuradas</option>
+                    ) : (
+                      [...new Set((professional ? [...professionals, professional] : professionals).filter(Boolean))].map(
+                        (professionalOption) => (
+                          <option key={professionalOption} value={professionalOption}>
+                            {professionalOption}
+                          </option>
+                        )
+                      )
+                    )}
                   </select>
                 </div>
 

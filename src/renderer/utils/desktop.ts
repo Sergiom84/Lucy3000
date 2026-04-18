@@ -183,6 +183,55 @@ const printTicketInBrowser = async (payload: TicketPayload): Promise<TicketPrint
 
 export const isDesktop = () => Boolean(window.electronAPI)
 
+export const getAppVersion = async () => {
+  if (!window.electronAPI) {
+    return '2.0.0'
+  }
+
+  return window.electronAPI.getVersion()
+}
+
+export type RuntimeDataPaths = {
+  userDataPath: string
+  dbPath: string
+  logsPath: string
+  dbExists: boolean
+}
+
+export const getRuntimeDataPaths = async (): Promise<RuntimeDataPaths> => {
+  if (!window.electronAPI) {
+    throw new Error(desktopUnavailableError)
+  }
+
+  return window.electronAPI.getRuntimeDataPaths()
+}
+
+export const openRuntimeDataFolder = async () => {
+  if (!window.electronAPI) {
+    throw new Error(desktopUnavailableError)
+  }
+
+  const response = await window.electronAPI.openRuntimeDataFolder()
+  if (!response.success) {
+    throw new Error(response.error || 'No se pudo abrir la carpeta de datos')
+  }
+
+  return response.path
+}
+
+export const resetRuntimeData = async () => {
+  if (!window.electronAPI) {
+    throw new Error(desktopUnavailableError)
+  }
+
+  const response = await window.electronAPI.resetRuntimeData()
+  if (!response.success) {
+    throw new Error(response.error || 'No se pudo restablecer la instalacion local')
+  }
+
+  return response
+}
+
 export const getDebugLogFilePath = async () => {
   if (!window.electronAPI) {
     throw new Error(desktopUnavailableError)

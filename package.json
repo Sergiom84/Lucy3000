@@ -1,6 +1,6 @@
 {
   "name": "lucy3000-accounting",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Sistema de contabilidad avanzado para tiendas de estética",
   "main": "dist/main/main.js",
   "author": "Sergio Hernández Lara",
@@ -44,6 +44,7 @@
     "lucide-react": "^0.303.0",
     "moment": "^2.30.1",
     "multer": "^2.1.1",
+    "node-xlrd": "^0.3.10",
     "prisma": "^5.8.0",
     "react": "^18.2.0",
     "react-big-calendar": "^1.8.5",

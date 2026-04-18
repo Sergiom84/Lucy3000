@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Save, X } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
+import { invalidateActiveProductsCache } from '../utils/appointmentCatalogs'
 
 interface ProductFormProps {
   product?: any
@@ -130,9 +131,11 @@ export default function ProductForm({ product, onSuccess, onCancel }: ProductFor
 
       if (product) {
         await api.put(`/products/${product.id}`, dataToSend)
+        invalidateActiveProductsCache()
         toast.success('Producto actualizado exitosamente')
       } else {
         await api.post('/products', dataToSend)
+        invalidateActiveProductsCache()
         toast.success('Producto creado exitosamente')
       }
 
@@ -228,14 +231,14 @@ export default function ProductForm({ product, onSuccess, onCancel }: ProductFor
           </div>
 
           <div>
-            <label className="label">Descripción</label>
+            <label className="label">Notas</label>
             <textarea
               name="description"
               value={formData.description}
               onChange={handleChange}
               className="input resize-none"
               rows={3}
-              placeholder="Descripción detallada del producto..."
+              placeholder="Añade notas, observaciones o aclaraciones del producto..."
             />
           </div>
         </div>

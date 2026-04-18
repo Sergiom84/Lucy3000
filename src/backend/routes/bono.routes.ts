@@ -4,6 +4,8 @@ import {
   getBonoTemplates,
   getGlobalAccountBalanceHistory,
   importBonoTemplatesFromExcel,
+  importClientBonosFromSpreadsheet,
+  importAccountBalanceFromSpreadsheet,
   createBonoTemplate,
   createBonoPack,
   createBonoAppointment,
@@ -14,8 +16,12 @@ import {
   createAccountBalanceTopUp,
   consumeAccountBalance
 } from '../controllers/bono.controller'
-import { authMiddleware } from '../middleware/auth.middleware'
-import { spreadsheetUpload, validateSpreadsheetUpload } from '../middleware/upload.middleware'
+import { adminMiddleware, authMiddleware } from '../middleware/auth.middleware'
+import {
+  spreadsheetUpload,
+  validateLegacySpreadsheetUpload,
+  validateSpreadsheetUpload
+} from '../middleware/upload.middleware'
 import { validateRequest } from '../middleware/validation.middleware'
 import {
   accountBalanceConsumeBodySchema,
@@ -24,7 +30,8 @@ import {
   bonoPackIdParamSchema,
   clientIdParamSchema,
   createBonoTemplateBodySchema,
-  createBonoAppointmentBodySchema
+  createBonoAppointmentBodySchema,
+  spreadsheetImportModeBodySchema
 } from '../validators/bono.schemas'
 
 const router = Router()
@@ -40,6 +47,14 @@ router.post(
   validateSpreadsheetUpload(),
   importBonoTemplatesFromExcel
 )
+router.post(
+  '/import-client-packs',
+  adminMiddleware,
+  spreadsheetUpload.single('file'),
+  validateLegacySpreadsheetUpload(),
+  validateRequest({ body: spreadsheetImportModeBodySchema }),
+  importClientBonosFromSpreadsheet
+)
 router.get('/client/:clientId', validateRequest({ params: clientIdParamSchema }), getClientBonos)
 router.post('/', createBonoPack)
 router.post(
@@ -53,6 +68,14 @@ router.get(
   '/account-balance/:clientId/history',
   validateRequest({ params: clientIdParamSchema, query: accountBalanceHistoryQuerySchema }),
   getAccountBalanceHistory
+)
+router.post(
+  '/account-balance/import',
+  adminMiddleware,
+  spreadsheetUpload.single('file'),
+  validateLegacySpreadsheetUpload(),
+  validateRequest({ body: spreadsheetImportModeBodySchema }),
+  importAccountBalanceFromSpreadsheet
 )
 router.post(
   '/account-balance/:clientId/top-up',

@@ -8,8 +8,11 @@ export const prismaMock: any = {
 
   user: {
     count: vi.fn(),
+    findFirst: vi.fn(),
+    findMany: vi.fn(),
     findUnique: vi.fn(),
-    create: vi.fn()
+    create: vi.fn(),
+    update: vi.fn()
   },
 
   sale: {
@@ -60,6 +63,24 @@ export const prismaMock: any = {
     create: vi.fn(),
     update: vi.fn(),
     updateMany: vi.fn(),
+    delete: vi.fn()
+  },
+
+  agendaBlock: {
+    count: vi.fn(),
+    findMany: vi.fn(),
+    findUnique: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    updateMany: vi.fn(),
+    delete: vi.fn()
+  },
+
+  agendaDayNote: {
+    findMany: vi.fn(),
+    findUnique: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
     delete: vi.fn()
   },
 

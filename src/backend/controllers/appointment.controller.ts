@@ -10,6 +10,35 @@ import {
 } from '../utils/customer-display'
 import { logError, logWarn } from '../utils/logger'
 import { isActiveAppointmentStatus, validateAppointmentSlot } from '../utils/appointment-validation'
+import {
+  AppointmentImportClientRecord,
+  AppointmentImportServiceRecord,
+  AppointmentSpreadsheetIssue,
+  AppointmentSpreadsheetResult,
+  buildAppointmentsExportWorkbook,
+  buildNormalizedAppointmentImportRow,
+  isLikelyAgendaBlockRow,
+  loadAppointmentRowsFromBuffer,
+  matchAppointmentClient,
+  matchAppointmentService,
+  parseAppointmentDate,
+  parseAppointmentMinutes,
+  parseAppointmentTime,
+  resolveAppointmentCabin,
+  resolveAppointmentEndTime,
+  resolveAppointmentProfessional
+} from '../utils/appointment-spreadsheet'
+import {
+  calculateAppointmentEndTime,
+  deriveAppointmentServiceIds,
+  getAppointmentServiceLabel
+} from '../utils/appointment-services'
+import {
+  findUnknownProfessionalNames,
+  getDefaultProfessionalName,
+  getProfessionalCatalog,
+  normalizeProfessionalName
+} from '../utils/professional-catalog'
 
 const appointmentInclude = {
   client: true,
@@ -17,6 +46,14 @@ const appointmentInclude = {
     select: { id: true, name: true, email: true }
   },
   service: true,
+  appointmentServices: {
+    include: {
+      service: true
+    },
+    orderBy: {
+      sortOrder: 'asc' as const
+    }
+  },
   sale: {
     select: {
       id: true,
@@ -44,7 +81,85 @@ const normalizeNullableId = (value: unknown) => {
 
 const hasText = (value: unknown) => Boolean(String(value ?? '').trim())
 
-const buildAppointmentPayload = (payload: Record<string, unknown>): Prisma.AppointmentUncheckedCreateInput => {
+const resolveProfessionalName = async (_userId: unknown, professional: unknown) => {
+  const normalizedProfessional = normalizeProfessionalName(professional)
+  if (normalizedProfessional) {
+    return normalizedProfessional
+  }
+
+  const defaultProfessional = await getDefaultProfessionalName()
+  if (defaultProfessional) {
+    return defaultProfessional
+  }
+
+  return ''
+}
+
+const appointmentServiceSelection = {
+  id: true,
+  name: true,
+  duration: true,
+  category: true,
+  serviceCode: true
+} satisfies Prisma.ServiceSelect
+
+type SelectedAppointmentService = Prisma.ServiceGetPayload<{ select: typeof appointmentServiceSelection }>
+
+const getExistingAppointmentServiceIds = (appointment: {
+  serviceId?: string | null
+  appointmentServices?: Array<{ serviceId?: string | null }> | null
+}) => {
+  const nestedServiceIds = Array.isArray(appointment.appointmentServices)
+    ? appointment.appointmentServices
+        .map((item) => String(item.serviceId || '').trim())
+        .filter(Boolean)
+    : []
+
+  if (nestedServiceIds.length > 0) {
+    return nestedServiceIds
+  }
+
+  const fallbackServiceId = String(appointment.serviceId || '').trim()
+  return fallbackServiceId ? [fallbackServiceId] : []
+}
+
+const loadSelectedAppointmentServices = async (serviceIds: string[]) => {
+  const normalizedServiceIds = deriveAppointmentServiceIds({ serviceIds })
+  if (normalizedServiceIds.length === 0) {
+    return []
+  }
+
+  const services = await prisma.service.findMany({
+    where: {
+      id: {
+        in: normalizedServiceIds
+      }
+    },
+    select: appointmentServiceSelection
+  })
+
+  const servicesById = new Map(services.map((service) => [service.id, service]))
+  const orderedServices = normalizedServiceIds
+    .map((serviceId) => servicesById.get(serviceId) || null)
+    .filter((service): service is SelectedAppointmentService => Boolean(service))
+
+  if (orderedServices.length !== normalizedServiceIds.length) {
+    throw new Error('Uno o más servicios seleccionados no existen')
+  }
+
+  return orderedServices
+}
+
+const buildAppointmentServicesCreateData = (serviceIds: string[]) =>
+  serviceIds.map((serviceId, index) => ({
+    serviceId,
+    sortOrder: index
+  }))
+
+const buildAppointmentPayload = (
+  payload: Record<string, unknown>,
+  options: { serviceId: string; endTime: string }
+): Prisma.AppointmentUncheckedCreateInput => {
   const clientId = normalizeNullableId(payload.clientId)
 
   return {
@@ -52,31 +167,34 @@ const buildAppointmentPayload = (payload: Record<string, unknown>): Prisma.Appoi
     guestName: clientId ? null : normalizeNullableText(payload.guestName),
     guestPhone: clientId ? null : normalizeNullableText(payload.guestPhone),
     userId: String(payload.userId),
-    serviceId: String(payload.serviceId),
+    serviceId: options.serviceId,
     cabin: payload.cabin as string,
-    professional: (payload.professional as string) || 'LUCY',
+    professional: normalizeProfessionalName(payload.professional),
     date: toDate(String(payload.date)),
     startTime: String(payload.startTime),
-    endTime: String(payload.endTime),
+    endTime: options.endTime,
     status: payload.status as string,
     notes: payload.notes ? String(payload.notes) : null,
     reminder: payload.reminder === undefined ? true : Boolean(payload.reminder)
   }
 }
 
-const buildAppointmentUpdatePayload = (payload: Record<string, unknown>): Prisma.AppointmentUncheckedUpdateInput => {
+const buildAppointmentUpdatePayload = (
+  payload: Record<string, unknown>,
+  options: { serviceId?: string; endTime?: string } = {}
+): Prisma.AppointmentUncheckedUpdateInput => {
   const data: Prisma.AppointmentUncheckedUpdateInput = {}
 
   if (payload.clientId !== undefined) data.clientId = normalizeNullableId(payload.clientId)
   if (payload.guestName !== undefined) data.guestName = normalizeNullableText(payload.guestName)
   if (payload.guestPhone !== undefined) data.guestPhone = normalizeNullableText(payload.guestPhone)
   if (payload.userId !== undefined) data.userId = String(payload.userId)
-  if (payload.serviceId !== undefined) data.serviceId = String(payload.serviceId)
+  if (options.serviceId !== undefined) data.serviceId = options.serviceId
   if (payload.cabin !== undefined) data.cabin = payload.cabin as string
-  if (payload.professional !== undefined) data.professional = payload.professional as string
+  if (payload.professional !== undefined) data.professional = normalizeProfessionalName(payload.professional)
   if (payload.date !== undefined) data.date = toDate(String(payload.date))
   if (payload.startTime !== undefined) data.startTime = String(payload.startTime)
-  if (payload.endTime !== undefined) data.endTime = String(payload.endTime)
+  if (options.endTime !== undefined) data.endTime = options.endTime
   if (payload.status !== undefined) data.status = payload.status as string
   if (payload.notes !== undefined) data.notes = payload.notes ? String(payload.notes) : null
   if (payload.reminder !== undefined) data.reminder = Boolean(payload.reminder)
@@ -88,12 +206,13 @@ const buildCalendarSyncInput = (appointment: any): AppointmentSyncInput => {
   const clientName = getAppointmentDisplayName(appointment)
   const phone = getAppointmentDisplayPhone(appointment)
   const phoneLine = phone ? `\nTelefono: ${phone}` : ''
+  const serviceLabel = getAppointmentServiceLabel(appointment) || String(appointment.service?.name || '').trim()
 
   return {
     appointmentId: appointment.id,
     existingEventId: appointment.googleCalendarEventId || null,
-    title: `${appointment.service.name} - ${clientName}`,
-    description: `Cita para ${appointment.service.name}\nCliente: ${clientName}${phoneLine}`,
+    title: `${serviceLabel} - ${clientName}`,
+    description: `Cita para ${serviceLabel}\nCliente: ${clientName}${phoneLine}`,
     date: appointment.date,
     startTime: appointment.startTime,
     endTime: appointment.endTime,
@@ -205,22 +324,710 @@ const persistCalendarSyncResult = async (appointmentId: string, syncResult: Awai
   })
 }
 
-export const getAppointments = async (req: Request, res: Response) => {
-  try {
-    const { startDate, endDate, status, clientId, cabin } = req.query
+const buildAppointmentsWhere = (query: {
+  startDate?: unknown
+  endDate?: unknown
+  status?: unknown
+  clientId?: unknown
+  cabin?: unknown
+}) => {
+  const where: Prisma.AppointmentWhereInput = {}
 
-    const where: Prisma.AppointmentWhereInput = {}
+  if (query.startDate && query.endDate) {
+    where.date = {
+      gte: new Date(String(query.startDate)),
+      lte: new Date(String(query.endDate))
+    }
+  }
 
-    if (startDate && endDate) {
-      where.date = {
-        gte: new Date(startDate as string),
-        lte: new Date(endDate as string)
+  if (query.status) where.status = String(query.status)
+  if (query.clientId) where.clientId = String(query.clientId)
+  if (query.cabin) where.cabin = String(query.cabin)
+
+  return where
+}
+
+const toAppointmentSpreadsheetError = (row: number, message: string): AppointmentSpreadsheetIssue => ({
+  row,
+  error: `Fila ${row}: ${message}`
+})
+
+const normalizeAppointmentImportError = (error: unknown) => {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim()
+  }
+
+  return 'Error desconocido al importar la fila'
+}
+
+const selectAppointmentImportCatalogs = async () => {
+  const [clients, services] = await Promise.all([
+    prisma.client.findMany({
+      select: {
+        id: true,
+        externalCode: true,
+        firstName: true,
+        lastName: true,
+        fullName: true,
+        phone: true,
+        mobilePhone: true,
+        landlinePhone: true,
+        email: true
       }
+    }),
+    prisma.service.findMany({
+      select: {
+        id: true,
+        serviceCode: true,
+        name: true,
+        duration: true,
+        isActive: true,
+        createdAt: true
+      }
+    })
+  ])
+
+  return {
+    clients: clients as AppointmentImportClientRecord[],
+    services: services as AppointmentImportServiceRecord[]
+  }
+}
+
+type AppointmentImportMode = 'preview' | 'commit'
+
+type MissingAppointmentClientCandidate = {
+  key: string
+  clientCode: string | null
+  clientName: string
+  phone: string | null
+  email: string | null
+  firstName: string
+  lastName: string
+  phoneForRecord: string
+}
+
+type AppointmentImportMissingClientSummary = {
+  key: string
+  clientCode: string | null
+  clientName: string
+  phone: string | null
+  email: string | null
+  rows: number[]
+  action?: 'created' | 'skipped'
+}
+
+type AppointmentImportDuplicateSummary = {
+  row: number
+  message: string
+}
+
+type AppointmentImportConflictSummary = {
+  row: number
+  message: string
+}
+
+type PreparedAppointmentImportRow =
+  | {
+      kind: 'ready'
+      rowNumber: number
+      row: ReturnType<typeof buildNormalizedAppointmentImportRow>
+      date: Date
+      startTime: string
+      endTime: string
+      minutes: number
+      cabin: string
+      professional: string
+      notes: string | null
+      clientId: string
+      serviceId: string
+      serviceName: string
+      clientName: string
+      importKey: string
+    }
+  | {
+      kind: 'missing-client'
+      rowNumber: number
+      row: ReturnType<typeof buildNormalizedAppointmentImportRow>
+      date: Date
+      startTime: string
+      endTime: string
+      minutes: number
+      cabin: string
+      professional: string
+      notes: string | null
+      serviceId: string
+      serviceName: string
+      missingClient: MissingAppointmentClientCandidate
+    }
+  | {
+      kind: 'block' | 'error'
+      rowNumber: number
+      row: ReturnType<typeof buildNormalizedAppointmentImportRow>
+      message: string
     }
 
-    if (status) where.status = status as string
-    if (clientId) where.clientId = clientId as string
-    if (cabin) where.cabin = cabin as string
+const isPreparedReadyEntry = (
+  entry: PreparedAppointmentImportRow
+): entry is Extract<PreparedAppointmentImportRow, { kind: 'ready' }> => entry.kind === 'ready'
+
+const isPreparedMissingClientEntry = (
+  entry: PreparedAppointmentImportRow
+): entry is Extract<PreparedAppointmentImportRow, { kind: 'missing-client' }> => entry.kind === 'missing-client'
+
+const isPreparedActionableEntry = (
+  entry: PreparedAppointmentImportRow
+): entry is Extract<PreparedAppointmentImportRow, { kind: 'ready' | 'missing-client' }> =>
+  isPreparedReadyEntry(entry) || isPreparedMissingClientEntry(entry)
+
+const normalizeImportIdentity = (value: unknown) =>
+  String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+
+const normalizeImportPhone = (value: unknown) => String(value ?? '').replace(/\D+/g, '')
+
+const normalizeImportEmail = (value: unknown) => {
+  const email = String(value ?? '').trim().toLowerCase()
+  return email && email.includes('@') ? email : null
+}
+
+const collapseWhitespace = (value: unknown) => String(value ?? '').trim().replace(/\s+/g, ' ')
+
+const formatAppointmentImportDateKey = (date: Date) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const splitImportedClientName = (value: unknown) => {
+  const normalizedName = collapseWhitespace(value)
+  if (!normalizedName) {
+    return {
+      firstName: 'SIN_NOMBRE',
+      lastName: 'SIN_APELLIDOS'
+    }
+  }
+
+  const tokens = normalizedName.split(' ')
+  if (tokens.length === 1) {
+    return {
+      firstName: tokens[0],
+      lastName: 'SIN_APELLIDOS'
+    }
+  }
+
+  return {
+    firstName: tokens[0],
+    lastName: tokens.slice(1).join(' ')
+  }
+}
+
+const buildMissingAppointmentClientCandidate = (
+  rowNumber: number,
+  row: ReturnType<typeof buildNormalizedAppointmentImportRow>
+): MissingAppointmentClientCandidate => {
+  const clientCode = normalizeNullableText(row.clientCode)
+  const clientName = collapseWhitespace(row.clientName) || (clientCode ? `Cliente ${clientCode}` : 'Cliente importado')
+  const phone = normalizeNullableText(row.phone)
+  const email = normalizeImportEmail(row.email)
+  const { firstName, lastName } = splitImportedClientName(clientName)
+  const identityKey =
+    (clientCode && `code:${normalizeImportIdentity(clientCode)}`) ||
+    (email && `email:${normalizeImportIdentity(email)}`) ||
+    (phone && `phone:${normalizeImportPhone(phone)}`) ||
+    `name:${normalizeImportIdentity(clientName)}`
+
+  return {
+    key: identityKey,
+    clientCode,
+    clientName,
+    phone,
+    email,
+    firstName,
+    lastName,
+    phoneForRecord: phone || `NO_PHONE_IMPORT_${clientCode || rowNumber}`
+  }
+}
+
+const buildAppointmentImportKey = (input: {
+  date: Date
+  startTime: string
+  endTime: string
+  professional: string
+  cabin: string
+  serviceId: string
+  clientId: string
+}) =>
+  [
+    formatAppointmentImportDateKey(input.date),
+    input.startTime,
+    input.endTime,
+    normalizeProfessionalName(input.professional),
+    input.cabin,
+    input.serviceId,
+    input.clientId
+  ].join('|')
+
+const buildPreparedRowLabel = (
+  rowNumber: number,
+  clientName: string,
+  serviceName: string,
+  date: Date,
+  startTime: string
+) => {
+  return `Fila ${rowNumber}: ${clientName} · ${formatAppointmentImportDateKey(date)} ${startTime} · ${serviceName}`
+}
+
+const buildDuplicateSummary = (
+  rowNumber: number,
+  clientName: string,
+  serviceName: string,
+  date: Date,
+  startTime: string,
+  reason: 'existing' | 'file'
+): AppointmentImportDuplicateSummary => ({
+  row: rowNumber,
+  message:
+    reason === 'existing'
+      ? `${buildPreparedRowLabel(rowNumber, clientName, serviceName, date, startTime)} ya existe en la agenda`
+      : `${buildPreparedRowLabel(rowNumber, clientName, serviceName, date, startTime)} está repetida dentro del Excel`
+})
+
+const previewCabinLabels: Record<string, string> = {
+  LUCY: 'Lucy',
+  TAMARA: 'Tamara',
+  CABINA_1: 'Cabina 1',
+  CABINA_2: 'Cabina 2'
+}
+
+const formatPreviewProfessionalLabel = (professional: string) => normalizeProfessionalName(professional) || professional
+
+const buildAppointmentImportConflictSummary = (row: number, message: string): AppointmentImportConflictSummary => ({
+  row,
+  message: `Fila ${row}: ${message}`
+})
+
+const timeRangesOverlap = (leftStart: string, leftEnd: string, rightStart: string, rightEnd: string) =>
+  leftStart < rightEnd && leftEnd > rightStart
+
+const findAppointmentImportPlannedConflicts = (
+  current: Extract<PreparedAppointmentImportRow, { kind: 'ready' | 'missing-client' }>,
+  plannedEntries: Array<Extract<PreparedAppointmentImportRow, { kind: 'ready' | 'missing-client' }>>
+) => {
+  const conflicts: string[] = []
+
+  for (const planned of plannedEntries) {
+    if (formatAppointmentImportDateKey(planned.date) !== formatAppointmentImportDateKey(current.date)) {
+      continue
+    }
+
+    if (!timeRangesOverlap(planned.startTime, planned.endTime, current.startTime, current.endTime)) {
+      continue
+    }
+
+    if (planned.professional === current.professional) {
+      conflicts.push(
+        `${formatPreviewProfessionalLabel(current.professional)} ya tiene una cita de ${planned.startTime} a ${planned.endTime}`
+      )
+    }
+
+    if (planned.cabin === current.cabin) {
+      conflicts.push(
+        `La cabina ${previewCabinLabels[current.cabin] || current.cabin} ya esta ocupada de ${planned.startTime} a ${planned.endTime}`
+      )
+    }
+  }
+
+  return [...new Set(conflicts)]
+}
+
+const buildMissingClientSummaryMap = (preparedRows: PreparedAppointmentImportRow[]) => {
+  const summaries = new Map<string, AppointmentImportMissingClientSummary>()
+
+  for (const entry of preparedRows) {
+    if (entry.kind !== 'missing-client') continue
+
+    const current = summaries.get(entry.missingClient.key)
+    if (current) {
+      current.rows.push(entry.rowNumber)
+      continue
+    }
+
+    summaries.set(entry.missingClient.key, {
+      key: entry.missingClient.key,
+      clientCode: entry.missingClient.clientCode,
+      clientName: entry.missingClient.clientName,
+      phone: entry.missingClient.phone,
+      email: entry.missingClient.email,
+      rows: [entry.rowNumber]
+    })
+  }
+
+  return summaries
+}
+
+const pushMissingClientOutcome = (
+  summaryMap: Map<string, AppointmentImportMissingClientSummary>,
+  candidate: MissingAppointmentClientCandidate,
+  rowNumber: number,
+  action: 'created' | 'skipped'
+) => {
+  const current = summaryMap.get(candidate.key)
+  if (current) {
+    if (!current.rows.includes(rowNumber)) {
+      current.rows.push(rowNumber)
+    }
+    current.action = action
+    return
+  }
+
+  summaryMap.set(candidate.key, {
+    key: candidate.key,
+    clientCode: candidate.clientCode,
+    clientName: candidate.clientName,
+    phone: candidate.phone,
+    email: candidate.email,
+    rows: [rowNumber],
+    action
+  })
+}
+
+const selectExistingImportAppointmentKeys = async (preparedRows: PreparedAppointmentImportRow[]) => {
+  const uniqueDateKeys = [...new Set(
+    preparedRows
+      .filter(isPreparedActionableEntry)
+      .map((entry) => formatAppointmentImportDateKey(entry.date))
+  )]
+
+  if (uniqueDateKeys.length === 0) {
+    return new Set<string>()
+  }
+
+  const dateClauses = uniqueDateKeys.map((dateKey) => {
+    const [year, month, day] = dateKey.split('-').map(Number)
+    const start = new Date(year, month - 1, day, 0, 0, 0, 0)
+    const end = new Date(year, month - 1, day, 23, 59, 59, 999)
+    return { date: { gte: start, lte: end } }
+  })
+
+  const appointments = await prisma.appointment.findMany({
+    where: {
+      status: { in: ['SCHEDULED', 'CONFIRMED', 'IN_PROGRESS'] },
+      OR: dateClauses
+    },
+    select: {
+      clientId: true,
+      serviceId: true,
+      date: true,
+      startTime: true,
+      endTime: true,
+      professional: true,
+      cabin: true
+    }
+  })
+
+  const keys = new Set<string>()
+  for (const appointment of appointments) {
+    if (!appointment.clientId) continue
+
+    keys.add(
+      buildAppointmentImportKey({
+        date: appointment.date,
+        startTime: appointment.startTime,
+        endTime: appointment.endTime,
+        professional: normalizeProfessionalName(appointment.professional),
+        cabin: appointment.cabin,
+        serviceId: appointment.serviceId,
+        clientId: appointment.clientId
+      })
+    )
+  }
+
+  return keys
+}
+
+const buildAppointmentImportPreview = async (
+  preparedRows: PreparedAppointmentImportRow[],
+  existingImportKeys: Set<string>
+) => {
+  const duplicateIssues: AppointmentImportDuplicateSummary[] = []
+  const conflictIssues: AppointmentImportConflictSummary[] = []
+  const errorIssues: AppointmentSpreadsheetIssue[] = []
+  const blockIssues: AppointmentSpreadsheetIssue[] = []
+  const plannedKeys = new Set<string>()
+  const plannedEntries: Array<Extract<PreparedAppointmentImportRow, { kind: 'ready' | 'missing-client' }>> = []
+  let ready = 0
+
+  for (const entry of preparedRows) {
+    if (entry.kind === 'error') {
+      errorIssues.push(toAppointmentSpreadsheetError(entry.rowNumber, entry.message))
+      continue
+    }
+
+    if (entry.kind === 'block') {
+      blockIssues.push(toAppointmentSpreadsheetError(entry.rowNumber, entry.message))
+      continue
+    }
+
+    if (isPreparedMissingClientEntry(entry)) {
+      const validation = await validateAppointmentSlot(
+        {
+          date: entry.date,
+          startTime: entry.startTime,
+          endTime: entry.endTime,
+          professional: entry.professional,
+          cabin: entry.cabin,
+          allowPastDate: true
+        },
+        prisma
+      )
+      const plannedConflicts = findAppointmentImportPlannedConflicts(entry, plannedEntries)
+      const allConflictMessages = [
+        ...validation.errors.map((validationError) => validationError.message),
+        ...plannedConflicts
+      ]
+
+      if (allConflictMessages.length > 0) {
+        conflictIssues.push(
+          buildAppointmentImportConflictSummary(entry.rowNumber, [...new Set(allConflictMessages)].join('; '))
+        )
+        continue
+      }
+
+      plannedEntries.push(entry)
+      continue
+    }
+
+    if (!isPreparedReadyEntry(entry)) {
+      continue
+    }
+
+    if (existingImportKeys.has(entry.importKey)) {
+      duplicateIssues.push(
+        buildDuplicateSummary(
+          entry.rowNumber,
+          entry.clientName,
+          entry.serviceName,
+          entry.date,
+          entry.startTime,
+          'existing'
+        )
+      )
+      continue
+    }
+
+    if (plannedKeys.has(entry.importKey)) {
+      duplicateIssues.push(
+        buildDuplicateSummary(
+          entry.rowNumber,
+          entry.clientName,
+          entry.serviceName,
+          entry.date,
+          entry.startTime,
+          'file'
+        )
+      )
+      continue
+    }
+
+    const validation = await validateAppointmentSlot(
+      {
+        date: entry.date,
+        startTime: entry.startTime,
+        endTime: entry.endTime,
+        professional: entry.professional,
+        cabin: entry.cabin,
+        allowPastDate: true
+      },
+      prisma
+    )
+    const plannedConflicts = findAppointmentImportPlannedConflicts(entry, plannedEntries)
+    const allConflictMessages = [
+      ...validation.errors.map((validationError) => validationError.message),
+      ...plannedConflicts
+    ]
+
+    if (allConflictMessages.length > 0) {
+      conflictIssues.push(
+        buildAppointmentImportConflictSummary(entry.rowNumber, [...new Set(allConflictMessages)].join('; '))
+      )
+      continue
+    }
+
+    plannedKeys.add(entry.importKey)
+    plannedEntries.push(entry)
+    ready += 1
+  }
+
+  return {
+    totalRows: preparedRows.length,
+    ready,
+    detectedProfessionals: [],
+    duplicates: duplicateIssues,
+    missingClients: [...buildMissingClientSummaryMap(preparedRows).values()].sort((left, right) =>
+      left.clientName.localeCompare(right.clientName, 'es', { sensitivity: 'base' })
+    ),
+    blocks: blockIssues,
+    conflicts: conflictIssues,
+    errors: errorIssues
+  }
+}
+
+const prepareAppointmentImportRows = (
+  rawRows: Record<string, unknown>[],
+  catalogs: {
+    clients: AppointmentImportClientRecord[]
+    services: AppointmentImportServiceRecord[]
+  }
+): PreparedAppointmentImportRow[] => {
+  const preparedRows: PreparedAppointmentImportRow[] = []
+
+  for (let index = 0; index < rawRows.length; index += 1) {
+    const rowNumber = index + 2
+    const row = buildNormalizedAppointmentImportRow(rawRows[index] || {})
+
+    try {
+      if (isLikelyAgendaBlockRow(row)) {
+        preparedRows.push({
+          kind: 'block',
+          rowNumber,
+          row,
+          message: `La fila parece un bloqueo o nota de agenda (${String(row.clientName || 'sin titulo').trim()}). Los bloqueos se importaran en una fase posterior`
+        })
+        continue
+      }
+
+      const date = parseAppointmentDate(row.date)
+      if (!date) throw new Error('Fecha invalida')
+
+      const startTime = parseAppointmentTime(row.time)
+      if (!startTime) throw new Error('Hora invalida')
+
+      const minutes = parseAppointmentMinutes(row.minutes)
+      if (!minutes) throw new Error('Minutos invalidos')
+
+      const serviceMatch = matchAppointmentService(
+        catalogs.services,
+        row.serviceCode,
+        row.serviceDescription,
+        minutes
+      )
+      if (!serviceMatch.service || serviceMatch.error) {
+        throw new Error(serviceMatch.error || 'Tratamiento invalido')
+      }
+
+      const professional = resolveAppointmentProfessional(row.professional, null)
+      const cabin = resolveAppointmentCabin(row.cabin, professional)
+      const resolvedProfessional = resolveAppointmentProfessional(row.professional, cabin)
+      if (!resolvedProfessional) throw new Error('Profesional invalido')
+      const endTime = resolveAppointmentEndTime(startTime, minutes)
+      const notes = row.notes ? String(row.notes).trim() || null : null
+      const clientMatch = matchAppointmentClient(catalogs.clients, {
+        clientCode: row.clientCode,
+        clientName: row.clientName,
+        phone: row.phone,
+        email: row.email
+      })
+
+      if (clientMatch.status === 'missing') {
+        preparedRows.push({
+          kind: 'missing-client',
+          rowNumber,
+          row,
+          date,
+          startTime,
+          endTime,
+          minutes,
+          cabin,
+          professional: resolvedProfessional,
+          notes,
+          serviceId: serviceMatch.service.id,
+          serviceName: String(serviceMatch.service.name || row.serviceDescription || '').trim(),
+          missingClient: buildMissingAppointmentClientCandidate(rowNumber, row)
+        })
+        continue
+      }
+
+      if (!clientMatch.client || clientMatch.error) {
+        throw new Error(clientMatch.error || 'Cliente invalido')
+      }
+
+      preparedRows.push({
+        kind: 'ready',
+        rowNumber,
+        row,
+        date,
+        startTime,
+        endTime,
+        minutes,
+        cabin,
+        professional: resolvedProfessional,
+        notes,
+        clientId: clientMatch.client.id,
+        serviceId: serviceMatch.service.id,
+        serviceName: String(serviceMatch.service.name || row.serviceDescription || '').trim(),
+        clientName: collapseWhitespace(row.clientName) || `${clientMatch.client.firstName || ''} ${clientMatch.client.lastName || ''}`.trim(),
+        importKey: buildAppointmentImportKey({
+          date,
+          startTime,
+          endTime,
+          professional: resolvedProfessional,
+          cabin,
+          serviceId: serviceMatch.service.id,
+          clientId: clientMatch.client.id
+        })
+      })
+    } catch (error) {
+      preparedRows.push({
+        kind: 'error',
+        rowNumber,
+        row,
+        message: normalizeAppointmentImportError(error)
+      })
+    }
+  }
+
+  return preparedRows
+}
+
+const createClientFromAppointmentImport = async (
+  candidate: MissingAppointmentClientCandidate
+): Promise<AppointmentImportClientRecord> => {
+  const createdClient = await prisma.client.create({
+    data: {
+      externalCode: candidate.clientCode,
+      firstName: candidate.firstName,
+      lastName: candidate.lastName,
+      fullName: `${candidate.firstName} ${candidate.lastName}`.trim(),
+      phone: candidate.phoneForRecord,
+      mobilePhone: candidate.phone || null,
+      email: candidate.email,
+      notes: 'Ficha creada automáticamente al importar citas desde Excel.',
+      isActive: true
+    },
+    select: {
+      id: true,
+      externalCode: true,
+      firstName: true,
+      lastName: true,
+      fullName: true,
+      phone: true,
+      mobilePhone: true,
+      landlinePhone: true,
+      email: true
+    }
+  })
+
+  return createdClient as AppointmentImportClientRecord
+}
+
+export const getAppointments = async (req: Request, res: Response) => {
+  try {
+    const where = buildAppointmentsWhere(req.query)
 
     const appointments = await prisma.appointment.findMany({
       where,
@@ -260,6 +1067,232 @@ export const getAppointmentsByDate = async (req: Request, res: Response) => {
     res.json(appointments)
   } catch (error) {
     logError('Get appointments by date error', error, { params: req.params })
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const exportAppointments = async (req: Request, res: Response) => {
+  try {
+    const where = buildAppointmentsWhere(req.query)
+    const appointments = await prisma.appointment.findMany({
+      where,
+      include: appointmentInclude,
+      orderBy: [{ date: 'asc' }, { startTime: 'asc' }]
+    })
+
+    const workbook = buildAppointmentsExportWorkbook(appointments as any[])
+    const buffer = await workbook.xlsx.writeBuffer()
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    res.setHeader('Content-Disposition', 'attachment; filename="appointments.xlsx"')
+    res.send(Buffer.from(buffer))
+  } catch (error) {
+    logError('Export appointments error', error, { query: req.query })
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const importAppointmentsFromExcel = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' })
+    }
+
+    if (!req.user?.id) {
+      return res.status(401).json({ error: 'No token provided' })
+    }
+
+    const mode: AppointmentImportMode = req.body?.mode === 'preview' ? 'preview' : 'commit'
+    const createMissingClients = Boolean(req.body?.createMissingClients)
+    const rows = await loadAppointmentRowsFromBuffer(req.file.buffer)
+    const catalogs = await selectAppointmentImportCatalogs()
+    const preparedRows = prepareAppointmentImportRows(rows, catalogs)
+    const existingImportKeys = await selectExistingImportAppointmentKeys(preparedRows)
+    const configuredProfessionals = await getProfessionalCatalog()
+    const detectedProfessionals = findUnknownProfessionalNames(
+      preparedRows.filter(isPreparedActionableEntry).map((entry) => entry.professional),
+      configuredProfessionals
+    )
+
+    if (mode === 'preview') {
+      const preview = await buildAppointmentImportPreview(preparedRows, existingImportKeys)
+      return res.json({
+        stage: 'preview',
+        preview: {
+          ...preview,
+          detectedProfessionals
+        }
+      })
+    }
+
+    const results: AppointmentSpreadsheetResult & {
+      createdClients: number
+      detectedProfessionals: string[]
+      duplicates: AppointmentImportDuplicateSummary[]
+      conflicts: AppointmentImportConflictSummary[]
+      blocks: AppointmentSpreadsheetIssue[]
+      missingClients: AppointmentImportMissingClientSummary[]
+    } = {
+      success: 0,
+      skipped: 0,
+      createdClients: 0,
+      detectedProfessionals,
+      duplicates: [],
+      conflicts: [],
+      blocks: [],
+      missingClients: [],
+      errors: []
+    }
+    const processedImportKeys = new Set<string>(existingImportKeys)
+    const missingClientOutcomes = new Map<string, AppointmentImportMissingClientSummary>()
+    const createdClientsByKey = new Map<string, AppointmentImportClientRecord>()
+
+    for (const entry of preparedRows) {
+      if (entry.kind === 'block') {
+        results.skipped += 1
+        results.blocks.push(toAppointmentSpreadsheetError(entry.rowNumber, entry.message))
+        continue
+      }
+
+      if (entry.kind === 'error') {
+        results.skipped += 1
+        results.errors.push(toAppointmentSpreadsheetError(entry.rowNumber, entry.message))
+        continue
+      }
+
+      const actionableEntry = entry as Extract<PreparedAppointmentImportRow, { kind: 'ready' | 'missing-client' }>
+
+      try {
+        let clientId = isPreparedReadyEntry(actionableEntry) ? actionableEntry.clientId : null
+        let clientName = isPreparedReadyEntry(actionableEntry)
+          ? actionableEntry.clientName
+          : actionableEntry.missingClient.clientName
+
+        if (isPreparedMissingClientEntry(actionableEntry)) {
+          if (!createMissingClients) {
+            results.skipped += 1
+            pushMissingClientOutcome(
+              missingClientOutcomes,
+              actionableEntry.missingClient,
+              actionableEntry.rowNumber,
+              'skipped'
+            )
+            continue
+          }
+
+          let createdClient = createdClientsByKey.get(actionableEntry.missingClient.key) || null
+          if (!createdClient) {
+            createdClient = await createClientFromAppointmentImport(actionableEntry.missingClient)
+            createdClientsByKey.set(actionableEntry.missingClient.key, createdClient)
+            catalogs.clients.push(createdClient)
+            results.createdClients += 1
+          }
+
+          clientId = createdClient.id
+          clientName =
+            `${createdClient.firstName || ''} ${createdClient.lastName || ''}`.trim() ||
+            actionableEntry.missingClient.clientName
+          pushMissingClientOutcome(
+            missingClientOutcomes,
+            actionableEntry.missingClient,
+            actionableEntry.rowNumber,
+            'created'
+          )
+        }
+
+        if (!clientId) {
+          throw new Error('Cliente invalido')
+        }
+
+        const importKey = buildAppointmentImportKey({
+          date: actionableEntry.date,
+          startTime: actionableEntry.startTime,
+          endTime: actionableEntry.endTime,
+          professional: actionableEntry.professional,
+          cabin: actionableEntry.cabin,
+          serviceId: actionableEntry.serviceId,
+          clientId
+        })
+
+        if (processedImportKeys.has(importKey)) {
+          results.skipped += 1
+          results.duplicates.push(
+            buildDuplicateSummary(
+              actionableEntry.rowNumber,
+              clientName,
+              actionableEntry.serviceName,
+              actionableEntry.date,
+              actionableEntry.startTime,
+              existingImportKeys.has(importKey) ? 'existing' : 'file'
+            )
+          )
+          continue
+        }
+
+        const validation = await validateAppointmentSlot(
+          {
+            date: actionableEntry.date,
+            startTime: actionableEntry.startTime,
+            endTime: actionableEntry.endTime,
+            professional: actionableEntry.professional,
+            cabin: actionableEntry.cabin,
+            allowPastDate: true
+          },
+          prisma
+        )
+
+        if (validation.errors.length > 0) {
+          results.skipped += 1
+          results.conflicts.push(
+            buildAppointmentImportConflictSummary(
+              actionableEntry.rowNumber,
+              validation.errors.map((validationError) => validationError.message).join('; ')
+            )
+          )
+          continue
+        }
+
+        await prisma.appointment.create({
+          data: {
+            clientId,
+            userId: req.user.id,
+            serviceId: actionableEntry.serviceId,
+            cabin: actionableEntry.cabin,
+            professional: actionableEntry.professional,
+            date: actionableEntry.date,
+            startTime: actionableEntry.startTime,
+            endTime: actionableEntry.endTime,
+            status: 'SCHEDULED',
+            notes: actionableEntry.notes,
+            reminder: true
+          }
+        })
+
+        processedImportKeys.add(importKey)
+        results.success += 1
+      } catch (error) {
+        results.skipped += 1
+        results.errors.push(
+          toAppointmentSpreadsheetError(actionableEntry.rowNumber, normalizeAppointmentImportError(error))
+        )
+      }
+    }
+
+    results.missingClients = [...missingClientOutcomes.values()].sort((left, right) =>
+      left.clientName.localeCompare(right.clientName, 'es', { sensitivity: 'base' })
+    )
+
+    return res.json({
+      stage: 'commit',
+      results
+    })
+  } catch (error) {
+    logError('Import appointments error', error, { userId: req.user?.id || null })
+
+    if (error instanceof Error && error.message === 'No worksheet found in the uploaded file') {
+      return res.status(400).json({ error: error.message })
+    }
+
     res.status(500).json({ error: 'Internal server error' })
   }
 }
@@ -381,13 +1414,41 @@ export const deleteAppointmentLegend = async (req: Request, res: Response) => {
 
 export const createAppointment = async (req: AuthRequest, res: Response) => {
   try {
-    const data = buildAppointmentPayload(req.body)
+    const requestedServiceIds = deriveAppointmentServiceIds(req.body)
+    let selectedServices: SelectedAppointmentService[]
+
+    try {
+      selectedServices = await loadSelectedAppointmentServices(requestedServiceIds)
+    } catch (error) {
+      return res.status(400).json({ error: error instanceof Error ? error.message : 'Servicios no válidos' })
+    }
+
+    if (selectedServices.length === 0) {
+      return res.status(400).json({ error: 'Debe seleccionar al menos un servicio' })
+    }
+
+    const selectedServiceIds = selectedServices.map((service) => service.id)
+    const computedEndTime = calculateAppointmentEndTime(
+      String(req.body.startTime || ''),
+      selectedServices.reduce((total, service) => total + Math.max(0, Number(service.duration || 0)), 0)
+    )
+    const data = buildAppointmentPayload(req.body, {
+      serviceId: selectedServiceIds[0],
+      endTime: computedEndTime
+    })
+    const resolvedProfessional = await resolveProfessionalName(data.userId, data.professional)
+
+    if (!resolvedProfessional) {
+      return res.status(400).json({ error: 'Debe indicar un profesional valido' })
+    }
+
+    data.professional = resolvedProfessional
 
     const validation = await validateAppointmentSlot({
       date: data.date as Date,
       startTime: data.startTime as string,
       endTime: data.endTime as string,
-      professional: (data.professional as string) || 'LUCY',
+      professional: resolvedProfessional,
       cabin: data.cabin as string,
     }, prisma)
 
@@ -402,7 +1463,12 @@ export const createAppointment = async (req: AuthRequest, res: Response) => {
     }
 
     const createdAppointment = await prisma.appointment.create({
-      data,
+      data: {
+        ...data,
+        appointmentServices: {
+          create: buildAppointmentServicesCreateData(selectedServiceIds)
+        }
+      },
       include: appointmentInclude
     })
 
@@ -455,7 +1521,30 @@ export const updateAppointment = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: 'Appointment not found' })
     }
 
-    const updateData = buildAppointmentUpdatePayload(req.body)
+    const nextServiceIds = deriveAppointmentServiceIds(req.body, getExistingAppointmentServiceIds(existing))
+    let selectedServices: SelectedAppointmentService[]
+
+    try {
+      selectedServices = await loadSelectedAppointmentServices(nextServiceIds)
+    } catch (error) {
+      return res.status(400).json({ error: error instanceof Error ? error.message : 'Servicios no válidos' })
+    }
+
+    if (selectedServices.length === 0) {
+      return res.status(400).json({ error: 'Debe seleccionar al menos un servicio' })
+    }
+
+    const serviceSelectionChanged = req.body.serviceId !== undefined || req.body.serviceIds !== undefined
+    const shouldRecalculateEndTime = serviceSelectionChanged || req.body.startTime !== undefined
+    const updateData = buildAppointmentUpdatePayload(req.body, {
+      serviceId: selectedServices[0].id,
+      endTime: shouldRecalculateEndTime
+        ? calculateAppointmentEndTime(
+            String(req.body.startTime || existing.startTime),
+            selectedServices.reduce((total, service) => total + Math.max(0, Number(service.duration || 0)), 0)
+          )
+        : undefined
+    })
     const partyValidationError = validateAppointmentPartyUpdate(existing, updateData)
 
     if (partyValidationError) {
@@ -495,11 +1584,21 @@ export const updateAppointment = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    const updatedAppointment = await prisma.appointment.update({
-      where: { id },
-      data: updateData,
-      include: appointmentInclude
-    })
+      const updatedAppointment = await prisma.appointment.update({
+        where: { id },
+        data: {
+          ...updateData,
+          ...(serviceSelectionChanged
+            ? {
+                appointmentServices: {
+                  deleteMany: {},
+                  create: buildAppointmentServicesCreateData(selectedServices.map((service) => service.id))
+                }
+              }
+            : {})
+        },
+        include: appointmentInclude
+      })
 
     const movedToCancelled =
       updatedAppointment.status === 'CANCELLED' || updatedAppointment.status === 'NO_SHOW'

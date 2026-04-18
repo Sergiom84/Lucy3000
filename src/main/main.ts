@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, shell, type MenuItemConstructorOptions } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import crypto from 'crypto'
@@ -34,6 +34,7 @@ let backendProcess: ChildProcess | null = null
 let isForcingAppExit = false
 
 const isDevelopment = process.env.NODE_ENV === 'development'
+const shouldAutoOpenDevTools = isDevelopment && process.env.ELECTRON_OPEN_DEVTOOLS === '1'
 const backendPort = process.env.PORT || '3001'
 
 if (isDevelopment) {
@@ -361,6 +362,205 @@ const getProductionDbPath = () => {
   return path.join(userDataDir, 'lucy3000.db')
 }
 
+const buildRuntimeDataPaths = () => {
+  const userDataPath = app.getPath('userData')
+  const dbPath = getProductionDbPath()
+  const logsPath = app.getPath('logs')
+
+  return {
+    userDataPath,
+    dbPath,
+    logsPath,
+    dbExists: fs.existsSync(dbPath)
+  }
+}
+
+const openRuntimeDataFolder = async () => {
+  const runtimeInfo = buildRuntimeDataPaths()
+  const result = await shell.openPath(runtimeInfo.userDataPath)
+
+  if (result) {
+    writeMainLog('error', 'Failed to open runtime data folder', {
+      userDataPath: runtimeInfo.userDataPath,
+      result
+    })
+    return { success: false, error: result, path: runtimeInfo.userDataPath }
+  }
+
+  return { success: true, path: runtimeInfo.userDataPath }
+}
+
+const performRuntimeDataReset = async () => {
+  const dbPath = getProductionDbPath()
+  const userDataPath = app.getPath('userData')
+
+  try {
+    if (!isDevelopment) {
+      await stopBackendGracefully()
+    }
+
+    let backupPath: string | null = null
+    if (fs.existsSync(dbPath)) {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      backupPath = path.join(userDataPath, `lucy3000-reset-backup-${timestamp}.db`)
+      await fsPromises.copyFile(dbPath, backupPath)
+      await fsPromises.unlink(dbPath)
+    }
+
+    writeMainLog('info', 'Runtime data reset requested', {
+      dbPath,
+      backupPath,
+      userDataPath
+    })
+
+    return {
+      success: true,
+      dbPath,
+      backupPath,
+      userDataPath,
+      requiresRelaunch: !isDevelopment
+    }
+  } catch (error) {
+    writeMainLog('error', 'Failed to reset runtime data', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+      dbPath,
+      userDataPath
+    }
+  }
+}
+
+const showDatabaseHelpDialog = async () => {
+  const runtimeInfo = buildRuntimeDataPaths()
+  const parentWindow = mainWindow ?? BrowserWindow.getFocusedWindow()
+  const showMessageBox = (options: Electron.MessageBoxOptions) => {
+    return parentWindow ? dialog.showMessageBox(parentWindow, options) : dialog.showMessageBox(options)
+  }
+
+  const result = await showMessageBox({
+    type: 'info',
+    title: 'Lucy3000 - BD local',
+    message: 'Importante sobre la base de datos local',
+    detail: [
+      'Reinstalar Lucy3000 no borra la base local del equipo.',
+      'Si el login no entra, puede que estés abriendo una instalación antigua con usuarios ya existentes.',
+      '',
+      `Base local activa: ${runtimeInfo.dbPath}`,
+      `Carpeta de datos: ${runtimeInfo.userDataPath}`
+    ].join('\n'),
+    buttons: ['Abrir carpeta de datos', 'Restablecer instalación local', 'Cerrar'],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true
+  })
+
+  if (result.response === 0) {
+    await openRuntimeDataFolder()
+    return
+  }
+
+  if (result.response !== 1) {
+    return
+  }
+
+  const confirmation = await showMessageBox({
+    type: 'warning',
+    title: 'Confirmar restablecimiento',
+    message: 'Esto archivará la BD local actual y reiniciará la app.',
+    detail:
+      'Lucy3000 moverá la base activa a una copia de seguridad dentro de la carpeta de datos y volverá al bootstrap del primer administrador.',
+    buttons: ['Cancelar', 'Restablecer'],
+    defaultId: 1,
+    cancelId: 0,
+    noLink: true
+  })
+
+  if (confirmation.response !== 1) {
+    return
+  }
+
+  const resetResult = await performRuntimeDataReset()
+  if (!resetResult.success) {
+    dialog.showErrorBox('No se pudo restablecer la BD local', resetResult.error || 'Error desconocido')
+    return
+  }
+
+  if (resetResult.requiresRelaunch) {
+    const completed = await showMessageBox({
+      type: 'info',
+      title: 'BD local restablecida',
+      message: 'Lucy3000 se reiniciará para aplicar el cambio.',
+      detail: resetResult.backupPath
+        ? `Copia de seguridad creada en:\n${resetResult.backupPath}`
+        : 'No existía una base previa que archivar.',
+      buttons: ['Reiniciar ahora'],
+      defaultId: 0,
+      noLink: true
+    })
+
+    if (completed.response === 0) {
+      setTimeout(() => {
+        app.relaunch()
+        app.quit()
+      }, 150)
+    }
+  }
+}
+
+const buildAppMenu = () => {
+  const template: MenuItemConstructorOptions[] = [
+    {
+      label: 'File',
+      submenu: [{ role: 'quit' }]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' }
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' }
+      ]
+    },
+    {
+      label: 'Window',
+      submenu: [{ role: 'minimize' }, { role: 'close' }]
+    },
+    {
+      role: 'help',
+      submenu: [
+        {
+          label: 'BD',
+          click: () => {
+            void showDatabaseHelpDialog()
+          }
+        },
+        { type: 'separator' }
+      ]
+    }
+  ]
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
+
 const getBundledSeedDbPath = () =>
   findExistingPath([
     path.join(process.resourcesPath, 'app.asar.unpacked', 'prisma', 'packaged', 'lucy3000.db'),
@@ -535,13 +735,15 @@ function createWindow() {
 
   if (isDevelopment) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173')
-    mainWindow.webContents.openDevTools()
+    if (shouldAutoOpenDevTools) {
+      mainWindow.webContents.openDevTools()
+    }
   } else {
     mainWindow.loadFile(path.join(__dirname, '../index.html'))
   }
 
   mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
-    if (level < 2) {
+    if (level < 2 || String(sourceId || '').startsWith('devtools://')) {
       return
     }
 
@@ -603,6 +805,7 @@ app.whenReady().then(async () => {
     return
   }
 
+  buildAppMenu()
   createWindow()
 
   // Initialize auto-backup
@@ -649,6 +852,9 @@ app.on('child-process-gone', (_event, details) => {
 
 ipcMain.handle('app:getVersion', () => app.getVersion())
 ipcMain.handle('app:getPath', (_, name: string) => app.getPath(name as AppPathName))
+ipcMain.handle('app:getRuntimeDataPaths', () => buildRuntimeDataPaths())
+ipcMain.handle('app:openRuntimeDataFolder', () => openRuntimeDataFolder())
+ipcMain.handle('app:resetRuntimeData', () => performRuntimeDataReset())
 ipcMain.handle('app:relaunch', () => {
   setTimeout(() => {
     app.relaunch()

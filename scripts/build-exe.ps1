@@ -43,6 +43,6 @@ npx electron-builder --win
 if ($LASTEXITCODE -ne 0) { throw "electron-builder failed" }
 
 Write-Host "`n=== Build complete! ===" -ForegroundColor Green
-Write-Host "Installer: release\Lucy3000 Accounting Setup 1.0.0.exe" -ForegroundColor Green
+Write-Host "Installer: release\Lucy3000 Accounting Setup 2.0.0.exe" -ForegroundColor Green
 Write-Host "`nIMPORTANT: Copy your .env file next to the installed .exe on the target machine." -ForegroundColor Yellow
 Write-Host "Location: C:\Users\<user>\AppData\Local\Programs\Lucy3000 Accounting\.env" -ForegroundColor Yellow

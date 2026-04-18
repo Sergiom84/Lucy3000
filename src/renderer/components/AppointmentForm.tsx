@@ -1,7 +1,12 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Clock, Save, X } from 'lucide-react'
 import api from '../utils/api'
-import { loadAppointmentClients, loadAppointmentServices } from '../utils/appointmentCatalogs'
+import {
+  loadAppointmentClients,
+  loadAppointmentProfessionals,
+  loadAppointmentServices,
+  type AppointmentServiceCatalogItem
+} from '../utils/appointmentCatalogs'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '../stores/authStore'
 import { formatCurrency } from '../utils/format'
@@ -37,6 +42,7 @@ interface AppointmentFormProps {
   onCancel: () => void
   preselectedDate?: Date
   preselectedStartTime?: string
+  preselectedEndTime?: string
   initialCabin?: 'LUCY' | 'TAMARA' | 'CABINA_1' | 'CABINA_2'
   fromBono?: BonoAppointmentContext | null
 }
@@ -51,12 +57,25 @@ type ClientBonoSummary = {
 
 const SEARCH_RESULTS_LIMIT = 50
 
-const professionalOptions = [
-  { value: 'LUCY', label: 'Lucy' },
-  { value: 'TAMARA', label: 'Tamara' },
-  { value: 'CHEMA', label: 'Chema' },
-  { value: 'OTROS', label: 'Otros' }
-]
+const getInitialAppointmentServiceIds = (appointment: any) => {
+  if (!appointment) {
+    return []
+  }
+
+  const linkedServiceIds = Array.isArray(appointment.appointmentServices)
+    ? [...appointment.appointmentServices]
+        .sort((left, right) => Number(left?.sortOrder || 0) - Number(right?.sortOrder || 0))
+        .map((item) => String(item?.serviceId || item?.service?.id || '').trim())
+        .filter(Boolean)
+    : []
+
+  if (linkedServiceIds.length > 0) {
+    return linkedServiceIds
+  }
+
+  const fallbackServiceId = String(appointment.serviceId || '').trim()
+  return fallbackServiceId ? [fallbackServiceId] : []
+}
 
 const getLocalDateInputValue = (value: Date) => {
   const year = value.getFullYear()
@@ -69,12 +88,16 @@ function TimeInput({
   value,
   onChange,
   onBlur,
-  placeholder
+  placeholder,
+  readOnly = false,
+  disabled = false
 }: {
   value: string
   onChange: (value: string) => void
   onBlur: () => void
   placeholder: string
+  readOnly?: boolean
+  disabled?: boolean
 }) {
   const listId = placeholder === '08:00' ? 'appointment-start-time-options' : 'appointment-end-time-options'
   const options = useMemo(() => {
@@ -91,17 +114,170 @@ function TimeInput({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onBlur={onBlur}
-        className="input pl-10"
+        className="input pl-10 disabled:cursor-not-allowed disabled:opacity-70 read-only:bg-gray-50 read-only:text-gray-600 dark:read-only:bg-gray-800/60 dark:read-only:text-gray-300"
         placeholder={placeholder}
         list={listId}
         inputMode="numeric"
         autoComplete="off"
+        readOnly={readOnly}
+        disabled={disabled}
       />
       <datalist id={listId}>
         {options.map((option) => (
           <option key={option} value={option} />
         ))}
       </datalist>
+    </div>
+  )
+}
+
+function SearchableMultiSelect({
+  selectedIds,
+  options,
+  onAdd,
+  onRemove,
+  placeholder,
+  emptyText,
+  disabled = false,
+  loading = false,
+  loadingText = 'Cargando opciones...'
+}: {
+  selectedIds: string[]
+  options: SearchableOption[]
+  onAdd: (id: string) => void
+  onRemove: (id: string) => void
+  placeholder: string
+  emptyText: string
+  disabled?: boolean
+  loading?: boolean
+  loadingText?: string
+}) {
+  const [query, setQuery] = useState('')
+  const [isOpen, setIsOpen] = useState(false)
+
+  const selectedOptions = useMemo(
+    () =>
+      selectedIds
+        .map((id) => options.find((option) => option.id === id) || null)
+        .filter((option): option is SearchableOption => Boolean(option)),
+    [options, selectedIds]
+  )
+
+  const availableOptions = useMemo(
+    () => options.filter((option) => !selectedIds.includes(option.id)),
+    [options, selectedIds]
+  )
+
+  const filteredOptions = useMemo(
+    () => filterSearchableOptions(availableOptions, query),
+    [availableOptions, query]
+  )
+
+  const visibleOptions = useMemo(
+    () => filteredOptions.slice(0, SEARCH_RESULTS_LIMIT),
+    [filteredOptions]
+  )
+
+  const hiddenResultsCount = Math.max(filteredOptions.length - visibleOptions.length, 0)
+  const hasQuery = buildSearchTokens(query).length > 0
+
+  const handleSelect = (option: SearchableOption) => {
+    onAdd(option.id)
+    setQuery('')
+    setIsOpen(false)
+  }
+
+  return (
+    <div className="space-y-3">
+      <div
+        className="relative"
+        onFocus={() => {
+          if (!disabled) setIsOpen(true)
+        }}
+        onBlur={() => {
+          window.setTimeout(() => setIsOpen(false), 120)
+        }}
+      >
+        <input
+          type="text"
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value)
+            setIsOpen(true)
+          }}
+          className="input disabled:cursor-not-allowed disabled:opacity-70"
+          placeholder={placeholder}
+          disabled={disabled}
+        />
+
+        {!disabled && isOpen && (
+          <div className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800">
+            {loading ? (
+              <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+                {loadingText}
+              </div>
+            ) : filteredOptions.length === 0 ? (
+              <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+                {emptyText}
+              </div>
+            ) : (
+              <>
+                {visibleOptions.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onMouseDown={(event) => {
+                      event.preventDefault()
+                      handleSelect(option)
+                    }}
+                    className="w-full border-b border-gray-100 px-3 py-2 text-left last:border-b-0 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700"
+                  >
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                      {option.label}
+                    </p>
+                    {option.detail && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {option.detail}
+                      </p>
+                    )}
+                  </button>
+                ))}
+
+                {(hiddenResultsCount > 0 || !hasQuery) && (
+                  <div className="border-t border-gray-100 px-3 py-2 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                    {hiddenResultsCount > 0
+                      ? `Mostrando ${visibleOptions.length} resultados. Escribe mas para afinar la busqueda.`
+                      : 'Puedes anadir varios servicios a la misma cita.'}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {selectedOptions.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {selectedOptions.map((option) => (
+            <span
+              key={option.id}
+              className="inline-flex items-center gap-2 rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-sm text-primary-800 dark:border-primary-900/50 dark:bg-primary-900/30 dark:text-primary-100"
+            >
+              <span className="truncate max-w-[18rem]">{option.label}</span>
+              {!disabled && (
+                <button
+                  type="button"
+                  onClick={() => onRemove(option.id)}
+                  className="rounded-full p-0.5 transition hover:bg-primary-100 dark:hover:bg-primary-800/60"
+                  aria-label={`Quitar ${option.label}`}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -261,6 +437,7 @@ export default function AppointmentForm({
   onCancel,
   preselectedDate,
   preselectedStartTime,
+  preselectedEndTime,
   initialCabin = 'LUCY',
   fromBono = null
 }: AppointmentFormProps) {
@@ -268,9 +445,11 @@ export default function AppointmentForm({
   const [loading, setLoading] = useState(false)
   const [clientsLoading, setClientsLoading] = useState(true)
   const [servicesLoading, setServicesLoading] = useState(true)
+  const [professionalsLoading, setProfessionalsLoading] = useState(true)
+  const [professionalTouched, setProfessionalTouched] = useState(false)
   const [clients, setClients] = useState<any[]>([])
   const [services, setServices] = useState<any[]>([])
-  const [selectedService, setSelectedService] = useState<any>(null)
+  const [professionals, setProfessionals] = useState<string[]>([])
   const [clientBonos, setClientBonos] = useState<ClientBonoSummary[]>([])
 
   const isCreatingFromBono = !appointment && Boolean(fromBono?.bonoPackId)
@@ -284,10 +463,10 @@ export default function AppointmentForm({
     clientId: fromBono?.clientId || '',
     guestName: '',
     guestPhone: '',
-    serviceId: fromBono?.serviceId || '',
+    serviceIds: fromBono?.serviceId ? [fromBono.serviceId] : [],
     userId: user?.id || '',
     cabin: initialCabin,
-    professional: 'LUCY',
+    professional: '',
     date: '',
     status: 'SCHEDULED',
     notes: '',
@@ -315,10 +494,12 @@ export default function AppointmentForm({
     const loadCatalogs = async () => {
       setClientsLoading(true)
       setServicesLoading(true)
+      setProfessionalsLoading(true)
 
-      const [clientsResult, servicesResult] = await Promise.allSettled([
+      const [clientsResult, servicesResult, professionalsResult] = await Promise.allSettled([
         loadAppointmentClients(),
-        loadAppointmentServices()
+        loadAppointmentServices(),
+        loadAppointmentProfessionals()
       ])
 
       if (cancelled) {
@@ -337,8 +518,15 @@ export default function AppointmentForm({
         console.error('Error fetching services:', servicesResult.reason)
       }
 
+      if (professionalsResult.status === 'fulfilled') {
+        setProfessionals(professionalsResult.value)
+      } else {
+        console.error('Error fetching professionals:', professionalsResult.reason)
+      }
+
       setClientsLoading(false)
       setServicesLoading(false)
+      setProfessionalsLoading(false)
     }
 
     void loadCatalogs()
@@ -350,16 +538,17 @@ export default function AppointmentForm({
 
   useEffect(() => {
     if (appointment) {
+      setProfessionalTouched(false)
       const appointmentDate = new Date(appointment.date)
       setGuestMode(!appointment.clientId)
       setFormData({
         clientId: appointment.clientId || '',
         guestName: appointment.guestName || '',
         guestPhone: appointment.guestPhone || '',
-        serviceId: appointment.serviceId || '',
+        serviceIds: getInitialAppointmentServiceIds(appointment),
         userId: appointment.userId || user?.id || '',
         cabin: appointment.cabin || initialCabin,
-        professional: appointment.professional || 'LUCY',
+        professional: appointment.professional || '',
         date: getLocalDateInputValue(appointmentDate),
         status: appointment.status || 'SCHEDULED',
         notes: appointment.notes || '',
@@ -367,9 +556,6 @@ export default function AppointmentForm({
       })
       setStartTimeInput(appointment.startTime || '')
       setEndTimeInput(appointment.endTime || '')
-      if (appointment.service) {
-        setSelectedService(appointment.service)
-      }
       return
     }
 
@@ -377,24 +563,59 @@ export default function AppointmentForm({
       setGuestMode(false)
     }
 
+    setProfessionalTouched(false)
     setFormData((prev) => ({
       ...prev,
       clientId: fromBono?.clientId || prev.clientId,
       guestName: isCreatingFromBono ? '' : prev.guestName,
       guestPhone: isCreatingFromBono ? '' : prev.guestPhone,
-      serviceId: fromBono?.serviceId || prev.serviceId,
+      serviceIds: fromBono?.serviceId ? [fromBono.serviceId] : prev.serviceIds,
       userId: user?.id || prev.userId || '',
       cabin: initialCabin,
-      professional: prev.professional || 'LUCY',
+      professional: prev.professional || '',
       date: preselectedDate ? getLocalDateInputValue(preselectedDate) : prev.date
     }))
     setStartTimeInput(preselectedStartTime || '')
     setEndTimeInput(
-      preselectedStartTime
-        ? minutesToTime(Math.min(timeToMinutes(preselectedStartTime) + TIME_STEP_MINUTES, BUSINESS_END_MINUTES))
-        : ''
+      preselectedEndTime ||
+        (preselectedStartTime
+          ? minutesToTime(
+              Math.min(timeToMinutes(preselectedStartTime) + TIME_STEP_MINUTES, BUSINESS_END_MINUTES)
+            )
+          : '')
     )
-  }, [appointment, preselectedDate, preselectedStartTime, user, initialCabin, fromBono, isCreatingFromBono])
+  }, [
+    appointment,
+    preselectedDate,
+    preselectedStartTime,
+    preselectedEndTime,
+    user,
+    initialCabin,
+    fromBono,
+    isCreatingFromBono
+  ])
+
+  useEffect(() => {
+    if (appointment || professionalTouched || formData.professional.trim()) {
+      return
+    }
+
+    const fallbackProfessional = professionals[0] || ''
+    if (!fallbackProfessional) {
+      return
+    }
+
+    setFormData((prev) => {
+      if (prev.professional.trim()) {
+        return prev
+      }
+
+      return {
+        ...prev,
+        professional: fallbackProfessional
+      }
+    })
+  }, [appointment, formData.professional, professionalTouched, professionals])
 
   useEffect(() => {
     if (!formData.clientId) {
@@ -423,20 +644,40 @@ export default function AppointmentForm({
     }
   }, [formData.clientId])
 
-  useEffect(() => {
-    if (!formData.serviceId) {
-      setSelectedService(null)
-      return
-    }
-
-    const matchedService = services.find((service) => service.id === formData.serviceId) || null
-    setSelectedService(matchedService)
-  }, [formData.serviceId, services])
-
   const selectedClient = useMemo(
     () => clients.find((client) => client.id === formData.clientId) || null,
     [clients, formData.clientId]
   )
+
+  const selectedServices = useMemo<AppointmentServiceCatalogItem[]>(
+    () =>
+      formData.serviceIds
+        .map((serviceId) => services.find((service) => service.id === serviceId) || null)
+        .filter((service): service is AppointmentServiceCatalogItem => Boolean(service)),
+    [formData.serviceIds, services]
+  )
+
+  const totalSelectedServiceDuration = useMemo(
+    () =>
+      selectedServices.reduce(
+        (total, service) => total + Math.max(0, Number(service.duration || 0)),
+        0
+      ),
+    [selectedServices]
+  )
+
+  useEffect(() => {
+    if (formData.serviceIds.length > 0 && selectedServices.length === 0 && servicesLoading) {
+      return
+    }
+
+    if (!normalizedStartTime) {
+      setEndTimeInput('')
+      return
+    }
+
+    setEndTimeInput(getSuggestedEndTime(normalizedStartTime))
+  }, [formData.serviceIds.length, normalizedStartTime, selectedServices.length, servicesLoading, totalSelectedServiceDuration])
 
   const accountBalance = Number(selectedClient?.accountBalance || 0)
 
@@ -487,6 +728,18 @@ export default function AppointmentForm({
     })
   }, [services])
 
+  const professionalOptions = useMemo(() => {
+    const baseProfessionals = professionals.filter((item) => item.trim().length > 0)
+    const mergedProfessionals = formData.professional.trim()
+      ? [...baseProfessionals, formData.professional.trim()]
+      : baseProfessionals
+
+    return [...new Set(mergedProfessionals)].map((professional) => ({
+      value: professional,
+      label: professional
+    }))
+  }, [formData.professional, professionals])
+
   const calculateEndTime = (startTime: string, duration: number) => {
     return minutesToTime(timeToMinutes(startTime) + Math.max(0, Number(duration || 0)))
   }
@@ -499,12 +752,11 @@ export default function AppointmentForm({
   const getSuggestedEndTime = (startTime: string) => {
     if (!startTime) return ''
 
-    if (selectedService?.duration) {
-      return getServiceEndTime(startTime, selectedService.duration)
+    if (totalSelectedServiceDuration > 0) {
+      return getServiceEndTime(startTime, totalSelectedServiceDuration)
     }
 
-    const startMinutes = timeToMinutes(startTime)
-    return minutesToTime(Math.min(startMinutes + TIME_STEP_MINUTES, BUSINESS_END_MINUTES))
+    return ''
   }
 
   const handleStartTimeInputChange = (value: string) => {
@@ -518,23 +770,13 @@ export default function AppointmentForm({
       return
     }
 
-    const nextSuggestedEndTime = selectedService
-      ? getServiceEndTime(nextStartTime, Number(selectedService.duration || 0))
-      : getSuggestedEndTime(nextStartTime)
-
-    if (selectedService || !normalizedEndTime || timeToMinutes(normalizedEndTime) <= timeToMinutes(nextStartTime)) {
-      setEndTimeInput(nextSuggestedEndTime)
-    }
+    setEndTimeInput(getSuggestedEndTime(nextStartTime))
   }
 
   const handleStartTimeBlur = () => {
     if (startTimeState.normalized) {
       setStartTimeInput(startTimeState.normalized)
     }
-  }
-
-  const handleEndTimeInputChange = (value: string) => {
-    setEndTimeInput(value)
   }
 
   const handleEndTimeBlur = () => {
@@ -572,23 +814,27 @@ export default function AppointmentForm({
     }))
   }
 
-  const handleServiceSelect = (serviceId: string) => {
+  const handleServiceAdd = (serviceId: string) => {
     if (lockService) return
-    const service = services.find((item) => item.id === serviceId) || null
-    setSelectedService(service)
-
     setFormData((prev) => ({
       ...prev,
-      serviceId
+      serviceIds: prev.serviceIds.includes(serviceId) ? prev.serviceIds : [...prev.serviceIds, serviceId]
     }))
+  }
 
-    if (service && normalizedStartTime) {
-      setEndTimeInput(getServiceEndTime(normalizedStartTime, Number(service.duration || 0)))
-    }
+  const handleServiceRemove = (serviceId: string) => {
+    if (lockService) return
+    setFormData((prev) => ({
+      ...prev,
+      serviceIds: prev.serviceIds.filter((currentId) => currentId !== serviceId)
+    }))
   }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target
+    if (name === 'professional') {
+      setProfessionalTouched(true)
+    }
     setFormData((prev) => ({
       ...prev,
       [name]: type === 'checkbox' ? (e.target as HTMLInputElement).checked : value
@@ -630,8 +876,14 @@ export default function AppointmentForm({
         return
       }
 
-      if (!formData.serviceId) {
-        toast.error('Debe seleccionar un servicio')
+      if (formData.serviceIds.length === 0) {
+        toast.error('Debe seleccionar al menos un servicio')
+        setLoading(false)
+        return
+      }
+
+      if (totalSelectedServiceDuration <= 0) {
+        toast.error('Los servicios seleccionados no tienen una duracion valida')
         setLoading(false)
         return
       }
@@ -692,7 +944,8 @@ export default function AppointmentForm({
         clientId: guestMode ? null : formData.clientId,
         guestName: guestMode ? normalizedGuestName : null,
         guestPhone: guestMode ? normalizedGuestPhone : null,
-        serviceId: formData.serviceId,
+        serviceId: formData.serviceIds[0],
+        serviceIds: formData.serviceIds,
         userId: formData.userId || user?.id,
         cabin: formData.cabin,
         professional: formData.professional,
@@ -712,6 +965,7 @@ export default function AppointmentForm({
         const bonoPayload = {
           userId: dataToSend.userId,
           serviceId: dataToSend.serviceId,
+          serviceIds: dataToSend.serviceIds,
           cabin: dataToSend.cabin,
           professional: dataToSend.professional,
           date: dataToSend.date,
@@ -827,13 +1081,14 @@ export default function AppointmentForm({
 
           <div>
             <label className="label">
-              Servicio <span className="text-red-500">*</span>
+              Servicios <span className="text-red-500">*</span>
             </label>
-            <SearchableSelect
-              value={formData.serviceId}
+            <SearchableMultiSelect
+              selectedIds={formData.serviceIds}
               options={serviceOptions}
-              onSelect={handleServiceSelect}
-              placeholder="Buscar servicio por nombre o categoria..."
+              onAdd={handleServiceAdd}
+              onRemove={handleServiceRemove}
+              placeholder="Buscar y anadir servicios por nombre o categoria..."
               emptyText="No se encontraron servicios"
               loading={servicesLoading}
               loadingText="Cargando servicios..."
@@ -843,6 +1098,18 @@ export default function AppointmentForm({
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 Servicio fijado por el bono seleccionado.
               </p>
+            )}
+            {selectedServices.length > 0 && (
+              <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50/80 p-3 text-sm dark:border-gray-700 dark:bg-gray-800/50">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-medium text-gray-900 dark:text-white">
+                    {selectedServices.length === 1 ? '1 servicio seleccionado' : `${selectedServices.length} servicios seleccionados`}
+                  </span>
+                  <span className="text-gray-600 dark:text-gray-300">
+                    Duracion total: {totalSelectedServiceDuration} min
+                  </span>
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -928,13 +1195,30 @@ export default function AppointmentForm({
             </label>
             <TimeInput
               value={endTimeInput}
-              onChange={handleEndTimeInputChange}
+              onChange={() => {}}
               onBlur={handleEndTimeBlur}
               placeholder="08:15"
+              readOnly
+              disabled={!normalizedStartTime || formData.serviceIds.length === 0}
             />
             {endTimeState.error && (
               <p className="mt-1 text-sm text-red-600 dark:text-red-400">
                 {endTimeState.error}
+              </p>
+            )}
+            {!normalizedStartTime && (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Se calculara automaticamente al indicar la hora de inicio.
+              </p>
+            )}
+            {normalizedStartTime && formData.serviceIds.length === 0 && (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Se calcula automaticamente al seleccionar los servicios.
+              </p>
+            )}
+            {normalizedStartTime && totalSelectedServiceDuration > 0 && normalizedEndTime && (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Fin calculado con la suma de todos los servicios.
               </p>
             )}
           </div>
@@ -968,9 +1252,9 @@ export default function AppointmentForm({
           }
           return null
         })()}
-        {selectedService?.duration && normalizedStartTime && !normalizedEndTime && (
+        {totalSelectedServiceDuration > 0 && normalizedStartTime && !normalizedEndTime && (
           <p className="mt-2 text-sm text-red-600 dark:text-red-400">
-            La duracion del servicio supera el horario de cierre. Elige una hora de inicio anterior.
+            La duracion total de los servicios supera el horario de cierre. Elige una hora de inicio anterior.
           </p>
         )}
       </div>
@@ -983,12 +1267,17 @@ export default function AppointmentForm({
           onChange={handleChange}
           className="input"
           required
+          disabled={professionalsLoading && professionalOptions.length === 0}
         >
-          {professionalOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
+          {professionalOptions.length === 0 ? (
+            <option value="">{professionalsLoading ? 'Cargando profesionales...' : 'Sin profesionales activos'}</option>
+          ) : (
+            professionalOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))
+          )}
         </select>
       </div>
 

@@ -1,10 +1,12 @@
 import type { Workbook, Worksheet } from 'exceljs'
 
 export const XLSX_FILE_ACCEPT = '.xlsx'
+export const LEGACY_SPREADSHEET_FILE_ACCEPT = '.xls,.xlsx'
 export const XLSX_MIME_TYPE =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
 const XLSX_FILE_PATTERN = /\.xlsx$/i
+const LEGACY_SPREADSHEET_FILE_PATTERN = /\.(xls|xlsx)$/i
 
 const getExcelColumnName = (columnNumber: number): string => {
   let current = columnNumber
@@ -31,10 +33,18 @@ const downloadBlob = (fileName: string, blob: Blob) => {
 }
 
 export const isSupportedSpreadsheetFile = (file: File) => XLSX_FILE_PATTERN.test(file.name)
+export const isSupportedLegacySpreadsheetFile = (file: File) =>
+  LEGACY_SPREADSHEET_FILE_PATTERN.test(file.name)
 
 export const assertSupportedSpreadsheetFile = (file: File) => {
   if (!isSupportedSpreadsheetFile(file)) {
     throw new Error('Por favor selecciona un archivo Excel valido (.xlsx)')
+  }
+}
+
+export const assertSupportedLegacySpreadsheetFile = (file: File) => {
+  if (!isSupportedLegacySpreadsheetFile(file)) {
+    throw new Error('Por favor selecciona un archivo Excel valido (.xls o .xlsx)')
   }
 }
 

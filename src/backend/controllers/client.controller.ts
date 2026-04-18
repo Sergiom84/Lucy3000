@@ -1,7 +1,9 @@
 import { Request, Response } from 'express'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../db'
+import type { AuthRequest } from '../middleware/auth.middleware'
 import { loadWorkbookFromBuffer, worksheetToObjects } from '../utils/spreadsheet'
+import { notifyAdminsAboutResourceCreation } from '../utils/notifications'
 
 const buildSearchTerms = (value: string) =>
   value
@@ -414,7 +416,7 @@ export const getClientById = async (req: Request, res: Response) => {
   }
 }
 
-export const createClient = async (req: Request, res: Response) => {
+export const createClient = async (req: AuthRequest, res: Response) => {
   try {
     const data = normalizeClientPayload(req.body)
 
@@ -437,6 +439,7 @@ export const createClient = async (req: Request, res: Response) => {
     })
 
     await syncDebtNotification(client)
+    await notifyAdminsAboutResourceCreation(req.user, 'client', 1)
 
     res.status(201).json(client)
   } catch (error) {
@@ -766,7 +769,87 @@ const addClientReferenceToLookup = (
   addValue(fullName)
 }
 
-export const importClientsFromExcel = async (req: Request, res: Response) => {
+type ExistingClientIdentity = {
+  id: string
+  externalCode?: string | null
+  dni?: string | null
+  email?: string | null
+  phone?: string | null
+  mobilePhone?: string | null
+  landlinePhone?: string | null
+  firstName?: string | null
+  lastName?: string | null
+}
+
+const buildIdentityLookupKey = (prefix: string, value: unknown) => {
+  const normalized = normalizeColumnKey(String(value || '').trim())
+  return normalized ? `${prefix}:${normalized}` : null
+}
+
+const buildCompositeIdentityLookupKey = (prefix: string, left: unknown, right: unknown) => {
+  const normalizedLeft = normalizeColumnKey(String(left || '').trim())
+  const normalizedRight = normalizeColumnKey(String(right || '').trim())
+
+  if (!normalizedLeft || !normalizedRight) return null
+
+  return `${prefix}:${normalizedLeft}:${normalizedRight}`
+}
+
+const addClientIdentityToLookup = (lookup: Map<string, string>, client: ExistingClientIdentity) => {
+  const addValue = (prefix: string, value: unknown) => {
+    const key = buildIdentityLookupKey(prefix, value)
+    if (!key || lookup.has(key)) return
+    lookup.set(key, client.id)
+  }
+
+  const fullName = `${client.firstName || ''} ${client.lastName || ''}`.trim()
+  const addFullNameWithContact = (contact: unknown) => {
+    const key = buildCompositeIdentityLookupKey('fullNamePhone', fullName, contact)
+    if (!key || lookup.has(key)) return
+    lookup.set(key, client.id)
+  }
+
+  addValue('externalCode', client.externalCode)
+  addValue('dni', client.dni)
+  addValue('email', client.email)
+  addFullNameWithContact(client.phone)
+  addFullNameWithContact(client.mobilePhone)
+  addFullNameWithContact(client.landlinePhone)
+}
+
+const findExistingClientIdForImport = (
+  lookup: Map<string, string>,
+  candidate: {
+    externalCode?: string | null
+    dni?: string | null
+    email?: string | null
+    firstName?: string | null
+    lastName?: string | null
+    phone?: string | null
+    mobilePhone?: string | null
+    landlinePhone?: string | null
+  }
+) => {
+  const fullName = `${candidate.firstName || ''} ${candidate.lastName || ''}`.trim()
+  const orderedKeys = [
+    buildIdentityLookupKey('externalCode', candidate.externalCode),
+    buildIdentityLookupKey('dni', candidate.dni),
+    buildIdentityLookupKey('email', candidate.email),
+    buildCompositeIdentityLookupKey('fullNamePhone', fullName, candidate.phone),
+    buildCompositeIdentityLookupKey('fullNamePhone', fullName, candidate.mobilePhone),
+    buildCompositeIdentityLookupKey('fullNamePhone', fullName, candidate.landlinePhone)
+  ]
+
+  for (const key of orderedKeys) {
+    if (!key) continue
+    const existingId = lookup.get(key)
+    if (existingId) return existingId
+  }
+
+  return null
+}
+
+export const importClientsFromExcel = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' })
@@ -787,14 +870,15 @@ export const importClientsFromExcel = async (req: Request, res: Response) => {
       skipped: 0
     }
 
-    const seenEmails = new Set<string>()
     const linkedClientLookup = new Map<string, string>()
+    const identityLookup = new Map<string, string>()
     const pendingLinks: Array<{ clientId: string; reference: string }> = []
 
     const existingClients = await prisma.client.findMany({
       select: {
         id: true,
         externalCode: true,
+        dni: true,
         email: true,
         phone: true,
         mobilePhone: true,
@@ -806,6 +890,7 @@ export const importClientsFromExcel = async (req: Request, res: Response) => {
 
     for (const client of existingClients) {
       addClientReferenceToLookup(linkedClientLookup, client)
+      addClientIdentityToLookup(identityLookup, client)
     }
 
     for (let i = 0; i < data.length; i++) {
@@ -839,11 +924,24 @@ export const importClientsFromExcel = async (req: Request, res: Response) => {
         let emailRaw = textOrNull(getRowValue(row, ['Email', 'eMail', 'Correo electrónico', 'correo', 'mail']))
         let email: string | null = null
         if (emailRaw && emailRaw.includes('@') && emailRaw.includes('.')) {
-          const normalized = emailRaw.toLowerCase()
-          if (!seenEmails.has(normalized)) {
-            seenEmails.add(normalized)
-            email = normalized
-          }
+          email = emailRaw.toLowerCase()
+        }
+
+        const dni = textOrNull(getRowValue(row, ['DNI', 'dni']))
+        const existingClientId = findExistingClientIdForImport(identityLookup, {
+          externalCode,
+          dni,
+          email,
+          firstName,
+          lastName,
+          phone,
+          mobilePhone,
+          landlinePhone
+        })
+
+        if (existingClientId) {
+          results.skipped++
+          continue
         }
 
         const billedRaw = getRowValue(row, ['Importe facturado', 'billedAmount', 'Total facturado'])
@@ -860,7 +958,7 @@ export const importClientsFromExcel = async (req: Request, res: Response) => {
 
         const clientPayload = normalizeClientPayload({
           externalCode,
-          dni: getRowValue(row, ['DNI', 'dni']),
+          dni,
           firstName,
           lastName,
           email,
@@ -919,6 +1017,7 @@ export const importClientsFromExcel = async (req: Request, res: Response) => {
         })
 
         addClientReferenceToLookup(linkedClientLookup, createdClient)
+        addClientIdentityToLookup(identityLookup, createdClient)
 
         if (linkedClientReference) {
           pendingLinks.push({
@@ -943,6 +1042,8 @@ export const importClientsFromExcel = async (req: Request, res: Response) => {
         data: { linkedClientId }
       })
     }
+
+    await notifyAdminsAboutResourceCreation(req.user, 'client', results.success)
 
     res.json({ message: 'Import completed', results })
   } catch (error) {

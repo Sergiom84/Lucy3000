@@ -56,7 +56,7 @@ async function setup() {
     // App Configuration
     console.log('\n📱 CONFIGURACIÓN DE LA APLICACIÓN\n');
     const appName = await question('   Nombre de la aplicación (default: Lucy3000 Accounting): ') || 'Lucy3000 Accounting';
-    const appVersion = await question('   Versión (default: 1.0.0): ') || '1.0.0';
+    const appVersion = await question('   Versión (default: 2.0.0): ') || '2.0.0';
 
     // Crear archivo .env
     const envContent = `# Supabase Configuration

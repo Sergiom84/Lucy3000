@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Save, X } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
+import { invalidateAppointmentServicesCache } from '../utils/appointmentCatalogs'
 
 interface ServiceFormProps {
   service?: any
@@ -100,9 +101,11 @@ export default function ServiceForm({ service, onSuccess, onCancel }: ServiceFor
 
       if (service) {
         await api.put(`/services/${service.id}`, dataToSend)
+        invalidateAppointmentServicesCache()
         toast.success('Tratamiento actualizado')
       } else {
         await api.post('/services', dataToSend)
+        invalidateAppointmentServicesCache()
         toast.success('Tratamiento creado')
       }
 

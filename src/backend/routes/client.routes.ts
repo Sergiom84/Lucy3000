@@ -10,7 +10,7 @@ import {
   getBirthdaysThisMonth,
   importClientsFromExcel
 } from '../controllers/client.controller'
-import { authMiddleware } from '../middleware/auth.middleware'
+import { adminMiddleware, authMiddleware } from '../middleware/auth.middleware'
 import { spreadsheetUpload, validateSpreadsheetUpload } from '../middleware/upload.middleware'
 import { validateRequest } from '../middleware/validation.middleware'
 import {
@@ -29,7 +29,13 @@ router.get('/', validateRequest({ query: clientsQuerySchema }), getClients)
 router.get('/birthdays', getBirthdaysThisMonth)
 router.get('/:id', validateRequest({ params: clientIdParamSchema }), getClientById)
 router.post('/', validateRequest({ body: createClientBodySchema }), createClient)
-router.post('/import', spreadsheetUpload.single('file'), validateSpreadsheetUpload(), importClientsFromExcel)
+router.post(
+  '/import',
+  adminMiddleware,
+  spreadsheetUpload.single('file'),
+  validateSpreadsheetUpload(),
+  importClientsFromExcel
+)
 router.put('/:id', validateRequest({ params: clientIdParamSchema, body: updateClientBodySchema }), updateClient)
 router.delete('/:id', validateRequest({ params: clientIdParamSchema }), deleteClient)
 router.get('/:id/history', validateRequest({ params: clientIdParamSchema }), getClientHistory)

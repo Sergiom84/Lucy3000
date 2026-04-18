@@ -1,7 +1,9 @@
 import { Request, Response } from 'express'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../db'
+import type { AuthRequest } from '../middleware/auth.middleware'
 import { loadWorkbookFromBuffer, worksheetToObjects } from '../utils/spreadsheet'
+import { notifyAdminsAboutResourceCreation } from '../utils/notifications'
 
 const buildSearchTerms = (value: string) =>
   value
@@ -123,7 +125,7 @@ export const getServiceById = async (req: Request, res: Response) => {
   }
 }
 
-export const createService = async (req: Request, res: Response) => {
+export const createService = async (req: AuthRequest, res: Response) => {
   try {
     const data = normalizeServicePayload(req.body)
 
@@ -142,6 +144,8 @@ export const createService = async (req: Request, res: Response) => {
     const service = await prisma.service.create({
       data: data as Prisma.ServiceCreateInput
     })
+
+    await notifyAdminsAboutResourceCreation(req.user, 'service', 1)
 
     res.status(201).json(service)
   } catch (error) {
@@ -209,6 +213,67 @@ const parseImportDuration = (val: unknown): number => {
   return isNaN(num) || num <= 0 ? 30 : num
 }
 
+type ExistingServiceImportRecord = {
+  id: string
+  name: string
+  category: string
+  serviceCode?: string | null
+}
+
+const normalizeServiceImportValue = (value: unknown) =>
+  String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ')
+
+const buildServiceCodeLookupKey = (value: unknown) => {
+  const normalized = normalizeServiceImportValue(value).replace(/\s+/g, '')
+  return normalized ? `code:${normalized}` : null
+}
+
+const buildServiceNameCategoryLookupKey = (name: unknown, category: unknown) => {
+  const normalizedName = normalizeServiceImportValue(name)
+  const normalizedCategory = normalizeServiceImportValue(category)
+  if (!normalizedName || !normalizedCategory) return null
+  return `name:${normalizedName}|category:${normalizedCategory}`
+}
+
+const addServiceToLookup = (
+  lookup: Map<string, ExistingServiceImportRecord>,
+  service: ExistingServiceImportRecord
+) => {
+  const codeKey = buildServiceCodeLookupKey(service.serviceCode)
+  if (codeKey) {
+    lookup.set(codeKey, service)
+  }
+
+  const nameCategoryKey = buildServiceNameCategoryLookupKey(service.name, service.category)
+  if (nameCategoryKey) {
+    lookup.set(nameCategoryKey, service)
+  }
+}
+
+const findExistingServiceForImport = (
+  lookup: Map<string, ExistingServiceImportRecord>,
+  serviceCode: string,
+  name: string,
+  category: string
+) => {
+  const codeKey = buildServiceCodeLookupKey(serviceCode)
+  if (codeKey && lookup.has(codeKey)) {
+    return lookup.get(codeKey) || null
+  }
+
+  const nameCategoryKey = buildServiceNameCategoryLookupKey(name, category)
+  if (nameCategoryKey && lookup.has(nameCategoryKey)) {
+    return lookup.get(nameCategoryKey) || null
+  }
+
+  return null
+}
+
 const normalizeImportKey = (value: string) =>
   value
     .normalize('NFD')
@@ -241,7 +306,7 @@ const getImportRowValue = (row: Record<string, unknown>, aliases: string[]) => {
   return null
 }
 
-export const importServicesFromExcel = async (req: Request, res: Response) => {
+export const importServicesFromExcel = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' })
@@ -258,11 +323,24 @@ export const importServicesFromExcel = async (req: Request, res: Response) => {
 
     const results = {
       success: 0,
+      created: 0,
+      updated: 0,
       errors: [] as { row: number; error: string }[],
       skipped: 0
     }
 
     let currentCategory = 'Sin categoria'
+    const existingServices = await prisma.service.findMany({
+      select: {
+        id: true,
+        name: true,
+        category: true,
+        serviceCode: true
+      }
+    })
+    const serviceLookup = new Map<string, ExistingServiceImportRecord>()
+    existingServices.forEach((service) => addServiceToLookup(serviceLookup, service))
+    const processedServiceIds = new Set<string>()
 
     for (let i = 0; i < data.length; i++) {
       const row = buildNormalizedImportRow(data[i] || {})
@@ -285,8 +363,9 @@ export const importServicesFromExcel = async (req: Request, res: Response) => {
         }
 
         // Skip header-like rows
-        if (!code || !desc) continue
+        if (!code && !desc) continue
         if (String(tarifaRaw).trim() === 'Tarifa 1' || String(tarifaRaw).trim() === 'Tarifa') continue
+        if (!desc) continue
 
         const explicitCategory = String(categoryRaw ?? '').trim()
         const price = parseImportDecimal(tarifaRaw)
@@ -298,44 +377,62 @@ export const importServicesFromExcel = async (req: Request, res: Response) => {
           throw new Error(`Tarifa inválida o ausente: ${String(tarifaRaw ?? '').trim() || '(vacío)'}`)
         }
 
-        const serviceData = {
+        const baseServiceData = {
           name: desc,
-          description: code ? `Codigo: ${code}` : null,
           price,
           duration,
           category,
-          serviceCode: code || null,
           taxRate,
           isActive: true
         }
 
-        const matchingServices = await prisma.service.findMany({
-          where: code
-            ? {
-                OR: [
-                  { serviceCode: code },
-                  { name: desc, category }
-                ]
-              }
-            : {
-                name: desc,
-                category
-              }
-        })
+        const existingService = findExistingServiceForImport(serviceLookup, code, desc, category)
 
-        if (matchingServices.length > 0) {
-          await Promise.all(
-            matchingServices.map((service) =>
-              prisma.service.update({
-                where: { id: service.id },
-                data: serviceData
-              })
-            )
-          )
-        } else {
-          await prisma.service.create({
-            data: serviceData
+        if (existingService && processedServiceIds.has(existingService.id)) {
+          results.skipped += 1
+          continue
+        }
+
+        if (existingService) {
+          await prisma.service.update({
+            where: { id: existingService.id },
+            data: {
+              ...baseServiceData,
+              ...(code
+                ? {
+                    serviceCode: code,
+                    description: `Codigo: ${code}`
+                  }
+                : {})
+            }
           })
+
+          const refreshedService: ExistingServiceImportRecord = {
+            ...existingService,
+            name: desc,
+            category,
+            serviceCode: code || existingService.serviceCode || null
+          }
+          addServiceToLookup(serviceLookup, refreshedService)
+          processedServiceIds.add(existingService.id)
+          results.updated += 1
+        } else {
+          const createdService = await prisma.service.create({
+            data: {
+              ...baseServiceData,
+              serviceCode: code || null,
+              description: code ? `Codigo: ${code}` : null
+            }
+          })
+
+          addServiceToLookup(serviceLookup, {
+            id: createdService.id,
+            name: desc,
+            category,
+            serviceCode: code || null
+          })
+          processedServiceIds.add(createdService.id)
+          results.created += 1
         }
 
         results.success++
@@ -347,6 +444,8 @@ export const importServicesFromExcel = async (req: Request, res: Response) => {
         results.skipped++
       }
     }
+
+    await notifyAdminsAboutResourceCreation(req.user, 'service', results.created)
 
     res.json({ message: 'Import completed', results })
   } catch (error) {

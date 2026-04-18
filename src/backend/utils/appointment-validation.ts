@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client'
+import { normalizeProfessionalName } from './professional-catalog'
 
 export const ACTIVE_APPOINTMENT_STATUSES = ['SCHEDULED', 'CONFIRMED', 'IN_PROGRESS'] as const
 
@@ -28,6 +29,8 @@ interface AppointmentSlotInput {
   professional: string
   cabin: string
   excludeAppointmentId?: string
+  excludeAgendaBlockId?: string
+  allowPastDate?: boolean
 }
 
 interface ValidationIssue {
@@ -58,9 +61,19 @@ const endOfDay = (value: Date) => {
 }
 
 const formatProfessionalLabel = (professional: string) =>
-  PROFESSIONAL_LABELS[professional] || professional
+  PROFESSIONAL_LABELS[professional] || normalizeProfessionalName(professional) || professional
 
 const formatCabinLabel = (cabin: string) => CABIN_LABELS[cabin] || cabin
+
+const buildProfessionalVariants = (professional: string) => {
+  const variants = new Set([
+    String(professional || '').trim(),
+    normalizeProfessionalName(professional),
+    String(professional || '').trim().toLocaleUpperCase('es-ES')
+  ])
+
+  return [...variants].filter(Boolean)
+}
 
 export const isActiveAppointmentStatus = (status: string | null | undefined) =>
   ACTIVE_APPOINTMENT_STATUSES.includes(
@@ -74,7 +87,16 @@ export async function validateAppointmentSlot(
   const errors: ValidationIssue[] = []
   const warnings: ValidationIssue[] = []
 
-  const { date, startTime, endTime, professional, cabin, excludeAppointmentId } = input
+  const {
+    date,
+    startTime,
+    endTime,
+    professional,
+    cabin,
+    excludeAppointmentId,
+    excludeAgendaBlockId,
+    allowPastDate
+  } = input
   const startMinutes = timeToMinutes(startTime)
   const endMinutes = timeToMinutes(endTime)
 
@@ -97,18 +119,20 @@ export async function validateAppointmentSlot(
   const appointmentDate = startOfDay(date)
   const today = startOfDay(now)
 
-  if (appointmentDate < today) {
-    errors.push({
-      code: 'PAST_DATETIME',
-      message: 'No se puede crear una cita en el pasado'
-    })
-  } else if (appointmentDate.getTime() === today.getTime()) {
-    const nowMinutes = now.getHours() * 60 + now.getMinutes()
-    if (startMinutes < nowMinutes) {
+  if (!allowPastDate) {
+    if (appointmentDate < today) {
       errors.push({
         code: 'PAST_DATETIME',
         message: 'No se puede crear una cita en el pasado'
       })
+    } else if (appointmentDate.getTime() === today.getTime()) {
+      const nowMinutes = now.getHours() * 60 + now.getMinutes()
+      if (startMinutes < nowMinutes) {
+        errors.push({
+          code: 'PAST_DATETIME',
+          message: 'No se puede crear una cita en el pasado'
+        })
+      }
     }
   }
 
@@ -134,13 +158,40 @@ export async function validateAppointmentSlot(
     ...(excludeAppointmentId ? { id: { not: excludeAppointmentId } } : {})
   }
 
-  const [professionalConflicts, cabinConflicts] = await Promise.all([
+  const [professionalConflicts, cabinConflicts, professionalBlockConflicts, cabinBlockConflicts] = await Promise.all([
     prisma.appointment.findMany({
-      where: { ...baseWhere, professional },
+      where: {
+        ...baseWhere,
+        professional: {
+          in: buildProfessionalVariants(professional)
+        }
+      },
       select: { startTime: true, endTime: true }
     }),
     prisma.appointment.findMany({
       where: { ...baseWhere, cabin },
+      select: { startTime: true, endTime: true }
+    }),
+    prisma.agendaBlock.findMany({
+      where: {
+        date: { gte: slotStart, lte: slotEnd },
+        professional: {
+          in: buildProfessionalVariants(professional)
+        },
+        startTime: { lt: endTime },
+        endTime: { gt: startTime },
+        ...(excludeAgendaBlockId ? { id: { not: excludeAgendaBlockId } } : {})
+      },
+      select: { startTime: true, endTime: true }
+    }),
+    prisma.agendaBlock.findMany({
+      where: {
+        date: { gte: slotStart, lte: slotEnd },
+        cabin,
+        startTime: { lt: endTime },
+        endTime: { gt: startTime },
+        ...(excludeAgendaBlockId ? { id: { not: excludeAgendaBlockId } } : {})
+      },
       select: { startTime: true, endTime: true }
     })
   ])
@@ -156,6 +207,20 @@ export async function validateAppointmentSlot(
     errors.push({
       code: 'CABIN_CONFLICT',
       message: `La cabina ${formatCabinLabel(cabin)} ya esta ocupada de ${conflict.startTime} a ${conflict.endTime}`
+    })
+  }
+
+  for (const conflict of professionalBlockConflicts) {
+    errors.push({
+      code: 'PROFESSIONAL_CONFLICT',
+      message: `${formatProfessionalLabel(professional)} tiene un bloqueo de ${conflict.startTime} a ${conflict.endTime}`
+    })
+  }
+
+  for (const conflict of cabinBlockConflicts) {
+    errors.push({
+      code: 'CABIN_CONFLICT',
+      message: `La cabina ${formatCabinLabel(cabin)} tiene un bloqueo de ${conflict.startTime} a ${conflict.endTime}`
     })
   }
 

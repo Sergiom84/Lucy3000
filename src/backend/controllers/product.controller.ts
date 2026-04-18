@@ -1,6 +1,8 @@
 import { Request, Response } from 'express'
 import { prisma } from '../db'
+import type { AuthRequest } from '../middleware/auth.middleware'
 import { loadWorkbookFromBuffer, worksheetToObjects } from '../utils/spreadsheet'
+import { notifyAdminsAboutResourceCreation } from '../utils/notifications'
 
 const buildSearchTerms = (value: string) =>
   value
@@ -20,6 +22,11 @@ const parseIntegerValue = (value: unknown): number => {
   if (value === null || value === undefined || String(value).trim() === '') return 0
   const parsed = Number.parseInt(String(value).trim(), 10)
   return Number.isFinite(parsed) ? parsed : 0
+}
+
+type ExistingProductImportRecord = {
+  id: string
+  sku: string
 }
 
 export const getProducts = async (req: Request, res: Response) => {
@@ -88,13 +95,15 @@ export const getProductById = async (req: Request, res: Response) => {
   }
 }
 
-export const createProduct = async (req: Request, res: Response) => {
+export const createProduct = async (req: AuthRequest, res: Response) => {
   try {
     const data = req.body
 
     const product = await prisma.product.create({
       data
     })
+
+    await notifyAdminsAboutResourceCreation(req.user, 'product', 1)
 
     res.status(201).json(product)
   } catch (error) {
@@ -261,7 +270,7 @@ export const addStockMovement = async (req: Request, res: Response) => {
   }
 }
 
-export const importProductsFromExcel = async (req: Request, res: Response) => {
+export const importProductsFromExcel = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' })
@@ -278,9 +287,22 @@ export const importProductsFromExcel = async (req: Request, res: Response) => {
 
     const results = {
       success: 0,
+      created: 0,
+      updated: 0,
       errors: [] as any[],
       skipped: 0
     }
+    const existingProducts = await prisma.product.findMany({
+      select: {
+        id: true,
+        sku: true
+      }
+    })
+    const productsBySku = new Map<string, ExistingProductImportRecord>()
+    existingProducts.forEach((product) => {
+      productsBySku.set(product.sku, product)
+    })
+    const processedSkus = new Set<string>()
 
     // Procesar cada fila
     for (let i = 0; i < data.length; i++) {
@@ -289,10 +311,11 @@ export const importProductsFromExcel = async (req: Request, res: Response) => {
       try {
         const legacyId = row.ID ?? row.id ?? row.sku ?? row.SKU
         const brand = row.Marca ?? row.marca ?? null
-        const family = row.Familia ?? row.familia ?? row.categoria
-        const productDescription = row['Descripción'] ?? row.descripcion ?? row.nombre
-        const quantityRaw = row.Cantidad ?? row.cantidad ?? row.stock
-        const pvpRaw = row.PVP ?? row.pvp ?? row.precio
+        const family = row.Familia ?? row.familia ?? row.Categoria ?? row.categoria
+        const productDescription =
+          row['Descripción'] ?? row.Descripcion ?? row.descripcion ?? row.Nombre ?? row.nombre
+        const quantityRaw = row.Cantidad ?? row.cantidad ?? row.Stock ?? row.stock
+        const pvpRaw = row.PVP ?? row.pvp ?? row.Precio ?? row.precio
 
         if (
           legacyId === null || legacyId === undefined || String(legacyId).trim() === '' ||
@@ -321,39 +344,56 @@ export const importProductsFromExcel = async (req: Request, res: Response) => {
           continue
         }
 
-        // Verificar si el SKU ya existe
-        const existingProduct = await prisma.product.findFirst({
-          where: { sku }
-        })
-
-        if (existingProduct) {
-          results.errors.push({
-            row: i + 2,
-            error: `ID ${sku} ya existe`
-          })
+        if (processedSkus.has(sku)) {
           results.skipped++
           continue
         }
 
-        // Crear producto
-        await prisma.product.create({
-          data: {
-            name: String(productDescription).trim(),
-            description: null,
-            sku,
-            barcode: null,
-            category: String(family).trim(),
-            brand: brand === null || brand === undefined || String(brand).trim() === '' ? null : String(brand).trim(),
-            price,
-            cost: price,
-            stock,
-            minStock: 1,
-            maxStock: null,
-            unit: 'unidad',
-            isActive: true
-          }
-        })
+        const normalizedBrand =
+          brand === null || brand === undefined || String(brand).trim() === '' ? null : String(brand).trim()
+        const normalizedName = String(productDescription).trim()
+        const normalizedCategory = String(family).trim()
+        const existingProduct = productsBySku.get(sku)
 
+        if (existingProduct) {
+          await prisma.product.update({
+            where: { id: existingProduct.id },
+            data: {
+              name: normalizedName,
+              category: normalizedCategory,
+              price,
+              stock,
+              isActive: true,
+              ...(normalizedBrand ? { brand: normalizedBrand } : {})
+            }
+          })
+          results.updated++
+        } else {
+          const createdProduct = await prisma.product.create({
+            data: {
+              name: normalizedName,
+              description: null,
+              sku,
+              barcode: null,
+              category: normalizedCategory,
+              brand: normalizedBrand,
+              price,
+              cost: price,
+              stock,
+              minStock: 1,
+              maxStock: null,
+              unit: 'unidad',
+              isActive: true
+            }
+          })
+          productsBySku.set(sku, {
+            id: createdProduct.id,
+            sku: createdProduct.sku
+          })
+          results.created++
+        }
+
+        processedSkus.add(sku)
         results.success++
       } catch (error: any) {
         results.errors.push({
@@ -363,6 +403,8 @@ export const importProductsFromExcel = async (req: Request, res: Response) => {
         results.skipped++
       }
     }
+
+    await notifyAdminsAboutResourceCreation(req.user, 'product', results.created)
 
     res.json({
       message: 'Import completed',

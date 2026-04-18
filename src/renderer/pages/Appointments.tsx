@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Calendar as BigCalendar, momentLocalizer, View } from 'react-big-calendar'
+import { Calendar as BigCalendar, View } from 'react-big-calendar'
 import moment from 'moment'
-import 'moment/locale/es'
 import 'react-big-calendar/lib/css/react-big-calendar.css'
 import { ChevronLeft, ChevronRight, CreditCard, UserX } from 'lucide-react'
 import api from '../utils/api'
@@ -18,31 +17,29 @@ import {
   BUSINESS_START_MINUTES,
   getTimeInputValueFromDate
 } from '../utils/appointmentTime'
+import { exportAppointmentsWorkbook } from '../utils/exports'
+import { useAuthStore } from '../stores/authStore'
 import { paymentMethodLabel } from '../utils/tickets'
 import toast from 'react-hot-toast'
+import AgendaDayNotesPanel from '../components/AgendaDayNotesPanel'
 import Modal from '../components/Modal'
 import AppointmentLegendModal from '../components/AppointmentLegendModal'
 import AppointmentForm from '../components/AppointmentForm'
 import { getAppointmentDisplayName } from '../../shared/customerDisplay'
+import { getAppointmentPrimaryService, getAppointmentServiceLabel } from '../utils/appointmentServices'
+import {
+  calendarCulture,
+  calendarFormats,
+  calendarLocalizer,
+  calendarMessages,
+  calendarWeekDays,
+  endOfCalendarWeek,
+  formatCalendarText,
+  startOfCalendarWeek
+} from '../utils/calendarLocale'
 
-moment.locale('es')
-const localizer = momentLocalizer(moment)
-
-const messages = {
-  allDay: 'Todo el día',
-  previous: 'Anterior',
-  next: 'Siguiente',
-  today: 'Hoy',
-  month: 'Mes',
-  week: 'Semana',
-  day: 'Día',
-  agenda: 'Agenda',
-  date: 'Fecha',
-  time: 'Hora',
-  event: 'Cita',
-  noEventsInRange: 'No hay citas en este rango',
-  showMore: (total: number) => `+ Ver más (${total})`
-}
+const ImportAppointmentsModal = lazy(() => import('../components/ImportAppointmentsModal'))
+const AgendaBlockForm = lazy(() => import('../components/AgendaBlockForm'))
 
 const cabinResources = [
   { resourceId: 'LUCY', resourceTitle: 'Lucy' },
@@ -66,10 +63,39 @@ const cabinLabels: Record<string, string> = {
   CABINA_2: 'Cabina 2'
 }
 
-function AppointmentEvent({ event }: { event: any }) {
+const formatProfessionalLabel = (professional: string | null | undefined) =>
+  professionalLabels[String(professional || '')] || String(professional || '')
+
+const getSelectionTimeValue = (value: Date) => {
+  return getTimeInputValueFromDate(value)
+}
+
+function CalendarEvent({ event }: { event: any }) {
+  if (event.kind === 'agenda-block') {
+    const agendaBlock = event.agendaBlock
+    const timeRange = `${agendaBlock.startTime} - ${agendaBlock.endTime}`
+    const tooltip = [
+      'Bloqueo de agenda',
+      `Profesional: ${formatProfessionalLabel(agendaBlock.professional)}`,
+      timeRange,
+      `Cabina: ${cabinLabels[agendaBlock.cabin] || agendaBlock.cabin}`,
+      agendaBlock.notes ? `Observaciones: ${agendaBlock.notes}` : null
+    ]
+      .filter(Boolean)
+      .join('\n')
+
+    return (
+      <div className="leading-tight overflow-hidden" title={tooltip}>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] truncate">Bloqueo</p>
+        <p className="text-[11px] truncate">{formatProfessionalLabel(agendaBlock.professional)}</p>
+        <p className="text-[10px] opacity-80">{timeRange}</p>
+      </div>
+    )
+  }
+
   const { appointment } = event
   const clientName = getAppointmentDisplayName(appointment)
-  const serviceName = appointment.service?.name || ''
+  const serviceName = getAppointmentServiceLabel(appointment) || appointment.service?.name || ''
   const timeRange = `${appointment.startTime} - ${appointment.endTime}`
   const tooltip = `${clientName}\n${serviceName}\n${timeRange}\nCabina: ${cabinLabels[appointment.cabin] || appointment.cabin}`
 
@@ -110,20 +136,27 @@ function AppointmentEvent({ event }: { event: any }) {
 }
 
 export default function Appointments() {
+  const { user } = useAuthStore()
   const navigate = useNavigate()
   const [appointments, setAppointments] = useState<any[]>([])
+  const [agendaBlocks, setAgendaBlocks] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [legendLoading, setLegendLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+  const [showBlockModal, setShowBlockModal] = useState(false)
+  const [showImportModal, setShowImportModal] = useState(false)
   const [showLegendModal, setShowLegendModal] = useState(false)
   const [editingAppointment, setEditingAppointment] = useState<any>(null)
+  const [editingAgendaBlock, setEditingAgendaBlock] = useState<any>(null)
   const [selectedDate, setSelectedDate] = useState<Date | undefined>()
   const [preselectedStartTime, setPreselectedStartTime] = useState<string | undefined>()
+  const [preselectedEndTime, setPreselectedEndTime] = useState<string | undefined>()
   const [initialCabin, setInitialCabin] = useState<'LUCY' | 'TAMARA' | 'CABINA_1' | 'CABINA_2'>('LUCY')
   const [view, setView] = useState<View>('day')
   const [currentDate, setCurrentDate] = useState(new Date())
   const [legendItems, setLegendItems] = useState<AppointmentLegendCatalogItem[]>([])
   const [legendCategories, setLegendCategories] = useState<string[]>([])
+  const isAdmin = user?.role === 'ADMIN'
 
   useEffect(() => {
     fetchAppointments()
@@ -144,23 +177,28 @@ export default function Appointments() {
         startDate = moment(currentDate).startOf('month').subtract(7, 'days').toDate()
         endDate = moment(currentDate).endOf('month').add(7, 'days').toDate()
       } else if (view === 'week') {
-        startDate = moment(currentDate).startOf('week').toDate()
-        endDate = moment(currentDate).endOf('week').toDate()
+        startDate = startOfCalendarWeek(currentDate)
+        endDate = endOfCalendarWeek(currentDate)
       } else {
         startDate = moment(currentDate).startOf('day').toDate()
         endDate = moment(currentDate).endOf('day').toDate()
       }
 
-      const response = await api.get('/appointments', {
-        params: {
-          startDate: startDate.toISOString(),
-          endDate: endDate.toISOString()
-        }
-      })
-      setAppointments(response.data)
+      const params = {
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString()
+      }
+
+      const [appointmentsResponse, agendaBlocksResponse] = await Promise.all([
+        api.get('/appointments', { params }),
+        api.get('/appointments/blocks', { params })
+      ])
+
+      setAppointments(Array.isArray(appointmentsResponse.data) ? appointmentsResponse.data : [])
+      setAgendaBlocks(Array.isArray(agendaBlocksResponse.data) ? agendaBlocksResponse.data : [])
     } catch (error) {
       console.error('Error fetching appointments:', error)
-      toast.error('Error al cargar citas')
+      toast.error('Error al cargar la agenda')
     } finally {
       setLoading(false)
     }
@@ -189,25 +227,62 @@ export default function Appointments() {
     }
   }
 
-  const handleSelectSlot = ({ start, resourceId }: { start: Date; resourceId?: string | number }) => {
+  const handleSelectSlot = ({
+    start,
+    end,
+    resourceId,
+    action
+  }: {
+    start: Date
+    end: Date
+    resourceId?: string | number
+    action: 'select' | 'click' | 'doubleClick'
+  }) => {
     setSelectedDate(start)
-    const slotMinutes = start.getHours() * 60 + start.getMinutes()
-    setPreselectedStartTime(
-      slotMinutes >= BUSINESS_START_MINUTES && slotMinutes < BUSINESS_END_MINUTES
-        ? getTimeInputValueFromDate(start)
-        : undefined
-    )
     const selectedCabin = String(resourceId || 'LUCY') as typeof initialCabin
     setInitialCabin(selectedCabin)
     setEditingAppointment(null)
+    setEditingAgendaBlock(null)
+
+    const slotMinutes = start.getHours() * 60 + start.getMinutes()
+    const nextStartTime =
+      slotMinutes >= BUSINESS_START_MINUTES && slotMinutes < BUSINESS_END_MINUTES
+        ? getSelectionTimeValue(start)
+        : undefined
+
+    setPreselectedStartTime(nextStartTime)
+    setPreselectedEndTime(nextStartTime ? getSelectionTimeValue(end) : undefined)
+
+    const shouldOpenBlockModal = action === 'select' && (view === 'day' || view === 'week')
+
+    if (shouldOpenBlockModal) {
+      setShowModal(false)
+      setShowBlockModal(true)
+      return
+    }
+
+    setShowBlockModal(false)
     setShowModal(true)
   }
 
   const handleSelectEvent = (event: any) => {
-    setEditingAppointment(event.appointment)
-    setInitialCabin(event.appointment.cabin || 'LUCY')
     setSelectedDate(undefined)
     setPreselectedStartTime(undefined)
+    setPreselectedEndTime(undefined)
+
+    if (event.kind === 'agenda-block') {
+      setEditingAppointment(null)
+      setEditingAgendaBlock(event.agendaBlock)
+      setInitialCabin(event.agendaBlock.cabin || 'LUCY')
+      setShowModal(false)
+      setShowBlockModal(true)
+      return
+    }
+
+    setEditingAgendaBlock(null)
+    setEditingAppointment(event.appointment)
+    setInitialCabin(event.appointment.cabin || 'LUCY')
+    setShowBlockModal(false)
     setShowModal(true)
   }
 
@@ -216,11 +291,26 @@ export default function Appointments() {
     setEditingAppointment(null)
     setSelectedDate(undefined)
     setPreselectedStartTime(undefined)
+    setPreselectedEndTime(undefined)
+    setInitialCabin('LUCY')
+  }
+
+  const handleCloseBlockModal = () => {
+    setShowBlockModal(false)
+    setEditingAgendaBlock(null)
+    setSelectedDate(undefined)
+    setPreselectedStartTime(undefined)
+    setPreselectedEndTime(undefined)
     setInitialCabin('LUCY')
   }
 
   const handleFormSuccess = () => {
     handleCloseModal()
+    fetchAppointments()
+  }
+
+  const handleAgendaBlockSuccess = () => {
+    handleCloseBlockModal()
     fetchAppointments()
   }
 
@@ -250,6 +340,21 @@ export default function Appointments() {
     }
   }
 
+  const handleExportAppointments = async () => {
+    try {
+      if (appointments.length === 0) {
+        toast.error('No hay citas para exportar en el rango actual')
+        return
+      }
+
+      await exportAppointmentsWorkbook(appointments)
+      toast.success('Citas exportadas a Excel')
+    } catch (error) {
+      console.error('Appointments export error:', error)
+      toast.error('No se pudo exportar el listado de citas')
+    }
+  }
+
   const goToCharge = (appointment: any) => {
     const params = new URLSearchParams({
       serviceId: appointment.serviceId,
@@ -262,8 +367,8 @@ export default function Appointments() {
   }
 
   const events = useMemo(
-    () =>
-      appointments.map((appointment) => {
+    () => [
+      ...appointments.map((appointment) => {
         const appointmentDate = new Date(appointment.date)
         const [startHours, startMinutes] = appointment.startTime.split(':')
         const [endHours, endMinutes] = appointment.endTime.split(':')
@@ -279,16 +384,56 @@ export default function Appointments() {
           start,
           end,
           appointment,
+          kind: 'appointment',
           resourceId: appointment.cabin
         }
       }),
-    [appointments]
+      ...agendaBlocks.map((agendaBlock) => {
+        const blockDate = new Date(agendaBlock.date)
+        const [startHours, startMinutes] = agendaBlock.startTime.split(':')
+        const [endHours, endMinutes] = agendaBlock.endTime.split(':')
+
+        const start = new Date(blockDate)
+        start.setHours(parseInt(startHours, 10), parseInt(startMinutes, 10))
+
+        const end = new Date(blockDate)
+        end.setHours(parseInt(endHours, 10), parseInt(endMinutes, 10))
+
+        return {
+          title: `Bloqueo - ${formatProfessionalLabel(agendaBlock.professional)}`,
+          start,
+          end,
+          agendaBlock,
+          kind: 'agenda-block',
+          resourceId: agendaBlock.cabin
+        }
+      })
+    ],
+    [agendaBlocks, appointments]
   )
 
   const getThemeForAppointment = (appointment: any) =>
-    getAppointmentColorTheme(legendItems, appointment.service?.category)
+    getAppointmentColorTheme(
+      legendItems,
+      getAppointmentPrimaryService(appointment)?.category || appointment.service?.category
+    )
 
   const eventStyleGetter = (event: any) => {
+    if (event.kind === 'agenda-block') {
+      return {
+        style: {
+          backgroundColor: '#FDE68A',
+          borderRadius: '8px',
+          color: '#7C2D12',
+          border: '1px dashed #D97706',
+          boxShadow: 'none',
+          opacity: 1,
+          fontSize: '12px',
+          padding: '4px 6px'
+        }
+      }
+    }
+
     const theme = getThemeForAppointment(event.appointment)
     const isInactive = INACTIVE_STATUSES.has(String(event.appointment.status || '').toUpperCase())
 
@@ -318,12 +463,8 @@ export default function Appointments() {
   ).length
 
   const currentDateMoment = useMemo(() => moment(currentDate), [currentDate])
-  const calendarWeekDays = useMemo(
-    () => moment.weekdaysMin(true).map((day) => day.replace('.', '')),
-    []
-  )
   const monthGridDays = useMemo(() => {
-    const monthStart = currentDateMoment.clone().startOf('month').startOf('week')
+    const monthStart = currentDateMoment.clone().startOf('month').startOf('isoWeek')
     return Array.from({ length: 42 }, (_, index) => monthStart.clone().add(index, 'days'))
   }, [currentDateMoment])
 
@@ -352,17 +493,33 @@ export default function Appointments() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Agenda de Citas</h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Haz clic en un hueco para crear una cita o arrastra en el calendario para bloquear una franja.
+          </p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <button onClick={() => setShowLegendModal(true)} className="btn btn-secondary">
             Añadir Leyenda
           </button>
+          {isAdmin ? (
+            <>
+              <button onClick={() => setShowImportModal(true)} className="btn btn-secondary">
+                Importar
+              </button>
+              <button onClick={() => void handleExportAppointments()} className="btn btn-secondary">
+                Exportar
+              </button>
+            </>
+          ) : null}
           <button
             onClick={() => {
               setEditingAppointment(null)
+              setEditingAgendaBlock(null)
+              setShowBlockModal(false)
               setInitialCabin('LUCY')
               setSelectedDate(new Date(currentDate))
               setPreselectedStartTime(undefined)
+              setPreselectedEndTime(undefined)
               setShowModal(true)
             }}
             className="btn btn-primary"
@@ -372,26 +529,35 @@ export default function Appointments() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-3 xl:grid-cols-[repeat(3,minmax(0,1fr))_22rem]">
-        <div className="card self-start p-4">
-          <p className="text-sm text-gray-600 dark:text-gray-400">Citas hoy</p>
-          <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">
-            {todayAppointments.length}
-          </p>
+      <div className="grid grid-cols-1 items-stretch gap-3 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-3">
+            <div className="card self-start p-4">
+              <p className="text-sm text-gray-600 dark:text-gray-400">Citas hoy</p>
+              <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">
+                {todayAppointments.length}
+              </p>
+            </div>
+            <div className="card self-start p-4">
+              <p className="text-sm text-gray-600 dark:text-gray-400">Cabinas activas</p>
+              <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">
+                {activeCabinsToday}
+              </p>
+            </div>
+            <div className="card self-start p-4">
+              <p className="text-sm text-gray-600 dark:text-gray-400">Citas que quedan</p>
+              <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">
+                {remainingTodayAppointments}
+              </p>
+            </div>
+          </div>
+
+          {view === 'day' ? (
+            <AgendaDayNotesPanel dayKey={currentDateMoment.format('YYYY-MM-DD')} />
+          ) : null}
         </div>
-        <div className="card self-start p-4">
-          <p className="text-sm text-gray-600 dark:text-gray-400">Cabinas activas</p>
-          <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">
-            {activeCabinsToday}
-          </p>
-        </div>
-        <div className="card self-start p-4">
-          <p className="text-sm text-gray-600 dark:text-gray-400">Citas que quedan</p>
-          <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">
-            {remainingTodayAppointments}
-          </p>
-        </div>
-        <div className="card self-start p-2.5 md:col-span-3 xl:col-span-1">
+
+        <div className="card flex h-full flex-col p-2.5">
           <div className="mb-1.5 flex items-center justify-between">
             <button
               onClick={goToPreviousMonth}
@@ -401,7 +567,7 @@ export default function Appointments() {
               <ChevronLeft className="h-3.5 w-3.5" />
             </button>
             <p className="text-xs font-semibold capitalize tracking-[0.08em] text-gray-700 dark:text-gray-200">
-              {currentDateMoment.format('MMMM YYYY')}
+              {formatCalendarText(currentDate, 'MMMM YYYY')}
             </p>
             <button
               onClick={goToNextMonth}
@@ -474,15 +640,17 @@ export default function Appointments() {
 
       <div className="card" style={{ height: '760px' }}>
         <BigCalendar
-          localizer={localizer}
+          localizer={calendarLocalizer}
+          culture={calendarCulture}
+          formats={calendarFormats}
           events={events}
           startAccessor="start"
           endAccessor="end"
           resources={cabinResources}
           resourceIdAccessor="resourceId"
           resourceTitleAccessor="resourceTitle"
-          messages={messages}
-          components={{ event: AppointmentEvent }}
+          messages={calendarMessages}
+          components={{ event: CalendarEvent }}
           views={['month', 'week', 'day', 'agenda']}
           view={view}
           onView={setView}
@@ -490,11 +658,12 @@ export default function Appointments() {
           onNavigate={setCurrentDate}
           onSelectSlot={handleSelectSlot}
           onSelectEvent={handleSelectEvent}
-          selectable
+          selectable="ignoreEvents"
           eventPropGetter={eventStyleGetter}
           style={{ height: '100%' }}
           step={15}
           timeslots={4}
+          longPressThreshold={250}
           min={new Date(2024, 0, 1, 8, 0, 0)}
           max={new Date(2024, 0, 1, 21, 0, 0)}
         />
@@ -533,7 +702,7 @@ export default function Appointments() {
                 <div>
                   <p className="text-gray-600 dark:text-gray-400">Profesional</p>
                   <p className="font-medium text-gray-900 dark:text-white">
-                    {professionalLabels[editingAppointment.professional] || editingAppointment.professional || 'Lucy'}
+                    {formatProfessionalLabel(editingAppointment.professional) || 'Lucy'}
                   </p>
                 </div>
                 <div>
@@ -591,10 +760,67 @@ export default function Appointments() {
             onCancel={handleCloseModal}
             preselectedDate={selectedDate}
             preselectedStartTime={preselectedStartTime}
+            preselectedEndTime={preselectedEndTime}
             initialCabin={initialCabin}
           />
         </div>
       </Modal>
+
+      <Modal
+        isOpen={showBlockModal}
+        onClose={handleCloseBlockModal}
+        title={editingAgendaBlock?.id ? 'Editar Bloqueo' : 'Nuevo Bloqueo'}
+        maxWidth="lg"
+      >
+        {showBlockModal ? (
+          <Suspense
+            fallback={
+              <div className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                Cargando formulario...
+              </div>
+            }
+          >
+            <div className="space-y-4">
+              <AgendaBlockForm
+                agendaBlock={editingAgendaBlock?.id ? editingAgendaBlock : undefined}
+                onSuccess={handleAgendaBlockSuccess}
+                onCancel={handleCloseBlockModal}
+                preselectedDate={selectedDate}
+                preselectedStartTime={preselectedStartTime}
+                preselectedEndTime={preselectedEndTime}
+                initialCabin={initialCabin}
+              />
+            </div>
+          </Suspense>
+        ) : null}
+      </Modal>
+
+      {isAdmin ? (
+        <Modal
+          isOpen={showImportModal}
+          onClose={() => setShowImportModal(false)}
+          title="Importar Citas desde Excel"
+          maxWidth="xl"
+        >
+          {showImportModal ? (
+            <Suspense
+              fallback={
+                <div className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                  Cargando importación...
+                </div>
+              }
+            >
+              <ImportAppointmentsModal
+                onSuccess={() => {
+                  setShowImportModal(false)
+                  void fetchAppointments()
+                }}
+                onCancel={() => setShowImportModal(false)}
+              />
+            </Suspense>
+          ) : null}
+        </Modal>
+      ) : null}
     </div>
   )
 }

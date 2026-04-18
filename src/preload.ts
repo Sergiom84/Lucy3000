@@ -4,6 +4,9 @@ import type { TicketPrinterConfig } from './shared/ticketPrinter'
 const electronAPI = {
   getVersion: () => ipcRenderer.invoke('app:getVersion'),
   getPath: (name: string) => ipcRenderer.invoke('app:getPath', name),
+  getRuntimeDataPaths: () => ipcRenderer.invoke('app:getRuntimeDataPaths'),
+  openRuntimeDataFolder: () => ipcRenderer.invoke('app:openRuntimeDataFolder'),
+  resetRuntimeData: () => ipcRenderer.invoke('app:resetRuntimeData'),
   relaunch: () => ipcRenderer.invoke('app:relaunch'),
   quit: () => ipcRenderer.invoke('app:quit'),
   logs: {
@@ -66,6 +69,21 @@ declare global {
     electronAPI?: {
       getVersion: () => Promise<string>
       getPath: (name: string) => Promise<string>
+      getRuntimeDataPaths: () => Promise<{
+        userDataPath: string
+        dbPath: string
+        logsPath: string
+        dbExists: boolean
+      }>
+      openRuntimeDataFolder: () => Promise<{ success: boolean; path: string; error?: string }>
+      resetRuntimeData: () => Promise<{
+        success: boolean
+        dbPath: string
+        userDataPath: string
+        requiresRelaunch: boolean
+        backupPath?: string | null
+        error?: string
+      }>
       relaunch: () => Promise<{ success: boolean }>
       quit: () => Promise<void>
       logs: {

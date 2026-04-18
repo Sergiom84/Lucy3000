@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle, X } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
+import { invalidateAppointmentClientsCache } from '../utils/appointmentCatalogs'
 import {
   XLSX_FILE_ACCEPT,
   assertSupportedSpreadsheetFile,
@@ -159,13 +160,25 @@ export default function ImportClientsModal({ onSuccess, onCancel }: ImportClient
         headers: { 'Content-Type': 'multipart/form-data' }
       })
 
-      setResults(response.data.results)
+      const nextResults = response.data.results
+      const successCount = Number(nextResults?.success || 0)
+      const skippedCount = Number(nextResults?.skipped || 0)
+      const errorCount = Array.isArray(nextResults?.errors) ? nextResults.errors.length : 0
 
-      if (response.data.results.success > 0) {
-        toast.success(`${response.data.results.success} clientes importados exitosamente`)
-        if (response.data.results.errors.length === 0) {
+      setResults(nextResults)
+
+      if (successCount > 0) {
+        invalidateAppointmentClientsCache()
+        toast.success(
+          skippedCount > 0
+            ? `${successCount} clientes importados. ${skippedCount} omitidos por ya existir.`
+            : `${successCount} clientes importados exitosamente`
+        )
+        if (errorCount === 0) {
           setTimeout(() => onSuccess(), 2000)
         }
+      } else if (skippedCount > 0 && errorCount === 0) {
+        toast.success(`No había clientes nuevos. ${skippedCount} ya existían y se omitieron.`)
       } else {
         toast.error('No se pudo importar ningun cliente')
       }
@@ -191,7 +204,7 @@ export default function ImportClientsModal({ onSuccess, onCancel }: ImportClient
               <li>Campos mínimos: <strong>Nombre, Apellidos</strong> y al menos un teléfono entre <strong>Teléfono principal, Móvil o Teléfono fijo</strong></li>
               <li>La plantilla ya incluye los mismos datos que el alta manual: alergias, parentesco, nº de abonos, saldo a cuenta, notas y más</li>
               <li><strong>Cliente vinculado</strong> puede referenciarse por Nº Cliente, email, teléfono o nombre completo</li>
-              <li>Los emails duplicados dentro del archivo se omiten automáticamente</li>
+              <li>Si un cliente ya existe en Lucy3000, se omite para no duplicarlo. Se detecta por código, DNI, email o nombre + teléfono</li>
             </ol>
           </div>
         </div>

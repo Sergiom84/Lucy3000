@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '../db'
 import { getAppointmentDisplayName, getAppointmentDisplayPhone } from '../utils/customer-display'
+import { getAppointmentServiceLabel } from '../utils/appointment-services'
 import { whatsappService } from './whatsapp.service'
 
 const WHATSAPP_SENT_NOTIFICATION_TYPE = 'WHATSAPP_REMINDER_SENT'
@@ -22,6 +23,19 @@ const appointmentReminderInclude = {
     select: {
       id: true,
       name: true
+    }
+  },
+  appointmentServices: {
+    include: {
+      service: {
+        select: {
+          id: true,
+          name: true
+        }
+      }
+    },
+    orderBy: {
+      sortOrder: 'asc' as const
     }
   }
 } satisfies Prisma.AppointmentInclude
@@ -129,10 +143,11 @@ class AppointmentReminderService {
 
       const phoneCandidate = getAppointmentDisplayPhone(appointment)
       const clientName = getAppointmentDisplayName(appointment)
+      const serviceLabel = getAppointmentServiceLabel(appointment) || appointment.service.name
       const result = await whatsappService.sendAppointmentReminder({
         appointmentId: appointment.id,
         clientName,
-        serviceName: appointment.service.name,
+        serviceName: serviceLabel,
         appointmentDate: appointment.date,
         appointmentStartTime: appointment.startTime,
         phone: phoneCandidate
@@ -149,7 +164,7 @@ class AppointmentReminderService {
         data: {
           type: WHATSAPP_SENT_NOTIFICATION_TYPE,
           title,
-          message: `Recordatorio WhatsApp enviado a ${clientName} para ${appointment.service.name} (${appointment.startTime}).`,
+          message: `Recordatorio WhatsApp enviado a ${clientName} para ${serviceLabel} (${appointment.startTime}).`,
           priority: 'LOW',
           isRead: true
         }

@@ -54,8 +54,33 @@ const tableExists = async (tableName: string) => {
   return rows.length > 0
 }
 
+const indexExists = async (indexName: string) => {
+  const rows = await prisma.$queryRawUnsafe<Array<{ name: string }>>(
+    `SELECT name FROM sqlite_master WHERE type='index' AND name='${indexName}' LIMIT 1`
+  )
+
+  return rows.length > 0
+}
+
 const getTableColumns = async (tableName: string) => {
   return prisma.$queryRawUnsafe<Array<SqliteTableInfoRow>>(`PRAGMA table_info("${tableName}")`)
+}
+
+const ensureUsersUsernameColumn = async () => {
+  if (!(await tableExists('users'))) {
+    return
+  }
+
+  const userColumns = await getTableColumns('users')
+  const hasUsername = userColumns.some((column) => column.name === 'username')
+
+  if (!hasUsername) {
+    await prisma.$executeRawUnsafe('ALTER TABLE "users" ADD COLUMN "username" TEXT')
+  }
+
+  if (!(await indexExists('users_username_key'))) {
+    await prisma.$executeRawUnsafe('CREATE UNIQUE INDEX "users_username_key" ON "users"("username")')
+  }
 }
 
 const ensureAccountBalancePaymentMethodColumn = async () => {
@@ -69,6 +94,62 @@ const ensureAccountBalancePaymentMethodColumn = async () => {
   if (!hasPaymentMethod) {
     await prisma.$executeRawUnsafe(
       'ALTER TABLE "account_balance_movements" ADD COLUMN "paymentMethod" TEXT'
+    )
+  }
+}
+
+const ensureLegacyAccountBalanceImportColumns = async () => {
+  if (!(await tableExists('account_balance_movements'))) {
+    return
+  }
+
+  const accountBalanceColumns = await getTableColumns('account_balance_movements')
+  const hasLegacyRef = accountBalanceColumns.some((column) => column.name === 'legacyRef')
+  const hasImportSource = accountBalanceColumns.some((column) => column.name === 'importSource')
+
+  if (!hasLegacyRef) {
+    await prisma.$executeRawUnsafe(
+      'ALTER TABLE "account_balance_movements" ADD COLUMN "legacyRef" TEXT'
+    )
+  }
+
+  if (!hasImportSource) {
+    await prisma.$executeRawUnsafe(
+      'ALTER TABLE "account_balance_movements" ADD COLUMN "importSource" TEXT'
+    )
+  }
+
+  if (!(await indexExists('account_balance_movements_clientId_legacyRef_importSource_key'))) {
+    await prisma.$executeRawUnsafe(
+      'CREATE UNIQUE INDEX "account_balance_movements_clientId_legacyRef_importSource_key" ON "account_balance_movements"("clientId", "legacyRef", "importSource")'
+    )
+  }
+}
+
+const ensureLegacyBonoImportColumns = async () => {
+  if (!(await tableExists('bono_packs'))) {
+    return
+  }
+
+  const bonoPackColumns = await getTableColumns('bono_packs')
+  const hasLegacyRef = bonoPackColumns.some((column) => column.name === 'legacyRef')
+  const hasImportSource = bonoPackColumns.some((column) => column.name === 'importSource')
+
+  if (!hasLegacyRef) {
+    await prisma.$executeRawUnsafe(
+      'ALTER TABLE "bono_packs" ADD COLUMN "legacyRef" TEXT'
+    )
+  }
+
+  if (!hasImportSource) {
+    await prisma.$executeRawUnsafe(
+      'ALTER TABLE "bono_packs" ADD COLUMN "importSource" TEXT'
+    )
+  }
+
+  if (!(await indexExists('bono_packs_clientId_legacyRef_importSource_key'))) {
+    await prisma.$executeRawUnsafe(
+      'CREATE UNIQUE INDEX "bono_packs_clientId_legacyRef_importSource_key" ON "bono_packs"("clientId", "legacyRef", "importSource")'
     )
   }
 }
@@ -197,6 +278,40 @@ const ensureAppointmentGuestSupport = async () => {
   }
 }
 
+const ensureAppointmentServicesTable = async () => {
+  if (!(await tableExists('appointments'))) {
+    return
+  }
+
+  if (!(await tableExists('appointment_services'))) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE "appointment_services" (
+        "appointmentId" TEXT NOT NULL,
+        "serviceId" TEXT NOT NULL,
+        "sortOrder" INTEGER NOT NULL,
+        CONSTRAINT "appointment_services_appointmentId_fkey" FOREIGN KEY ("appointmentId") REFERENCES "appointments" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "appointment_services_serviceId_fkey" FOREIGN KEY ("serviceId") REFERENCES "services" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+        PRIMARY KEY ("appointmentId", "serviceId")
+      )
+    `)
+    await prisma.$executeRawUnsafe(
+      'CREATE UNIQUE INDEX "appointment_services_appointmentId_sortOrder_key" ON "appointment_services"("appointmentId", "sortOrder")'
+    )
+  }
+
+  await prisma.$executeRawUnsafe(`
+    INSERT INTO "appointment_services" ("appointmentId", "serviceId", "sortOrder")
+    SELECT "id", "serviceId", 0
+    FROM "appointments" AS "appointments"
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM "appointment_services" AS "appointment_services"
+      WHERE "appointment_services"."appointmentId" = "appointments"."id"
+        AND "appointment_services"."sortOrder" = 0
+    )
+  `)
+}
+
 const ensureAppointmentLegendTable = async () => {
   if (await tableExists('appointment_legends')) {
     return
@@ -212,6 +327,80 @@ const ensureAppointmentLegendTable = async () => {
       "updatedAt" DATETIME NOT NULL
     )
   `)
+}
+
+const ensureAgendaBlocksTable = async () => {
+  if (await tableExists('agenda_blocks')) {
+    const agendaBlockColumns = await getTableColumns('agenda_blocks')
+    const hasCalendarInviteEmail = agendaBlockColumns.some((column) => column.name === 'calendarInviteEmail')
+
+    if (!hasCalendarInviteEmail) {
+      await prisma.$executeRawUnsafe(
+        'ALTER TABLE "agenda_blocks" ADD COLUMN "calendarInviteEmail" TEXT'
+      )
+    }
+
+    return
+  }
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE "agenda_blocks" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "professional" TEXT NOT NULL,
+      "calendarInviteEmail" TEXT,
+      "cabin" TEXT NOT NULL DEFAULT 'LUCY',
+      "date" DATETIME NOT NULL,
+      "startTime" TEXT NOT NULL,
+      "endTime" TEXT NOT NULL,
+      "notes" TEXT,
+      "googleCalendarEventId" TEXT,
+      "googleCalendarSyncStatus" TEXT NOT NULL DEFAULT 'DISABLED',
+      "googleCalendarSyncError" TEXT,
+      "googleCalendarSyncedAt" DATETIME,
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" DATETIME NOT NULL
+    )
+  `)
+  await prisma.$executeRawUnsafe(
+    'CREATE UNIQUE INDEX "agenda_blocks_googleCalendarEventId_key" ON "agenda_blocks"("googleCalendarEventId")'
+  )
+}
+
+const ensureAgendaDayNotesTable = async () => {
+  if (await tableExists('agenda_day_notes')) {
+    const agendaDayNoteColumns = await getTableColumns('agenda_day_notes')
+    const hasIsCompleted = agendaDayNoteColumns.some((column) => column.name === 'isCompleted')
+    const hasCompletedAt = agendaDayNoteColumns.some((column) => column.name === 'completedAt')
+
+    if (!hasIsCompleted) {
+      await prisma.$executeRawUnsafe(
+        'ALTER TABLE "agenda_day_notes" ADD COLUMN "isCompleted" BOOLEAN NOT NULL DEFAULT false'
+      )
+    }
+
+    if (!hasCompletedAt) {
+      await prisma.$executeRawUnsafe(
+        'ALTER TABLE "agenda_day_notes" ADD COLUMN "completedAt" DATETIME'
+      )
+    }
+
+    return
+  }
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE "agenda_day_notes" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "dayKey" TEXT NOT NULL,
+      "text" TEXT NOT NULL,
+      "isCompleted" BOOLEAN NOT NULL DEFAULT false,
+      "completedAt" DATETIME,
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" DATETIME NOT NULL
+    )
+  `)
+  await prisma.$executeRawUnsafe(
+    'CREATE INDEX "agenda_day_notes_dayKey_createdAt_idx" ON "agenda_day_notes"("dayKey", "createdAt")'
+  )
 }
 
 const ensureDefaultAppointmentLegends = async () => {
@@ -238,8 +427,14 @@ const ensureDefaultAppointmentLegends = async () => {
 export const ensureSqliteCompatibilityMigrations = async () => {
   if (!isSqliteDatabase()) return
 
+  await ensureUsersUsernameColumn()
   await ensureAccountBalancePaymentMethodColumn()
+  await ensureLegacyAccountBalanceImportColumns()
+  await ensureLegacyBonoImportColumns()
   await ensureAppointmentGuestSupport()
+  await ensureAppointmentServicesTable()
   await ensureAppointmentLegendTable()
+  await ensureAgendaBlocksTable()
+  await ensureAgendaDayNotesTable()
   await ensureDefaultAppointmentLegends()
 }

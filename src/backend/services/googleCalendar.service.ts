@@ -48,6 +48,7 @@ export type AppointmentSyncInput = {
   clientEmail?: string | null
   clientName: string
   existingEventId?: string | null
+  forceSendUpdates?: boolean
 }
 
 export type CalendarSyncResult = {
@@ -215,8 +216,20 @@ export class GoogleCalendarService {
     }
   }
 
-  private getSendUpdates(config: StoredGoogleCalendarConfig, clientEmail?: string | null) {
-    return config.sendClientInvites && clientEmail ? 'all' : 'none'
+  private getSendUpdates(
+    config: StoredGoogleCalendarConfig,
+    clientEmail?: string | null,
+    forceSendUpdates = false
+  ) {
+    if (!clientEmail) {
+      return 'none'
+    }
+
+    if (forceSendUpdates) {
+      return 'all'
+    }
+
+    return config.sendClientInvites ? 'all' : 'none'
   }
 
   private formatGoogleError(error: unknown) {
@@ -355,7 +368,7 @@ export class GoogleCalendarService {
     try {
       const { calendar, config: activeConfig } = await this.getAuthorizedCalendar()
       const requestBody = this.buildEventRequest(input)
-      const sendUpdates = this.getSendUpdates(activeConfig, input.clientEmail)
+      const sendUpdates = this.getSendUpdates(activeConfig, input.clientEmail, input.forceSendUpdates)
 
       if (input.existingEventId) {
         try {
@@ -398,7 +411,11 @@ export class GoogleCalendarService {
     }
   }
 
-  async deleteAppointmentEvent(eventId: string | null, clientEmail?: string | null): Promise<CalendarSyncResult> {
+  async deleteAppointmentEvent(
+    eventId: string | null,
+    clientEmail?: string | null,
+    forceSendUpdates = false
+  ): Promise<CalendarSyncResult> {
     if (!eventId) {
       return {
         eventId: null,
@@ -422,7 +439,7 @@ export class GoogleCalendarService {
       await calendar.events.delete({
         calendarId: activeConfig.calendarId,
         eventId,
-        sendUpdates: this.getSendUpdates(activeConfig, clientEmail)
+        sendUpdates: this.getSendUpdates(activeConfig, clientEmail, forceSendUpdates)
       })
 
       return {
@@ -466,6 +483,15 @@ export class GoogleCalendarService {
     })
 
     await prisma.appointment.updateMany({
+      data: {
+        googleCalendarEventId: null,
+        googleCalendarSyncStatus: 'DISABLED',
+        googleCalendarSyncError: null,
+        googleCalendarSyncedAt: null
+      }
+    })
+
+    await prisma.agendaBlock.updateMany({
       data: {
         googleCalendarEventId: null,
         googleCalendarSyncStatus: 'DISABLED',

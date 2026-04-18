@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard,
@@ -10,9 +11,12 @@ import {
   FileText,
   Settings,
   Sparkles,
-  Trophy
+  Trophy,
+  ShieldCheck
 } from 'lucide-react'
 import { cn } from '../utils/cn'
+import { getAppVersion } from '../utils/desktop'
+import { useAuthStore } from '../stores/authStore'
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -23,11 +27,35 @@ const navigation = [
   { name: 'Productos', href: '/products', icon: Package },
   { name: 'Ventas', href: '/sales', icon: ShoppingCart },
   { name: 'Caja', href: '/cash', icon: Wallet },
-  { name: 'Reportes', href: '/reports', icon: FileText },
+  { name: 'Cuentas', href: '/accounts', icon: ShieldCheck, adminOnly: true },
+  { name: 'Reportes', href: '/reports', icon: FileText, adminOnly: true },
   { name: 'Configuración', href: '/settings', icon: Settings },
 ]
 
 export default function Sidebar() {
+  const { user } = useAuthStore()
+  const [appVersion, setAppVersion] = useState('2.0.0')
+
+  useEffect(() => {
+    let active = true
+
+    void getAppVersion()
+      .then((version) => {
+        if (active) {
+          setAppVersion(version)
+        }
+      })
+      .catch(() => {
+        // Keep the packaged fallback version when the runtime bridge is unavailable.
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const visibleNavigation = navigation.filter((item) => !item.adminOnly || user?.role === 'ADMIN')
+
   return (
     <div className="w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
       {/* Logo */}
@@ -43,7 +71,7 @@ export default function Sidebar() {
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-4 px-3">
         <ul className="space-y-1">
-          {navigation.map((item) => (
+          {visibleNavigation.map((item) => (
             <li key={item.name}>
               <NavLink
                 to={item.href}
@@ -68,7 +96,7 @@ export default function Sidebar() {
       {/* Footer */}
       <div className="p-4 border-t border-gray-200 dark:border-gray-700">
         <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
-          Lucy3000 v1.0.0
+          {`Lucy3000 v${appVersion}`}
         </p>
       </div>
     </div>

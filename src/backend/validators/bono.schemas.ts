@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { optionalNullableTextSchema } from './common.schemas'
+import { booleanQuerySchema, optionalNullableTextSchema } from './common.schemas'
 
 const positiveMoneySchema = z.coerce.number().finite().positive('Amount must be greater than zero')
 const appointmentStatusSchema = z.enum([
@@ -15,6 +15,13 @@ const userIdSchema = z.string().trim().min(1, 'Invalid userId')
 const timeSchema = z
   .string()
   .regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Invalid time format')
+const serviceIdsSchema = z
+  .array(z.string().uuid('Invalid serviceId'))
+  .min(1, 'At least one service is required')
+  .max(20, 'Too many services selected')
+  .refine((serviceIds) => new Set(serviceIds).size === serviceIds.length, {
+    message: 'Services cannot be duplicated'
+  })
 
 export const clientIdParamSchema = z.object({
   clientId: z.string().uuid('Invalid clientId')
@@ -27,6 +34,13 @@ export const bonoPackIdParamSchema = z.object({
 export const accountBalanceHistoryQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional()
 })
+
+export const spreadsheetImportModeBodySchema = z
+  .object({
+    mode: z.enum(['preview', 'commit']).optional(),
+    createMissingClients: booleanQuerySchema.optional()
+  })
+  .strict()
 
 export const accountBalanceTopUpBodySchema = z
   .object({
@@ -69,14 +83,19 @@ export const createBonoTemplateBodySchema = z
   })
   .strict()
 
-const professionalSchema = z.enum(['LUCY', 'TAMARA', 'CHEMA', 'OTROS'])
+const professionalSchema = z
+  .string()
+  .trim()
+  .min(1, 'Professional is required')
+  .max(120, 'Professional is too long')
 
 export const createBonoAppointmentBodySchema = z
   .object({
     serviceId: z.string().uuid('Invalid serviceId').optional(),
+    serviceIds: serviceIdsSchema.optional(),
     userId: userIdSchema,
     cabin: cabinSchema,
-    professional: professionalSchema.default('LUCY'),
+    professional: professionalSchema.optional(),
     date: z.coerce.date(),
     startTime: timeSchema,
     endTime: timeSchema,
@@ -85,3 +104,15 @@ export const createBonoAppointmentBodySchema = z
     reminder: z.boolean().optional().default(true)
   })
   .strict()
+  .superRefine((payload, ctx) => {
+    const serviceId = String(payload.serviceId || '').trim()
+    const serviceIds = Array.isArray(payload.serviceIds) ? payload.serviceIds : []
+
+    if (serviceId && serviceIds.length > 0 && serviceIds[0] !== serviceId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['serviceIds'],
+        message: 'The primary service must match the first selected service'
+      })
+    }
+  })

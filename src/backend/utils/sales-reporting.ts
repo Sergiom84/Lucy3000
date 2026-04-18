@@ -12,6 +12,8 @@ import {
   roundQuantityShare
 } from './payment-breakdown'
 
+import { normalizeProfessionalName } from './professional-catalog'
+
 const PROFESSIONAL_LABELS: Record<string, string> = {
   LUCY: 'Lucy',
   TAMARA: 'Tamara',
@@ -114,7 +116,11 @@ const roundCurrency = (value: number) => Math.round((value + Number.EPSILON) * 1
 export const formatProfessionalName = (professional?: string | null, fallbackUserName?: string | null) => {
   const normalizedProfessional = String(professional || '').trim()
   if (normalizedProfessional) {
-    return PROFESSIONAL_LABELS[normalizedProfessional.toUpperCase()] || normalizedProfessional
+    return (
+      PROFESSIONAL_LABELS[normalizedProfessional.toUpperCase()] ||
+      normalizeProfessionalName(normalizedProfessional) ||
+      normalizedProfessional
+    )
   }
 
   const normalizedUserName = String(fallbackUserName || '').trim()

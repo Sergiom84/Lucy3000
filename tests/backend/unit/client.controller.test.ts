@@ -308,6 +308,50 @@ describe('client.controller gender validation', () => {
     )
   })
 
+  it('createClient notifies admins when a non-admin creates a new client', async () => {
+    prismaMock.client.create.mockResolvedValue({
+      id: 'client-2',
+      firstName: 'Lucia',
+      lastName: 'Martinez',
+      pendingAmount: 0,
+      debtAlertEnabled: false,
+      isActive: true
+    })
+    prismaMock.user.findUnique.mockResolvedValue({
+      name: 'Tamara',
+      email: 'tamara@example.com'
+    })
+    prismaMock.notification.create.mockResolvedValue({
+      id: 'notification-1'
+    })
+
+    const req = createMockRequest({
+      body: {
+        firstName: 'Lucia',
+        lastName: 'Martinez',
+        phone: '600000002',
+        gender: 'MUJER'
+      },
+      user: {
+        id: 'user-employee',
+        email: 'tamara@example.com',
+        role: 'EMPLOYEE'
+      }
+    })
+    const res = createMockResponse()
+
+    await createClient(req as any, res)
+
+    expect(prismaMock.notification.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: 'ADMIN_ACTIVITY',
+        title: 'Actividad en clientes',
+        message: 'El usuario Tamara ha añadido un nuevo cliente.',
+        priority: 'NORMAL'
+      })
+    })
+  })
+
   it('importClientsFromExcel keeps compatibility with legacy client template headers', async () => {
     prismaMock.client.findMany.mockResolvedValue([
       {
@@ -437,6 +481,76 @@ describe('client.controller gender validation', () => {
         results: expect.objectContaining({
           success: 1,
           skipped: 0
+        })
+      })
+    )
+  })
+
+  it('importClientsFromExcel skips rows that already exist in the current database', async () => {
+    prismaMock.client.findMany.mockResolvedValue([
+      {
+        id: 'client-existing',
+        externalCode: 'CL-010',
+        dni: '11111111A',
+        email: 'elena@example.com',
+        phone: '600123123',
+        mobilePhone: null,
+        landlinePhone: null,
+        firstName: 'Elena',
+        lastName: 'Manzanares'
+      }
+    ])
+
+    const buffer = await createWorkbookBuffer([
+      ['Nº Cliente', 'DNI', 'Nombre', 'Apellidos', 'Sexo', 'Teléfono principal', 'Email'],
+      ['CL-010', '11111111A', 'Elena', 'Manzanares', 'MUJER', '600123123', 'elena@example.com']
+    ], 'Clientes')
+
+    const req = createMockRequest({
+      file: { buffer } as any
+    })
+    const res = createMockResponse()
+
+    await importClientsFromExcel(req as any, res)
+
+    expect(prismaMock.client.create).not.toHaveBeenCalled()
+    expect(prismaMock.client.update).not.toHaveBeenCalled()
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        results: expect.objectContaining({
+          success: 0,
+          skipped: 1
+        })
+      })
+    )
+  })
+
+  it('importClientsFromExcel skips duplicate rows repeated inside the same Excel file', async () => {
+    prismaMock.client.findMany.mockResolvedValue([])
+    prismaMock.client.create.mockImplementation(async ({ data }: any) => ({
+      id: 'client-new',
+      ...data
+    }))
+
+    const buffer = await createWorkbookBuffer([
+      ['Nº Cliente', 'Nombre', 'Apellidos', 'Sexo', 'Teléfono principal'],
+      ['CL-020', 'Lucia', 'Perez', 'MUJER', '600888777'],
+      ['CL-020', 'Lucia', 'Perez', 'MUJER', '600888777']
+    ], 'Clientes')
+
+    const req = createMockRequest({
+      file: { buffer } as any
+    })
+    const res = createMockResponse()
+
+    await importClientsFromExcel(req as any, res)
+
+    expect(prismaMock.client.create).toHaveBeenCalledTimes(1)
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        results: expect.objectContaining({
+          success: 1,
+          skipped: 1
         })
       })
     )

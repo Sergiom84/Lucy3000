@@ -8,15 +8,21 @@ import { getJwtSecret } from '../utils/jwt'
 const USER_ROLES: string[] = ['ADMIN', 'MANAGER', 'EMPLOYEE']
 
 const normalizeEmail = (value: unknown) => String(value || '').trim().toLowerCase()
+const normalizeUsername = (value: unknown) => {
+  const normalized = String(value || '').trim().toLowerCase()
+  return normalized || null
+}
+const normalizeLoginIdentifier = (value: unknown) => String(value || '').trim().toLowerCase()
 
 const buildAuthResponse = (user: {
   id: string
   email: string
+  username?: string | null
   name: string
   role: string
 }) => {
   const token = jwt.sign(
-    { id: user.id, email: user.email, role: user.role },
+    { id: user.id, email: user.email, username: user.username || null, role: user.role },
     getJwtSecret(),
     { expiresIn: '7d' }
   )
@@ -26,6 +32,7 @@ const buildAuthResponse = (user: {
     user: {
       id: user.id,
       email: user.email,
+      username: user.username || null,
       name: user.name,
       role: user.role
     }
@@ -48,7 +55,7 @@ export const getBootstrapStatus = async (_req: Request, res: Response) => {
 
 export const bootstrapAdmin = async (req: Request, res: Response) => {
   try {
-    const { email, password, name } = req.body
+    const { email, username, password, name } = req.body
 
     const createdUser = await prisma.$transaction(async (tx) => {
       const userCount = await tx.user.count()
@@ -59,6 +66,7 @@ export const bootstrapAdmin = async (req: Request, res: Response) => {
       return tx.user.create({
         data: {
           email: normalizeEmail(email),
+          username: normalizeUsername(username),
           password: await bcrypt.hash(password, 10),
           name: String(name).trim(),
           role: 'ADMIN'
@@ -79,16 +87,21 @@ export const bootstrapAdmin = async (req: Request, res: Response) => {
 
 export const login = async (req: Request, res: Response) => {
   try {
-    const { email, password } = req.body
+    const { identifier, password } = req.body
 
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' })
+    if (!identifier || !password) {
+      return res.status(400).json({ error: 'User or email and password are required' })
     }
 
-    const normalizedEmail = normalizeEmail(email)
+    const normalizedIdentifier = normalizeLoginIdentifier(identifier)
 
-    const user = await prisma.user.findUnique({
-      where: { email: normalizedEmail }
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: normalizedIdentifier },
+          { username: normalizedIdentifier }
+        ]
+      }
     })
 
     if (!user) {
@@ -114,7 +127,7 @@ export const login = async (req: Request, res: Response) => {
 
 export const register = async (req: Request, res: Response) => {
   try {
-    const { email, password, name, role } = req.body
+    const { email, username, password, name, role } = req.body
 
     if (!email || !password || !name) {
       return res.status(400).json({ error: 'Email, password and name are required' })
@@ -125,15 +138,29 @@ export const register = async (req: Request, res: Response) => {
     }
 
     const normalizedEmail = normalizeEmail(email)
+    const normalizedUsername = normalizeUsername(username)
     const sanitizedRole: string =
       USER_ROLES.includes(role as string) ? (role as string) : 'EMPLOYEE'
 
-    const existingUser = await prisma.user.findUnique({
-      where: { email: normalizedEmail }
+    const existingUsers = await prisma.user.findMany({
+      where: {
+        OR: [
+          { email: normalizedEmail },
+          ...(normalizedUsername ? [{ username: normalizedUsername }] : [])
+        ]
+      },
+      select: {
+        email: true,
+        username: true
+      }
     })
 
-    if (existingUser) {
-      return res.status(400).json({ error: 'User already exists' })
+    if (existingUsers.some((user) => user.email === normalizedEmail)) {
+      return res.status(400).json({ error: 'Email already exists' })
+    }
+
+    if (normalizedUsername && existingUsers.some((user) => user.username === normalizedUsername)) {
+      return res.status(400).json({ error: 'Username already exists' })
     }
 
     const hashedPassword = await bcrypt.hash(password, 10)
@@ -141,6 +168,7 @@ export const register = async (req: Request, res: Response) => {
     const user = await prisma.user.create({
       data: {
         email: normalizedEmail,
+        username: normalizedUsername,
         password: hashedPassword,
         name: String(name).trim(),
         role: sanitizedRole
@@ -161,6 +189,7 @@ export const getCurrentUser = async (req: AuthRequest, res: Response) => {
       select: {
         id: true,
         email: true,
+        username: true,
         name: true,
         role: true,
         isActive: true,

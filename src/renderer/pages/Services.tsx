@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import {
   ChevronDown,
   ChevronUp,
@@ -16,11 +16,24 @@ import Modal from '../components/Modal'
 import BonoTemplateForm from '../components/BonoTemplateForm'
 import ServiceForm from '../components/ServiceForm'
 import api from '../utils/api'
+import { exportBonoTemplatesWorkbook, exportServicesWorkbook } from '../utils/exports'
 import { formatCurrency } from '../utils/format'
 import { buildSearchTokens, filterRankedItems } from '../utils/searchableOptions'
+import {
+  invalidateAppointmentServicesCache,
+  invalidateBonoTemplatesCache
+} from '../utils/appointmentCatalogs'
+import { useAuthStore } from '../stores/authStore'
 
 type ViewMode = 'all' | 'active' | null
 type CatalogMode = 'services' | 'bonos'
+const ImportServicesModal = lazy(() => import('../components/ImportServicesModal'))
+const ImportBonosModal = lazy(() => import('../components/ImportBonosModal'))
+const ImportClientBonosModal = lazy(() => import('../components/ImportClientBonosModal'))
+
+function LazyPanelLoader() {
+  return <div className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">Cargando...</div>
+}
 
 const formatTaxRate = (value: unknown): string => {
   if (value === null || value === undefined || String(value).trim() === '') return '-'
@@ -41,6 +54,7 @@ const formatCategoryLabel = (value: string): string =>
 const formatPrice = (value: unknown) => formatCurrency(Number(value || 0)).replace('€', '').trim()
 
 export default function Services() {
+  const { user } = useAuthStore()
   const [catalogMode, setCatalogMode] = useState<CatalogMode>('services')
   const [services, setServices] = useState<any[]>([])
   const [bonoTemplates, setBonoTemplates] = useState<any[]>([])
@@ -51,12 +65,16 @@ export default function Services() {
   const [serviceViewMode, setServiceViewMode] = useState<ViewMode>(null)
   const [serviceShowCategories, setServiceShowCategories] = useState(false)
   const [serviceModalOpen, setServiceModalOpen] = useState(false)
+  const [serviceImportModalOpen, setServiceImportModalOpen] = useState(false)
   const [editingService, setEditingService] = useState<any>(null)
+  const isAdmin = user?.role === 'ADMIN'
 
   const [bonoSearch, setBonoSearch] = useState('')
   const [bonoSelectedCategory, setBonoSelectedCategory] = useState<string | null>(null)
   const [bonoShowCategories, setBonoShowCategories] = useState(false)
   const [bonoModalOpen, setBonoModalOpen] = useState(false)
+  const [bonoImportModalOpen, setBonoImportModalOpen] = useState(false)
+  const [clientBonoImportModalOpen, setClientBonoImportModalOpen] = useState(false)
 
   useEffect(() => {
     void loadCatalogs()
@@ -100,6 +118,7 @@ export default function Services() {
 
     try {
       await api.delete(`/services/${id}`)
+      invalidateAppointmentServicesCache()
       toast.success('Tratamiento eliminado')
       await refreshServices()
     } catch (error) {
@@ -124,6 +143,7 @@ export default function Services() {
 
   const handleBonoTemplateSuccess = (templates: any[]) => {
     setBonoTemplates(templates)
+    invalidateBonoTemplatesCache()
     setBonoModalOpen(false)
   }
 
@@ -280,6 +300,42 @@ export default function Services() {
     setBonoSelectedCategory((prev) => (prev === category ? null : category))
   }
 
+  const handleExportServices = async () => {
+    const rowsToExport = serviceHasActiveFilter ? filteredServices : services
+
+    if (rowsToExport.length === 0) {
+      toast.error('No hay tratamientos para exportar con el filtro actual')
+      return
+    }
+
+    try {
+      await exportServicesWorkbook(rowsToExport)
+      toast.success('Tratamientos exportados a Excel')
+    } catch (error) {
+      console.error('Services export error:', error)
+      toast.error('No se pudo exportar el catálogo de tratamientos')
+    }
+  }
+
+  const bonoHasActiveFilter = bonoSearch.trim() !== '' || bonoSelectedCategory !== null
+
+  const handleExportBonos = async () => {
+    const rowsToExport = bonoHasActiveFilter ? filteredBonos : bonoTemplates
+
+    if (rowsToExport.length === 0) {
+      toast.error('No hay bonos para exportar con el filtro actual')
+      return
+    }
+
+    try {
+      await exportBonoTemplatesWorkbook(rowsToExport)
+      toast.success('Bonos exportados a Excel')
+    } catch (error) {
+      console.error('Bonos export error:', error)
+      toast.error('No se pudo exportar el catálogo de bonos')
+    }
+  }
+
   const isServiceMode = catalogMode === 'services'
 
   if (loading) {
@@ -325,15 +381,33 @@ export default function Services() {
             <div>
               <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Tratamientos</h1>
             </div>
-            <button
-              onClick={() => {
-                setEditingService(null)
-                setServiceModalOpen(true)
-              }}
-              className="btn btn-primary"
-            >
-              Nuevo Tratamiento
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+              {isAdmin ? (
+                <>
+                  <button
+                    onClick={() => setServiceImportModalOpen(true)}
+                    className="btn btn-secondary"
+                  >
+                    Importar
+                  </button>
+                  <button
+                    onClick={() => void handleExportServices()}
+                    className="btn btn-secondary"
+                  >
+                    Exportar
+                  </button>
+                </>
+              ) : null}
+              <button
+                onClick={() => {
+                  setEditingService(null)
+                  setServiceModalOpen(true)
+                }}
+                className="btn btn-primary"
+              >
+                Nuevo Tratamiento
+              </button>
+            </div>
           </div>
 
           <div className="card">
@@ -554,6 +628,27 @@ export default function Services() {
           >
             <ServiceForm service={editingService} onSuccess={handleFormSuccess} onCancel={handleCloseModal} />
           </Modal>
+
+          {isAdmin ? (
+            <Modal
+              isOpen={serviceImportModalOpen}
+              onClose={() => setServiceImportModalOpen(false)}
+              title="Importar Tratamientos desde Excel"
+              maxWidth="xl"
+            >
+              {serviceImportModalOpen ? (
+                <Suspense fallback={<LazyPanelLoader />}>
+                  <ImportServicesModal
+                    onSuccess={() => {
+                      setServiceImportModalOpen(false)
+                      void refreshServices()
+                    }}
+                    onCancel={() => setServiceImportModalOpen(false)}
+                  />
+                </Suspense>
+              ) : null}
+            </Modal>
+          ) : null}
         </>
       ) : (
         <>
@@ -561,9 +656,26 @@ export default function Services() {
             <div>
               <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Bonos</h1>
             </div>
-            <button onClick={() => setBonoModalOpen(true)} className="btn btn-primary">
-              Nuevo Bono
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                onClick={() => setBonoImportModalOpen(true)}
+                className="btn btn-secondary"
+              >
+                Importar catálogo
+              </button>
+              <button
+                onClick={() => setClientBonoImportModalOpen(true)}
+                className="btn btn-secondary"
+              >
+                Importar bonos de clientes
+              </button>
+              <button onClick={() => void handleExportBonos()} className="btn btn-secondary">
+                Exportar
+              </button>
+              <button onClick={() => setBonoModalOpen(true)} className="btn btn-primary">
+                Nuevo Bono
+              </button>
+            </div>
           </div>
 
           <div className="card">
@@ -715,6 +827,43 @@ export default function Services() {
               onSuccess={handleBonoTemplateSuccess}
               onCancel={() => setBonoModalOpen(false)}
             />
+          </Modal>
+
+          <Modal
+            isOpen={bonoImportModalOpen}
+            onClose={() => setBonoImportModalOpen(false)}
+            title="Importar Catálogo de Bonos"
+            maxWidth="xl"
+          >
+            {bonoImportModalOpen ? (
+              <Suspense fallback={<LazyPanelLoader />}>
+                <ImportBonosModal
+                  onSuccess={() => {
+                    setBonoImportModalOpen(false)
+                    void loadBonoTemplates()
+                  }}
+                  onCancel={() => setBonoImportModalOpen(false)}
+                />
+              </Suspense>
+            ) : null}
+          </Modal>
+
+          <Modal
+            isOpen={clientBonoImportModalOpen}
+            onClose={() => setClientBonoImportModalOpen(false)}
+            title="Importar Bonos de Clientes"
+            maxWidth="xl"
+          >
+            {clientBonoImportModalOpen ? (
+              <Suspense fallback={<LazyPanelLoader />}>
+                <ImportClientBonosModal
+                  onSuccess={() => {
+                    setClientBonoImportModalOpen(false)
+                  }}
+                  onCancel={() => setClientBonoImportModalOpen(false)}
+                />
+              </Suspense>
+            ) : null}
           </Modal>
         </>
       )}

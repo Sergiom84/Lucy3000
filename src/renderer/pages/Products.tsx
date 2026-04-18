@@ -1,11 +1,14 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import { Search, Edit, Trash2, Package, AlertTriangle, TrendingUp, TrendingDown, ChevronDown, ChevronUp } from 'lucide-react'
 import api from '../utils/api'
+import { exportProductsWorkbook } from '../utils/exports'
 import { formatCurrency } from '../utils/format'
 import toast from 'react-hot-toast'
 import Modal from '../components/Modal'
 import ProductForm from '../components/ProductForm'
 import { buildSearchTokens, filterRankedItems } from '../utils/searchableOptions'
+import { invalidateActiveProductsCache } from '../utils/appointmentCatalogs'
+import { useAuthStore } from '../stores/authStore'
 
 const ImportProductsModal = lazy(() => import('../components/ImportProductsModal'))
 
@@ -23,6 +26,7 @@ function LazyPanelLoader() {
 }
 
 export default function Products() {
+  const { user } = useAuthStore()
   const [products, setProducts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -34,6 +38,7 @@ export default function Products() {
   const [showStockModal, setShowStockModal] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState<any>(null)
   const [showImportModal, setShowImportModal] = useState(false)
+  const isAdmin = user?.role === 'ADMIN'
 
   useEffect(() => {
     fetchProducts()
@@ -56,6 +61,7 @@ export default function Products() {
 
     try {
       await api.delete(`/products/${id}`)
+      invalidateActiveProductsCache()
       toast.success('Producto eliminado')
       fetchProducts()
     } catch (error) {
@@ -180,6 +186,23 @@ export default function Products() {
     setSelectedFamily(prev => prev === family ? null : family)
   }
 
+  const handleExportProducts = async () => {
+    const rowsToExport = hasActiveFilter ? filteredProducts : products
+
+    if (rowsToExport.length === 0) {
+      toast.error('No hay productos para exportar con el filtro actual')
+      return
+    }
+
+    try {
+      await exportProductsWorkbook(rowsToExport)
+      toast.success('Productos exportados a Excel')
+    } catch (error) {
+      console.error('Products export error:', error)
+      toast.error('No se pudo exportar el catálogo de productos')
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -198,12 +221,22 @@ export default function Products() {
           </h1>
         </div>
         <div className="flex space-x-3">
-          <button
-            onClick={() => setShowImportModal(true)}
-            className="btn btn-secondary"
-          >
-            Importar Excel
-          </button>
+          {isAdmin ? (
+            <>
+              <button
+                onClick={() => void handleExportProducts()}
+                className="btn btn-secondary"
+              >
+                Exportar
+              </button>
+              <button
+                onClick={() => setShowImportModal(true)}
+                className="btn btn-secondary"
+              >
+                Importar
+              </button>
+            </>
+          ) : null}
           <button
             onClick={() => {
               setEditingProduct(null)
@@ -491,24 +524,26 @@ export default function Products() {
       </Modal>
 
       {/* Modal de Importación */}
-      <Modal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        title="Importar Productos desde Excel"
-        maxWidth="xl"
-      >
-        {showImportModal ? (
-          <Suspense fallback={<LazyPanelLoader />}>
-            <ImportProductsModal
-              onSuccess={() => {
-                setShowImportModal(false)
-                fetchProducts()
-              }}
-              onCancel={() => setShowImportModal(false)}
-            />
-          </Suspense>
-        ) : null}
-      </Modal>
+      {isAdmin ? (
+        <Modal
+          isOpen={showImportModal}
+          onClose={() => setShowImportModal(false)}
+          title="Importar Productos desde Excel"
+          maxWidth="xl"
+        >
+          {showImportModal ? (
+            <Suspense fallback={<LazyPanelLoader />}>
+              <ImportProductsModal
+                onSuccess={() => {
+                  setShowImportModal(false)
+                  fetchProducts()
+                }}
+                onCancel={() => setShowImportModal(false)}
+              />
+            </Suspense>
+          ) : null}
+        </Modal>
+      ) : null}
     </div>
   )
 }
@@ -557,6 +592,7 @@ function StockMovementForm({ product, onSuccess, onCancel }: any) {
         reference: formData.reference.trim() || null
       })
 
+      invalidateActiveProductsCache()
       toast.success('Movimiento de stock registrado')
       onSuccess()
     } catch (error: any) {

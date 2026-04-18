@@ -9,7 +9,7 @@ import {
   addStockMovement,
   importProductsFromExcel
 } from '../controllers/product.controller'
-import { authMiddleware } from '../middleware/auth.middleware'
+import { adminMiddleware, authMiddleware } from '../middleware/auth.middleware'
 import { spreadsheetUpload, validateSpreadsheetUpload } from '../middleware/upload.middleware'
 import { validateRequest } from '../middleware/validation.middleware'
 import {
@@ -28,7 +28,13 @@ router.get('/', validateRequest({ query: productsQuerySchema }), getProducts)
 router.get('/low-stock', getLowStockProducts)
 router.get('/:id', validateRequest({ params: productIdParamSchema }), getProductById)
 router.post('/', validateRequest({ body: createProductBodySchema }), createProduct)
-router.post('/import', spreadsheetUpload.single('file'), validateSpreadsheetUpload(), importProductsFromExcel)
+router.post(
+  '/import',
+  adminMiddleware,
+  spreadsheetUpload.single('file'),
+  validateSpreadsheetUpload(),
+  importProductsFromExcel
+)
 router.put(
   '/:id',
   validateRequest({ params: productIdParamSchema, body: updateProductBodySchema }),
