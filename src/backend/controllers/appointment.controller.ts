@@ -60,8 +60,22 @@ const appointmentInclude = {
       saleNumber: true,
       total: true,
       paymentMethod: true,
+      paymentBreakdown: true,
       status: true,
-      date: true
+      date: true,
+      pendingPayment: {
+        select: {
+          collections: {
+            select: {
+              amount: true,
+              paymentMethod: true,
+              showInOfficialCash: true,
+              operationDate: true,
+              createdAt: true
+            }
+          }
+        }
+      }
     }
   }
 } satisfies Prisma.AppointmentInclude

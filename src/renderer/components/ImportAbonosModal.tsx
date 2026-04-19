@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertCircle, CheckCircle, FileSpreadsheet, Upload, X } from 'lucide-react'
+import { AlertCircle, CheckCircle, FileSpreadsheet } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../utils/api'
 import {
@@ -353,7 +353,6 @@ export default function ImportAbonosModal({
                   className="btn btn-primary"
                   disabled={!canResolveMissing}
                 >
-                  <Upload className="mr-2 h-4 w-4" />
                   Crear fichas e importar
                 </button>
                 <button
@@ -365,7 +364,6 @@ export default function ImportAbonosModal({
                   className="btn btn-secondary"
                   disabled={!canResolveMissing}
                 >
-                  <X className="mr-2 h-4 w-4" />
                   Omitir esos abonos e importar
                 </button>
               </div>
@@ -424,7 +422,6 @@ export default function ImportAbonosModal({
           className="btn btn-secondary"
           disabled={loading}
         >
-          <X className="mr-2 h-4 w-4" />
           {results ? 'Cerrar' : 'Cancelar'}
         </button>
         {!preview && (
@@ -434,7 +431,6 @@ export default function ImportAbonosModal({
             className="btn btn-primary"
             disabled={!canAnalyze}
           >
-            <Upload className="mr-2 h-4 w-4" />
             {loading ? 'Analizando...' : 'Analizar archivo'}
           </button>
         )}
@@ -445,7 +441,6 @@ export default function ImportAbonosModal({
             className="btn btn-primary"
             disabled={!canCommit}
           >
-            <Upload className="mr-2 h-4 w-4" />
             {loading ? 'Importando...' : 'Confirmar importación'}
           </button>
         )}

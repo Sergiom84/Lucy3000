@@ -10,7 +10,7 @@ describe('report.controller sales report', () => {
     resetPrismaMock()
   })
 
-  it('separates collected revenue from work performed and adds abono, bono and top services summaries', async () => {
+  it('separates collected revenue from work performed and adds abono, bono consumption and top services summaries', async () => {
     prismaMock.sale.findMany
       .mockResolvedValueOnce([
       {
@@ -109,16 +109,18 @@ describe('report.controller sales report', () => {
       { type: 'TOP_UP', amount: 25 },
       { type: 'CONSUMPTION', amount: 48 }
     ])
-    prismaMock.bonoPack.findMany
-      .mockResolvedValueOnce([
-        { id: 'bono-1', name: 'Bono Premium' },
-        { id: 'bono-2', name: 'Bono Premium' },
-        { id: 'bono-3', name: 'Bono Glow' }
-      ])
-      .mockResolvedValueOnce([
-        { sessions: [{ id: 'session-1' }, { id: 'session-2' }] },
-        { sessions: [] }
-      ])
+    prismaMock.bonoPack.findMany.mockResolvedValue([
+      {
+        price: 120,
+        totalSessions: 3,
+        sessions: [{ id: 'session-1' }, { id: 'session-2' }]
+      },
+      {
+        price: 90,
+        totalSessions: 3,
+        sessions: []
+      }
+    ])
     prismaMock.setting.findUnique.mockResolvedValue({
       value: JSON.stringify([
         {
@@ -159,12 +161,8 @@ describe('report.controller sales report', () => {
           consumptionTotal: 48
         },
         bonoSummary: {
-          soldCount: 3,
           consumedSessions: 2,
-          topBonos: [
-            { name: 'Bono Premium', count: 2 },
-            { name: 'Bono Glow', count: 1 }
-          ]
+          consumedAmount: 80
         },
         topServices: [
           {

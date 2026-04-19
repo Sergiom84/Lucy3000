@@ -403,6 +403,139 @@ const ensureAgendaDayNotesTable = async () => {
   )
 }
 
+const ensureDashboardRemindersTable = async () => {
+  if (await tableExists('dashboard_reminders')) {
+    const dashboardReminderColumns = await getTableColumns('dashboard_reminders')
+    const hasIsCompleted = dashboardReminderColumns.some((column) => column.name === 'isCompleted')
+    const hasCompletedAt = dashboardReminderColumns.some((column) => column.name === 'completedAt')
+
+    if (!hasIsCompleted) {
+      await prisma.$executeRawUnsafe(
+        'ALTER TABLE "dashboard_reminders" ADD COLUMN "isCompleted" BOOLEAN NOT NULL DEFAULT false'
+      )
+    }
+
+    if (!hasCompletedAt) {
+      await prisma.$executeRawUnsafe(
+        'ALTER TABLE "dashboard_reminders" ADD COLUMN "completedAt" DATETIME'
+      )
+    }
+
+    return
+  }
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE "dashboard_reminders" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "text" TEXT NOT NULL,
+      "isCompleted" BOOLEAN NOT NULL DEFAULT false,
+      "completedAt" DATETIME,
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" DATETIME NOT NULL
+    )
+  `)
+  await prisma.$executeRawUnsafe(
+    'CREATE INDEX "dashboard_reminders_isCompleted_createdAt_idx" ON "dashboard_reminders"("isCompleted", "createdAt")'
+  )
+}
+
+const ensurePendingPaymentsTable = async () => {
+  if (!(await tableExists('pending_payments'))) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE "pending_payments" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "saleId" TEXT NOT NULL,
+        "clientId" TEXT NOT NULL,
+        "amount" DECIMAL NOT NULL,
+        "status" TEXT NOT NULL DEFAULT 'OPEN',
+        "settledAt" DATETIME,
+        "settledPaymentMethod" TEXT,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" DATETIME NOT NULL,
+        CONSTRAINT "pending_payments_saleId_fkey" FOREIGN KEY ("saleId") REFERENCES "sales" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "pending_payments_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "clients" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+      )
+    `)
+  } else {
+    const pendingPaymentColumns = await getTableColumns('pending_payments')
+    const hasSettledPaymentMethod = pendingPaymentColumns.some(
+      (column) => column.name === 'settledPaymentMethod'
+    )
+
+    if (!hasSettledPaymentMethod) {
+      await prisma.$executeRawUnsafe(
+        'ALTER TABLE "pending_payments" ADD COLUMN "settledPaymentMethod" TEXT'
+      )
+    }
+  }
+
+  if (!(await indexExists('pending_payments_saleId_key'))) {
+    await prisma.$executeRawUnsafe(
+      'CREATE UNIQUE INDEX "pending_payments_saleId_key" ON "pending_payments"("saleId")'
+    )
+  }
+
+  if (!(await indexExists('pending_payments_clientId_status_createdAt_idx'))) {
+    await prisma.$executeRawUnsafe(
+      'CREATE INDEX "pending_payments_clientId_status_createdAt_idx" ON "pending_payments"("clientId", "status", "createdAt")'
+    )
+  }
+}
+
+const ensureSalesPaymentBreakdownColumn = async () => {
+  if (!(await tableExists('sales'))) {
+    return
+  }
+
+  const saleColumns = await getTableColumns('sales')
+  const hasPaymentBreakdown = saleColumns.some((column) => column.name === 'paymentBreakdown')
+
+  if (!hasPaymentBreakdown) {
+    await prisma.$executeRawUnsafe('ALTER TABLE "sales" ADD COLUMN "paymentBreakdown" TEXT')
+  }
+}
+
+const ensurePendingPaymentCollectionsTable = async () => {
+  if (!(await tableExists('pending_payment_collections'))) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE "pending_payment_collections" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "pendingPaymentId" TEXT NOT NULL,
+        "saleId" TEXT NOT NULL,
+        "clientId" TEXT NOT NULL,
+        "userId" TEXT NOT NULL,
+        "amount" DECIMAL NOT NULL,
+        "paymentMethod" TEXT NOT NULL,
+        "showInOfficialCash" BOOLEAN NOT NULL DEFAULT true,
+        "operationDate" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "pending_payment_collections_pendingPaymentId_fkey" FOREIGN KEY ("pendingPaymentId") REFERENCES "pending_payments" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "pending_payment_collections_saleId_fkey" FOREIGN KEY ("saleId") REFERENCES "sales" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "pending_payment_collections_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "clients" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "pending_payment_collections_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+      )
+    `)
+  }
+
+  if (!(await indexExists('pending_payment_collections_pendingPaymentId_operationDate_idx'))) {
+    await prisma.$executeRawUnsafe(
+      'CREATE INDEX "pending_payment_collections_pendingPaymentId_operationDate_idx" ON "pending_payment_collections"("pendingPaymentId", "operationDate")'
+    )
+  }
+
+  if (!(await indexExists('pending_payment_collections_saleId_operationDate_idx'))) {
+    await prisma.$executeRawUnsafe(
+      'CREATE INDEX "pending_payment_collections_saleId_operationDate_idx" ON "pending_payment_collections"("saleId", "operationDate")'
+    )
+  }
+
+  if (!(await indexExists('pending_payment_collections_clientId_operationDate_idx'))) {
+    await prisma.$executeRawUnsafe(
+      'CREATE INDEX "pending_payment_collections_clientId_operationDate_idx" ON "pending_payment_collections"("clientId", "operationDate")'
+    )
+  }
+}
+
 const ensureDefaultAppointmentLegends = async () => {
   if (!(await tableExists('appointment_legends'))) {
     return
@@ -429,6 +562,7 @@ export const ensureSqliteCompatibilityMigrations = async () => {
 
   await ensureUsersUsernameColumn()
   await ensureAccountBalancePaymentMethodColumn()
+  await ensureSalesPaymentBreakdownColumn()
   await ensureLegacyAccountBalanceImportColumns()
   await ensureLegacyBonoImportColumns()
   await ensureAppointmentGuestSupport()
@@ -436,5 +570,8 @@ export const ensureSqliteCompatibilityMigrations = async () => {
   await ensureAppointmentLegendTable()
   await ensureAgendaBlocksTable()
   await ensureAgendaDayNotesTable()
+  await ensureDashboardRemindersTable()
+  await ensurePendingPaymentsTable()
+  await ensurePendingPaymentCollectionsTable()
   await ensureDefaultAppointmentLegends()
 }

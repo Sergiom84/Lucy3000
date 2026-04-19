@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Clock, Save, X } from 'lucide-react'
+import { Clock, X } from 'lucide-react'
 import api from '../utils/api'
 import {
   loadAppointmentClients,
@@ -43,8 +43,41 @@ interface AppointmentFormProps {
   preselectedDate?: Date
   preselectedStartTime?: string
   preselectedEndTime?: string
-  initialCabin?: 'LUCY' | 'TAMARA' | 'CABINA_1' | 'CABINA_2'
+  initialCabin?: CabinValue
   fromBono?: BonoAppointmentContext | null
+}
+
+type CabinValue = 'LUCY' | 'TAMARA' | 'CABINA_1' | 'CABINA_2'
+
+type AppointmentCopyDraft = {
+  date: string
+  cabin: CabinValue
+  professional: string
+}
+
+type AppointmentCopyItem = AppointmentCopyDraft & {
+  id: string
+  startTime: string
+}
+
+type AppointmentAvailabilityItem = {
+  id: string
+  startTime: string
+  endTime: string
+  professional?: string | null
+  cabin?: string | null
+  status?: string | null
+}
+
+type PlannedAppointmentSlot = {
+  id: string
+  label: string
+  date: string
+  startTime: string
+  endTime: string
+  professional: string
+  cabin: CabinValue
+  excludeAppointmentId?: string
 }
 
 type ClientBonoSummary = {
@@ -56,6 +89,22 @@ type ClientBonoSummary = {
 }
 
 const SEARCH_RESULTS_LIMIT = 50
+const ACTIVE_APPOINTMENT_STATUSES = new Set(['SCHEDULED', 'CONFIRMED', 'IN_PROGRESS'])
+const CABIN_LABELS: Record<CabinValue, string> = {
+  LUCY: 'Lucy',
+  TAMARA: 'Tamara',
+  CABINA_1: 'Cabina 1',
+  CABINA_2: 'Cabina 2'
+}
+
+const createEmptyAppointmentCopyDraft = (
+  cabin: CabinValue,
+  professional = ''
+): AppointmentCopyDraft => ({
+  date: '',
+  cabin,
+  professional
+})
 
 const getInitialAppointmentServiceIds = (appointment: any) => {
   if (!appointment) {
@@ -84,6 +133,26 @@ const getLocalDateInputValue = (value: Date) => {
   return `${year}-${month}-${day}`
 }
 
+const normalizeSlotMatchValue = (value: unknown) =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLocaleUpperCase('es-ES')
+
+const timeRangesOverlap = (leftStart: string, leftEnd: string, rightStart: string, rightEnd: string) =>
+  leftStart < rightEnd && leftEnd > rightStart
+
+const getDayRangeParams = (date: string) => ({
+  startDate: `${date}T00:00:00.000Z`,
+  endDate: `${date}T23:59:59.999Z`
+})
+
+const scheduleFieldGridClassName =
+  'grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(10.75rem,1fr))]'
+
+const scheduleDateInputClassName = 'input min-w-0 pr-12 text-[15px] tabular-nums'
+
 function TimeInput({
   value,
   onChange,
@@ -107,14 +176,14 @@ function TimeInput({
   }, [listId])
 
   return (
-    <div className="relative">
+    <div className="relative min-w-0">
       <Clock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
       <input
         type="text"
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onBlur={onBlur}
-        className="input pl-10 disabled:cursor-not-allowed disabled:opacity-70 read-only:bg-gray-50 read-only:text-gray-600 dark:read-only:bg-gray-800/60 dark:read-only:text-gray-300"
+        className="input min-w-0 pl-10 pr-4 text-[15px] tabular-nums disabled:cursor-not-allowed disabled:opacity-70 read-only:bg-gray-50 read-only:text-gray-600 dark:read-only:bg-gray-800/60 dark:read-only:text-gray-300"
         placeholder={placeholder}
         list={listId}
         inputMode="numeric"
@@ -419,12 +488,12 @@ function SearchableSelect({
   )
 }
 
-const cabinOptions = [
-  { value: 'LUCY', label: 'Lucy' },
-  { value: 'TAMARA', label: 'Tamara' },
-  { value: 'CABINA_1', label: 'Cabina 1' },
-  { value: 'CABINA_2', label: 'Cabina 2' }
-]
+const cabinOptions = (Object.entries(CABIN_LABELS) as Array<[CabinValue, string]>).map(
+  ([value, label]) => ({
+    value,
+    label
+  })
+)
 
 const getRemainingSessions = (bonoPack: ClientBonoSummary) => {
   const consumed = bonoPack.sessions.filter((session) => session.status === 'CONSUMED').length
@@ -453,11 +522,17 @@ export default function AppointmentForm({
   const [clientBonos, setClientBonos] = useState<ClientBonoSummary[]>([])
 
   const isCreatingFromBono = !appointment && Boolean(fromBono?.bonoPackId)
+  const canCreateCopies = !appointment && !isCreatingFromBono
   const isEditingGuestAppointment = Boolean(appointment?.id) && !appointment?.clientId
   const lockClient = isCreatingFromBono && Boolean(fromBono?.lockClient)
   const lockService = isCreatingFromBono && Boolean(fromBono?.lockService)
   const canToggleGuestMode = !appointment && !isCreatingFromBono
   const [guestMode, setGuestMode] = useState(isEditingGuestAppointment)
+  const [copyAppointmentEnabled, setCopyAppointmentEnabled] = useState(false)
+  const [appointmentCopies, setAppointmentCopies] = useState<AppointmentCopyItem[]>([])
+  const [copyDraft, setCopyDraft] = useState<AppointmentCopyDraft>(
+    createEmptyAppointmentCopyDraft(initialCabin)
+  )
 
   const [formData, setFormData] = useState({
     clientId: fromBono?.clientId || '',
@@ -474,6 +549,7 @@ export default function AppointmentForm({
   })
   const [startTimeInput, setStartTimeInput] = useState('')
   const [endTimeInput, setEndTimeInput] = useState('')
+  const [copyStartTimeInput, setCopyStartTimeInput] = useState('')
 
   const startTimeState = useMemo(
     () => getAppointmentTimeInputState(startTimeInput, 'start'),
@@ -485,8 +561,14 @@ export default function AppointmentForm({
     [endTimeInput, startTimeState.normalized]
   )
 
+  const copyStartTimeState = useMemo(
+    () => getAppointmentTimeInputState(copyStartTimeInput, 'start'),
+    [copyStartTimeInput]
+  )
+
   const normalizedStartTime = startTimeState.error ? '' : startTimeState.normalized
   const normalizedEndTime = endTimeState.error ? '' : endTimeState.normalized
+  const normalizedCopyStartTime = copyStartTimeState.error ? '' : copyStartTimeState.normalized
 
   useEffect(() => {
     let cancelled = false
@@ -538,6 +620,10 @@ export default function AppointmentForm({
 
   useEffect(() => {
     if (appointment) {
+      setCopyAppointmentEnabled(false)
+      setAppointmentCopies([])
+      setCopyDraft(createEmptyAppointmentCopyDraft(initialCabin))
+      setCopyStartTimeInput('')
       setProfessionalTouched(false)
       const appointmentDate = new Date(appointment.date)
       setGuestMode(!appointment.clientId)
@@ -563,6 +649,10 @@ export default function AppointmentForm({
       setGuestMode(false)
     }
 
+    setCopyAppointmentEnabled(false)
+    setAppointmentCopies([])
+    setCopyDraft(createEmptyAppointmentCopyDraft(initialCabin))
+    setCopyStartTimeInput('')
     setProfessionalTouched(false)
     setFormData((prev) => ({
       ...prev,
@@ -759,6 +849,11 @@ export default function AppointmentForm({
     return ''
   }
 
+  const computedCopyEndTime = useMemo(
+    () => (normalizedCopyStartTime ? getSuggestedEndTime(normalizedCopyStartTime) : ''),
+    [normalizedCopyStartTime, totalSelectedServiceDuration]
+  )
+
   const handleStartTimeInputChange = (value: string) => {
     setStartTimeInput(value)
 
@@ -782,6 +877,16 @@ export default function AppointmentForm({
   const handleEndTimeBlur = () => {
     if (endTimeState.normalized) {
       setEndTimeInput(endTimeState.normalized)
+    }
+  }
+
+  const handleCopyStartTimeInputChange = (value: string) => {
+    setCopyStartTimeInput(value)
+  }
+
+  const handleCopyStartTimeBlur = () => {
+    if (copyStartTimeState.normalized) {
+      setCopyStartTimeInput(copyStartTimeState.normalized)
     }
   }
 
@@ -841,21 +946,318 @@ export default function AppointmentForm({
     }))
   }
 
-  const showCalendarSyncWarning = (savedAppointment: any, successMessage: string) => {
+  const handleCopyDraftChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
+  ) => {
+    const { name, value } = e.target
+    setCopyDraft((prev) => ({
+      ...prev,
+      [name]: value
+    }))
+  }
+
+  const validateAppointmentSlotInput = ({
+    date,
+    startTime,
+    endTime,
+    startError,
+    endError
+  }: {
+    date: string
+    startTime: string
+    endTime: string
+    startError?: string | null
+    endError?: string | null
+  }) => {
+    if (!date) {
+      return 'Debe seleccionar una fecha'
+    }
+
+    if (startError || endError) {
+      return startError || endError || 'Debe indicar un horario valido'
+    }
+
+    if (!startTime || !endTime) {
+      return 'Debe indicar horario de inicio y fin'
+    }
+
+    if (startTime >= endTime) {
+      return 'La hora de inicio debe ser anterior a la hora de fin'
+    }
+
+    const startMinutes = timeToMinutes(startTime)
+    const endMinutes = timeToMinutes(endTime)
+    if (
+      startMinutes < BUSINESS_START_MINUTES ||
+      startMinutes >= BUSINESS_END_MINUTES ||
+      endMinutes > BUSINESS_END_MINUTES
+    ) {
+      return 'El horario debe estar entre 08:00 y 22:00'
+    }
+
+    const todayStr = getLocalDateInputValue(new Date())
+    if (date < todayStr) {
+      return 'No se puede crear una cita en el pasado'
+    }
+
+    if (date === todayStr) {
+      const now = new Date()
+      const nowMinutes = now.getHours() * 60 + now.getMinutes()
+      if (startMinutes < nowMinutes) {
+        return 'No se puede crear una cita en el pasado'
+      }
+    }
+
+    return null
+  }
+
+  const validatePlannedAppointmentAvailability = async (slots: PlannedAppointmentSlot[]) => {
+    if (slots.length === 0) {
+      return null
+    }
+
+    const uniqueDates = [...new Set(slots.map((slot) => slot.date).filter(Boolean))]
+    const availabilityEntries = await Promise.all(
+      uniqueDates.map(async (date) => {
+        const [appointmentsResponse, agendaBlocksResponse] = await Promise.all([
+          api.get(`/appointments/date/${date}`),
+          api.get('/appointments/blocks', { params: getDayRangeParams(date) })
+        ])
+
+        return {
+          date,
+          appointments: Array.isArray(appointmentsResponse.data)
+            ? (appointmentsResponse.data as AppointmentAvailabilityItem[])
+            : [],
+          agendaBlocks: Array.isArray(agendaBlocksResponse.data)
+            ? (agendaBlocksResponse.data as AppointmentAvailabilityItem[])
+            : []
+        }
+      })
+    )
+
+    const appointmentsByDate = new Map(
+      availabilityEntries.map((entry) => [entry.date, entry.appointments])
+    )
+    const agendaBlocksByDate = new Map(
+      availabilityEntries.map((entry) => [entry.date, entry.agendaBlocks])
+    )
+
+    for (let index = 0; index < slots.length; index += 1) {
+      const slot = slots[index]
+      const previousSlots = slots.slice(0, index)
+
+      const plannedProfessionalConflict = previousSlots.find(
+        (plannedSlot) =>
+          plannedSlot.date === slot.date &&
+          timeRangesOverlap(
+            plannedSlot.startTime,
+            plannedSlot.endTime,
+            slot.startTime,
+            slot.endTime
+          ) &&
+          normalizeSlotMatchValue(plannedSlot.professional) ===
+            normalizeSlotMatchValue(slot.professional)
+      )
+
+      if (plannedProfessionalConflict) {
+        return `${slot.label}: ${slot.professional} ya queda ocupada por ${plannedProfessionalConflict.label} (${plannedProfessionalConflict.startTime}-${plannedProfessionalConflict.endTime}).`
+      }
+
+      const plannedCabinConflict = previousSlots.find(
+        (plannedSlot) =>
+          plannedSlot.date === slot.date &&
+          timeRangesOverlap(
+            plannedSlot.startTime,
+            plannedSlot.endTime,
+            slot.startTime,
+            slot.endTime
+          ) &&
+          plannedSlot.cabin === slot.cabin
+      )
+
+      if (plannedCabinConflict) {
+        return `${slot.label}: la cabina ${CABIN_LABELS[slot.cabin]} coincide con ${plannedCabinConflict.label} (${plannedCabinConflict.startTime}-${plannedCabinConflict.endTime}).`
+      }
+
+      const matchingAppointment = (appointmentsByDate.get(slot.date) || []).find(
+        (existingSlot) =>
+          existingSlot.id !== slot.excludeAppointmentId &&
+          ACTIVE_APPOINTMENT_STATUSES.has(String(existingSlot.status || '').toUpperCase()) &&
+          timeRangesOverlap(
+            String(existingSlot.startTime || ''),
+            String(existingSlot.endTime || ''),
+            slot.startTime,
+            slot.endTime
+          ) &&
+          normalizeSlotMatchValue(existingSlot.professional) ===
+            normalizeSlotMatchValue(slot.professional)
+      )
+
+      if (matchingAppointment) {
+        return `${slot.label}: ${slot.professional} ya tiene una cita de ${matchingAppointment.startTime} a ${matchingAppointment.endTime}.`
+      }
+
+      const matchingCabinAppointment = (appointmentsByDate.get(slot.date) || []).find(
+        (existingSlot) =>
+          existingSlot.id !== slot.excludeAppointmentId &&
+          ACTIVE_APPOINTMENT_STATUSES.has(String(existingSlot.status || '').toUpperCase()) &&
+          timeRangesOverlap(
+            String(existingSlot.startTime || ''),
+            String(existingSlot.endTime || ''),
+            slot.startTime,
+            slot.endTime
+          ) &&
+          String(existingSlot.cabin || '') === slot.cabin
+      )
+
+      if (matchingCabinAppointment) {
+        return `${slot.label}: la cabina ${CABIN_LABELS[slot.cabin]} ya está ocupada de ${matchingCabinAppointment.startTime} a ${matchingCabinAppointment.endTime}.`
+      }
+
+      const matchingProfessionalBlock = (agendaBlocksByDate.get(slot.date) || []).find(
+        (existingSlot) =>
+          timeRangesOverlap(
+            String(existingSlot.startTime || ''),
+            String(existingSlot.endTime || ''),
+            slot.startTime,
+            slot.endTime
+          ) &&
+          normalizeSlotMatchValue(existingSlot.professional) ===
+            normalizeSlotMatchValue(slot.professional)
+      )
+
+      if (matchingProfessionalBlock) {
+        return `${slot.label}: ${slot.professional} tiene un bloqueo de ${matchingProfessionalBlock.startTime} a ${matchingProfessionalBlock.endTime}.`
+      }
+
+      const matchingCabinBlock = (agendaBlocksByDate.get(slot.date) || []).find(
+        (existingSlot) =>
+          timeRangesOverlap(
+            String(existingSlot.startTime || ''),
+            String(existingSlot.endTime || ''),
+            slot.startTime,
+            slot.endTime
+          ) &&
+          String(existingSlot.cabin || '') === slot.cabin
+      )
+
+      if (matchingCabinBlock) {
+        return `${slot.label}: la cabina ${CABIN_LABELS[slot.cabin]} tiene un bloqueo de ${matchingCabinBlock.startTime} a ${matchingCabinBlock.endTime}.`
+      }
+    }
+
+    return null
+  }
+
+  const handleCopyAppointmentToggle = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const { checked } = event.target
+
+    if (!checked && appointmentCopies.length > 0) {
+      const shouldDiscard = window.confirm(
+        'Se eliminarán las copias añadidas. ¿Quieres continuar?'
+      )
+
+      if (!shouldDiscard) {
+        return
+      }
+    }
+
+    setCopyAppointmentEnabled(checked)
+
+    if (checked) {
+      setCopyDraft((prev) => ({
+        date: prev.date,
+        cabin: prev.cabin || (formData.cabin as CabinValue),
+        professional: prev.professional || formData.professional || professionals[0] || ''
+      }))
+      return
+    }
+
+    setAppointmentCopies([])
+    setCopyDraft(
+      createEmptyAppointmentCopyDraft(
+        formData.cabin as CabinValue,
+        formData.professional || professionals[0] || ''
+      )
+    )
+    setCopyStartTimeInput('')
+  }
+
+  const handleAddAppointmentCopy = () => {
+    if (!canCreateCopies) {
+      return
+    }
+
+    if (!copyDraft.professional.trim()) {
+      toast.error('Debes indicar un profesional para la copia')
+      return
+    }
+
+    const copyValidationError = validateAppointmentSlotInput({
+      date: copyDraft.date,
+      startTime: normalizedCopyStartTime,
+      endTime: computedCopyEndTime,
+      startError: copyStartTimeState.error
+    })
+
+    if (copyValidationError) {
+      toast.error(copyValidationError)
+      return
+    }
+
+    setAppointmentCopies((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-${prev.length + 1}`,
+        date: copyDraft.date,
+        startTime: normalizedCopyStartTime,
+        cabin: copyDraft.cabin,
+        professional: copyDraft.professional.trim()
+      }
+    ])
+
+    setCopyDraft((prev) => ({
+      ...prev,
+      date: ''
+    }))
+    setCopyStartTimeInput(normalizedCopyStartTime)
+
+    const wantsAnotherCopy = window.confirm('Copia añadida. ¿Quieres crear otra copia?')
+    if (!wantsAnotherCopy) {
+      toast.success('Las copias se guardarán junto con la cita al crearla')
+    }
+  }
+
+  const handleRemoveAppointmentCopy = (copyId: string) => {
+    setAppointmentCopies((prev) => prev.filter((copy) => copy.id !== copyId))
+  }
+
+  const getCalendarSyncWarningMessage = (savedAppointment: any, label: string) => {
     const syncError = String(savedAppointment?.googleCalendarSyncError || '').trim()
     if (savedAppointment?.googleCalendarSyncStatus !== 'ERROR' || !syncError) {
+      return null
+    }
+
+    return `${label}: Google Calendar no se pudo sincronizar. ${syncError}`
+  }
+
+  const showCalendarSyncWarning = (savedAppointment: any, successMessage: string) => {
+    const warningMessage = getCalendarSyncWarningMessage(savedAppointment, successMessage)
+    if (!warningMessage) {
       toast.success(successMessage)
       return
     }
 
     toast.success(successMessage)
-    toast(`${successMessage}, pero Google Calendar no se pudo sincronizar. ${syncError}`)
+    toast(warningMessage)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     let requestPayload: Record<string, unknown> | null = null
+    let copySlots: Array<AppointmentCopyItem & { endTime: string }> = []
 
     try {
       if (!guestMode && !formData.clientId) {
@@ -894,69 +1296,123 @@ export default function AppointmentForm({
         return
       }
 
-      if (startTimeState.error || endTimeState.error) {
-        toast.error(startTimeState.error || endTimeState.error || 'Debe indicar un horario valido')
+      if (!formData.professional.trim()) {
+        toast.error('Debe indicar un profesional')
         setLoading(false)
         return
       }
 
-      if (!normalizedStartTime || !normalizedEndTime) {
-        toast.error('Debe indicar horario de inicio y fin')
+      const mainSlotValidationError = validateAppointmentSlotInput({
+        date: formData.date,
+        startTime: normalizedStartTime,
+        endTime: normalizedEndTime,
+        startError: startTimeState.error,
+        endError: endTimeState.error
+      })
+
+      if (mainSlotValidationError) {
+        toast.error(mainSlotValidationError)
         setLoading(false)
         return
       }
 
-      // Validate start < end
-      if (normalizedStartTime >= normalizedEndTime) {
-        toast.error('La hora de inicio debe ser anterior a la hora de fin')
+      if (
+        copyAppointmentEnabled &&
+        copyDraft.date.trim().length > 0
+      ) {
+        toast.error('Añade la copia pendiente antes de guardar la cita')
         setLoading(false)
         return
       }
 
-      const startMinutes = timeToMinutes(normalizedStartTime)
-      const endMinutes = timeToMinutes(normalizedEndTime)
-      if (startMinutes < BUSINESS_START_MINUTES || startMinutes >= BUSINESS_END_MINUTES || endMinutes > BUSINESS_END_MINUTES) {
-        toast.error('El horario debe estar entre 08:00 y 22:00')
-        setLoading(false)
-        return
-      }
+      copySlots = appointmentCopies.map((copy, index) => {
+        const copyEndTime = getSuggestedEndTime(copy.startTime)
+        const copyValidationError = validateAppointmentSlotInput({
+          date: copy.date,
+          startTime: copy.startTime,
+          endTime: copyEndTime
+        })
 
-      // Validate not in the past
-      const todayStr = getLocalDateInputValue(new Date())
-      if (formData.date < todayStr) {
-        toast.error('No se puede crear una cita en el pasado')
-        setLoading(false)
-        return
-      }
-      if (formData.date === todayStr) {
-        const now = new Date()
-        const nowMinutes = now.getHours() * 60 + now.getMinutes()
-        if (startMinutes < nowMinutes) {
-          toast.error('No se puede crear una cita en el pasado')
-          setLoading(false)
-          return
+        if (copyValidationError) {
+          throw new Error(`La copia ${index + 1} no es válida. ${copyValidationError}`)
         }
-      }
+
+        if (!copy.professional.trim()) {
+          throw new Error(`La copia ${index + 1} necesita un profesional`)
+        }
+
+        return {
+          ...copy,
+          endTime: copyEndTime
+        }
+      })
 
       const normalizedGuestName = formData.guestName.trim()
       const normalizedGuestPhone = formData.guestPhone.trim()
-      const dataToSend: Record<string, unknown> = {
+      const buildAppointmentRequest = ({
+        date,
+        startTime,
+        endTime,
+        cabin,
+        professional
+      }: {
+        date: string
+        startTime: string
+        endTime: string
+        cabin: CabinValue
+        professional: string
+      }) => ({
         clientId: guestMode ? null : formData.clientId,
         guestName: guestMode ? normalizedGuestName : null,
         guestPhone: guestMode ? normalizedGuestPhone : null,
         serviceId: formData.serviceIds[0],
         serviceIds: formData.serviceIds,
         userId: formData.userId || user?.id,
-        cabin: formData.cabin,
-        professional: formData.professional,
-        date: new Date(formData.date).toISOString(),
-        startTime: normalizedStartTime,
-        endTime: normalizedEndTime,
+        cabin,
+        professional: professional.trim(),
+        date: new Date(date).toISOString(),
+        startTime,
+        endTime,
         status: formData.status,
         notes: formData.notes.trim() || null,
         reminder: formData.reminder
-      }
+      })
+
+      const dataToSend = buildAppointmentRequest({
+        date: formData.date,
+        startTime: normalizedStartTime,
+        endTime: normalizedEndTime,
+        cabin: formData.cabin as CabinValue,
+        professional: formData.professional
+      })
       requestPayload = dataToSend
+
+      const slotAvailabilityError = await validatePlannedAppointmentAvailability([
+        {
+          id: appointment?.id || 'main',
+          label: 'Cita principal',
+          date: formData.date,
+          startTime: normalizedStartTime,
+          endTime: normalizedEndTime,
+          professional: formData.professional.trim(),
+          cabin: formData.cabin as CabinValue,
+          excludeAppointmentId: appointment?.id || undefined
+        },
+        ...copySlots.map((copy, index) => ({
+          id: copy.id,
+          label: `Copia ${index + 1}`,
+          date: copy.date,
+          startTime: copy.startTime,
+          endTime: copy.endTime,
+          professional: copy.professional.trim(),
+          cabin: copy.cabin
+        }))
+      ])
+
+      if (slotAvailabilityError) {
+        toast.error(slotAvailabilityError)
+        return
+      }
 
       if (appointment) {
         const response = await api.put(`/appointments/${appointment.id}`, dataToSend)
@@ -978,22 +1434,87 @@ export default function AppointmentForm({
         const response = await api.post(`/bonos/${fromBono.bonoPackId}/appointments`, bonoPayload)
         showCalendarSyncWarning(response.data, 'Cita creada y sesion reservada')
       } else {
-        const response = await api.post('/appointments', dataToSend)
-        showCalendarSyncWarning(response.data, 'Cita creada exitosamente')
+        const createdAppointments: any[] = []
+        const mainResponse = await api.post('/appointments', dataToSend)
+        createdAppointments.push(mainResponse.data)
+
+        for (let index = 0; index < copySlots.length; index += 1) {
+          try {
+            const copyResponse = await api.post(
+              '/appointments',
+              buildAppointmentRequest(copySlots[index])
+            )
+            createdAppointments.push(copyResponse.data)
+          } catch (error: any) {
+            const createdCopies = Math.max(createdAppointments.length - 1, 0)
+            const partialResultMessage =
+              createdCopies > 0
+                ? `La cita principal y ${createdCopies} ${createdCopies === 1 ? 'copia se ha creado' : 'copias se han creado'}, pero la copia ${index + 1} no se pudo guardar`
+                : 'La cita principal se ha creado, pero no se pudo guardar una de las copias'
+            toast.error(
+              `${partialResultMessage}. ${error.response?.data?.error || 'Error al guardar la copia'}`
+            )
+            onSuccess()
+            return
+          }
+        }
+
+        if (copySlots.length > 0) {
+          toast.success(
+            copySlots.length === 1
+              ? 'Cita y 1 copia creadas exitosamente'
+              : `Cita y ${copySlots.length} copias creadas exitosamente`
+          )
+
+          const syncWarnings = createdAppointments
+            .map((savedAppointment, index) =>
+              getCalendarSyncWarningMessage(
+                savedAppointment,
+                index === 0 ? 'Cita principal' : `Copia ${index}`
+              )
+            )
+            .filter((message): message is string => Boolean(message))
+
+          if (syncWarnings.length > 0) {
+            toast(syncWarnings.join(' '))
+          }
+        } else {
+          showCalendarSyncWarning(mainResponse.data, 'Cita creada exitosamente')
+        }
       }
 
       onSuccess()
     } catch (error: any) {
+      if (error instanceof Error && !(error as any).response) {
+        toast.error(error.message)
+        return
+      }
+
       console.error('Error saving appointment:', {
         error,
         appointmentId: appointment?.id || null,
         fromBonoPackId: fromBono?.bonoPackId || null,
         requestPayload
       })
-      toast.error(error.response?.data?.error || 'Error al guardar la cita')
+      const backendErrorMessage = error.response?.data?.error || 'Error al guardar la cita'
+      if (!appointment && copySlots.length > 0 && error.response?.status === 409) {
+        toast.error(`No se pudo crear la cita principal. ${backendErrorMessage}`)
+        return
+      }
+
+      toast.error(backendErrorMessage)
     } finally {
       setLoading(false)
     }
+  }
+
+  const formatCopyDateLabel = (value: string) => {
+    const parsed = new Date(`${value}T00:00:00`)
+    if (Number.isNaN(parsed.getTime())) {
+      return value
+    }
+
+    return parsed.toLocaleDateString('es-ES')
   }
 
   return (
@@ -1156,8 +1677,8 @@ export default function AppointmentForm({
         <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-4">
           Fecha y Horario
         </h3>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div>
+        <div className={scheduleFieldGridClassName}>
+          <div className="min-w-0">
             <label className="label">
               Fecha <span className="text-red-500">*</span>
             </label>
@@ -1166,13 +1687,13 @@ export default function AppointmentForm({
               name="date"
               value={formData.date}
               onChange={handleChange}
-              className="input"
+              className={scheduleDateInputClassName}
               min={getLocalDateInputValue(new Date())}
               required
             />
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label className="label">
               Hora Inicio <span className="text-red-500">*</span>
             </label>
@@ -1189,7 +1710,7 @@ export default function AppointmentForm({
             )}
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label className="label">
               Hora Fin <span className="text-red-500">*</span>
             </label>
@@ -1211,18 +1732,8 @@ export default function AppointmentForm({
                 Se calculara automaticamente al indicar la hora de inicio.
               </p>
             )}
-            {normalizedStartTime && formData.serviceIds.length === 0 && (
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Se calcula automaticamente al seleccionar los servicios.
-              </p>
-            )}
-            {normalizedStartTime && totalSelectedServiceDuration > 0 && normalizedEndTime && (
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Fin calculado con la suma de todos los servicios.
-              </p>
-            )}
           </div>
-          <div>
+          <div className="min-w-0">
             <label className="label">
               Cabina <span className="text-red-500">*</span>
             </label>
@@ -1293,18 +1804,169 @@ export default function AppointmentForm({
         />
       </div>
 
-      <div className="flex items-center">
-        <input
-          type="checkbox"
-          id="reminder"
-          name="reminder"
-          checked={formData.reminder}
-          onChange={handleChange}
-          className="w-4 h-4 text-primary-600 bg-gray-100 border-gray-300 rounded focus:ring-primary-500"
-        />
-        <label htmlFor="reminder" className="ml-2 text-sm text-gray-900 dark:text-white">
-          Crear recordatorio interno para el equipo
-        </label>
+      <div className="space-y-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-6">
+          <div className="flex items-center">
+            <input
+              type="checkbox"
+              id="reminder"
+              name="reminder"
+              checked={formData.reminder}
+              onChange={handleChange}
+              className="w-4 h-4 text-primary-600 bg-gray-100 border-gray-300 rounded focus:ring-primary-500"
+            />
+            <label htmlFor="reminder" className="ml-2 text-sm text-gray-900 dark:text-white">
+              Crear recordatorio interno para el equipo
+            </label>
+          </div>
+
+          {canCreateCopies && (
+            <div className="flex items-center">
+              <input
+                type="checkbox"
+                id="copyAppointment"
+                checked={copyAppointmentEnabled}
+                onChange={handleCopyAppointmentToggle}
+                className="w-4 h-4 text-primary-600 bg-gray-100 border-gray-300 rounded focus:ring-primary-500"
+              />
+              <label htmlFor="copyAppointment" className="ml-2 text-sm text-gray-900 dark:text-white">
+                Copiar cita
+              </label>
+            </div>
+          )}
+        </div>
+
+        {canCreateCopies && copyAppointmentEnabled && (
+          <div className="rounded-lg border border-gray-200 bg-gray-50/70 p-4 dark:border-gray-700 dark:bg-gray-800/40">
+            <div className={scheduleFieldGridClassName}>
+              <div className="min-w-0">
+                <label className="label">
+                  Fecha <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  name="date"
+                  value={copyDraft.date}
+                  onChange={handleCopyDraftChange}
+                  className={scheduleDateInputClassName}
+                  min={getLocalDateInputValue(new Date())}
+                />
+              </div>
+
+              <div className="min-w-0">
+                <label className="label">
+                  Hora Inicio <span className="text-red-500">*</span>
+                </label>
+                <TimeInput
+                  value={copyStartTimeInput}
+                  onChange={handleCopyStartTimeInputChange}
+                  onBlur={handleCopyStartTimeBlur}
+                  placeholder="08:00"
+                />
+                {copyStartTimeState.error && (
+                  <p className="mt-1 text-sm text-red-600 dark:text-red-400">
+                    {copyStartTimeState.error}
+                  </p>
+                )}
+              </div>
+
+              <div className="min-w-0">
+                <label className="label">
+                  Cabina <span className="text-red-500">*</span>
+                </label>
+                <select
+                  name="cabin"
+                  value={copyDraft.cabin}
+                  onChange={handleCopyDraftChange}
+                  className="input"
+                >
+                  {cabinOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="min-w-0">
+                <label className="label">
+                  Profesional <span className="text-red-500">*</span>
+                </label>
+                <select
+                  name="professional"
+                  value={copyDraft.professional}
+                  onChange={handleCopyDraftChange}
+                  className="input"
+                  disabled={professionalsLoading && professionalOptions.length === 0}
+                >
+                  {professionalOptions.length === 0 ? (
+                    <option value="">
+                      {professionalsLoading ? 'Cargando profesionales...' : 'Sin profesionales activos'}
+                    </option>
+                  ) : (
+                    <>
+                      <option value="">Selecciona un profesional</option>
+                      {professionalOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </>
+                  )}
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={handleAddAppointmentCopy}
+                className="btn btn-secondary"
+                disabled={loading}
+              >
+                Copiar cita
+              </button>
+            </div>
+
+            {appointmentCopies.length > 0 && (
+              <div className="mt-4 space-y-2">
+                {appointmentCopies.map((copy, index) => {
+                  const copyEndTime = getSuggestedEndTime(copy.startTime)
+
+                  return (
+                    <div
+                      key={copy.id}
+                      className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900/40 md:flex-row md:items-center md:justify-between"
+                    >
+                      <div className="text-gray-900 dark:text-white">
+                        <span className="font-medium">Copia {index + 1}</span>
+                        <span className="text-gray-500 dark:text-gray-400">
+                          {' · '}
+                          {formatCopyDateLabel(copy.date)}
+                          {' · '}
+                          {copy.startTime}
+                          {copyEndTime ? ` - ${copyEndTime}` : ''}
+                          {' · '}
+                          {cabinOptions.find((option) => option.value === copy.cabin)?.label || copy.cabin}
+                          {' · '}
+                          {copy.professional}
+                        </span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveAppointmentCopy(copy.id)}
+                        className="text-sm font-medium text-gray-500 transition hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400"
+                      >
+                        Quitar
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200 dark:border-gray-700">
@@ -1314,7 +1976,6 @@ export default function AppointmentForm({
           className="btn btn-secondary"
           disabled={loading}
         >
-          <X className="w-4 h-4 mr-2" />
           Cancelar
         </button>
         <button
@@ -1322,7 +1983,6 @@ export default function AppointmentForm({
           className="btn btn-primary"
           disabled={loading}
         >
-          <Save className="w-4 h-4 mr-2" />
           {loading ? 'Guardando...' : appointment ? 'Actualizar Cita' : 'Crear Cita'}
         </button>
       </div>

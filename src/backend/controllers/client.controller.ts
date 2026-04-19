@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '../db'
 import type { AuthRequest } from '../middleware/auth.middleware'
 import { loadWorkbookFromBuffer, worksheetToObjects } from '../utils/spreadsheet'
+import { syncDebtNotification } from '../utils/clientDebt'
 import { notifyAdminsAboutResourceCreation } from '../utils/notifications'
 
 const buildSearchTerms = (value: string) =>
@@ -11,6 +12,217 @@ const buildSearchTerms = (value: string) =>
     .split(/\s+/)
     .map((term) => term.trim())
     .filter(Boolean)
+
+type ClientSortBy = 'lastVisit' | 'name' | 'clientNumber' | 'totalSpent' | 'pendingAmount'
+type ClientSortDirection = 'asc' | 'desc'
+
+const DEFAULT_SORT_DIRECTION: Record<ClientSortBy, ClientSortDirection> = {
+  lastVisit: 'desc',
+  name: 'asc',
+  clientNumber: 'asc',
+  totalSpent: 'desc',
+  pendingAmount: 'desc'
+}
+
+const normalizeClientSortBy = (value: unknown): ClientSortBy => {
+  switch (value) {
+    case 'name':
+    case 'clientNumber':
+    case 'totalSpent':
+    case 'pendingAmount':
+      return value
+    case 'lastVisit':
+    default:
+      return 'lastVisit'
+  }
+}
+
+const normalizeClientSortDirection = (
+  sortBy: ClientSortBy,
+  value: unknown
+): ClientSortDirection => (value === 'asc' || value === 'desc' ? value : DEFAULT_SORT_DIRECTION[sortBy])
+
+const buildClientNameOrderSql = (sortDirection: ClientSortDirection) =>
+  sortDirection === 'asc'
+    ? Prisma.sql`LOWER(TRIM(COALESCE(c."firstName", '') || ' ' || COALESCE(c."lastName", ''))) ASC, c."createdAt" DESC`
+    : Prisma.sql`LOWER(TRIM(COALESCE(c."firstName", '') || ' ' || COALESCE(c."lastName", ''))) DESC, c."createdAt" DESC`
+
+const clientNumberIsNumericSql = Prisma.sql`
+  TRIM(COALESCE(c."externalCode", '')) <> ''
+  AND TRIM(COALESCE(c."externalCode", '')) NOT GLOB '*[^0-9]*'
+`
+
+const clientNumberRankSql = Prisma.sql`
+  CASE
+    WHEN c."externalCode" IS NULL OR TRIM(c."externalCode") = '' THEN 2
+    WHEN ${clientNumberIsNumericSql} THEN 0
+    ELSE 1
+  END
+`
+
+const clientNumberValueSql = Prisma.sql`
+  CASE
+    WHEN ${clientNumberIsNumericSql} THEN CAST(TRIM(c."externalCode") AS INTEGER)
+    ELSE NULL
+  END
+`
+
+const buildClientNumberOrderSql = (sortDirection: ClientSortDirection) =>
+  sortDirection === 'asc'
+    ? Prisma.sql`
+        ${clientNumberRankSql} ASC,
+        ${clientNumberValueSql} ASC,
+        LOWER(COALESCE(c."externalCode", '')) ASC,
+        ${buildClientNameOrderSql('asc')}
+      `
+    : Prisma.sql`
+        ${clientNumberRankSql} ASC,
+        ${clientNumberValueSql} DESC,
+        LOWER(COALESCE(c."externalCode", '')) DESC,
+        ${buildClientNameOrderSql('asc')}
+      `
+
+const latestCompletedAppointmentDateSql = Prisma.sql`
+  MAX(CASE WHEN a."status" = 'COMPLETED' THEN a."date" END)
+`
+
+const buildClientOrderSql = (sortBy: ClientSortBy, sortDirection: ClientSortDirection) => {
+  switch (sortBy) {
+    case 'name':
+      return buildClientNameOrderSql(sortDirection)
+    case 'clientNumber':
+      return buildClientNumberOrderSql(sortDirection)
+    case 'totalSpent':
+      return sortDirection === 'asc'
+        ? Prisma.sql`COALESCE(c."totalSpent", 0) ASC, ${buildClientNameOrderSql('asc')}`
+        : Prisma.sql`COALESCE(c."totalSpent", 0) DESC, ${buildClientNameOrderSql('asc')}`
+    case 'pendingAmount':
+      return sortDirection === 'asc'
+        ? Prisma.sql`COALESCE(c."pendingAmount", 0) ASC, ${buildClientNameOrderSql('asc')}`
+        : Prisma.sql`COALESCE(c."pendingAmount", 0) DESC, ${buildClientNameOrderSql('asc')}`
+    case 'lastVisit':
+    default:
+      return sortDirection === 'asc'
+        ? Prisma.sql`COALESCE(${latestCompletedAppointmentDateSql}, c."lastVisit", c."createdAt") ASC, c."createdAt" DESC`
+        : Prisma.sql`COALESCE(${latestCompletedAppointmentDateSql}, c."lastVisit", c."createdAt") DESC, c."createdAt" DESC`
+  }
+}
+
+const buildClientSearchSql = (term: string) => {
+  const likeTerm = `%${term}%`
+
+  return Prisma.sql`(
+    LOWER(COALESCE(c."firstName", '')) LIKE LOWER(${likeTerm})
+    OR LOWER(COALESCE(c."lastName", '')) LIKE LOWER(${likeTerm})
+    OR LOWER(COALESCE(c."externalCode", '')) LIKE LOWER(${likeTerm})
+    OR LOWER(COALESCE(c."dni", '')) LIKE LOWER(${likeTerm})
+    OR LOWER(COALESCE(c."email", '')) LIKE LOWER(${likeTerm})
+    OR LOWER(COALESCE(c."phone", '')) LIKE LOWER(${likeTerm})
+    OR LOWER(COALESCE(c."mobilePhone", '')) LIKE LOWER(${likeTerm})
+    OR LOWER(COALESCE(c."landlinePhone", '')) LIKE LOWER(${likeTerm})
+  )`
+}
+
+const getOrderedClientIds = async ({
+  searchTerms,
+  isActive,
+  sortBy,
+  sortDirection,
+  skip,
+  take
+}: {
+  searchTerms: string[]
+  isActive?: boolean
+  sortBy: ClientSortBy
+  sortDirection: ClientSortDirection
+  skip?: number
+  take?: number
+}) => {
+  const whereClauses: Prisma.Sql[] = []
+
+  for (const term of searchTerms) {
+    whereClauses.push(buildClientSearchSql(term))
+  }
+
+  if (typeof isActive === 'boolean') {
+    whereClauses.push(Prisma.sql`c."isActive" = ${isActive}`)
+  }
+
+  const whereSql =
+    whereClauses.length > 0
+      ? Prisma.sql`WHERE ${Prisma.join(whereClauses, ' AND ')}`
+      : Prisma.empty
+
+  const paginationSql =
+    typeof take === 'number'
+      ? Prisma.sql`LIMIT ${take} OFFSET ${skip ?? 0}`
+      : Prisma.empty
+  const orderBySql = buildClientOrderSql(sortBy, sortDirection)
+
+  const rows = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT c."id"
+    FROM "clients" c
+    LEFT JOIN "appointments" a ON a."clientId" = c."id"
+    ${whereSql}
+    GROUP BY c."id"
+    ORDER BY ${orderBySql}
+    ${paginationSql}
+  `)
+
+  return rows.map((row) => row.id)
+}
+
+const loadClientsByOrderedIds = async ({
+  clientIds,
+  include
+}: {
+  clientIds: string[]
+  include: Prisma.ClientInclude
+}) => {
+  if (clientIds.length === 0) return []
+
+  const [clients, appointmentActivity] = await Promise.all([
+    prisma.client.findMany({
+      where: {
+        id: {
+          in: clientIds
+        }
+      },
+      include
+    }),
+    prisma.appointment.groupBy({
+      by: ['clientId'],
+      where: {
+        clientId: {
+          in: clientIds
+        },
+        status: 'COMPLETED'
+      },
+      _max: {
+        date: true
+      }
+    })
+  ])
+
+  const appointmentActivityByClient = new Map(
+    appointmentActivity.map((item: { clientId: string | null; _max: { date: Date | null } }) => [
+      item.clientId,
+      item._max.date
+    ])
+  )
+  const clientsById = new Map(
+    clients.map((client) => [
+      client.id,
+      {
+        ...client,
+        effectiveLastVisit: appointmentActivityByClient.get(client.id) ?? client.lastVisit ?? null
+      }
+    ])
+  )
+  return clientIds
+    .map((clientId) => clientsById.get(clientId))
+    .filter((client): client is NonNullable<typeof client> => Boolean(client))
+}
 
 const parseDecimalValue = (value: unknown): number | null => {
   if (value === null || value === undefined || String(value).trim() === '') return null
@@ -171,73 +383,22 @@ const normalizeClientPayload = (payload: Record<string, any>, requireIdentityFie
   return data
 }
 
-const syncDebtNotification = async (client: {
-  id: string
-  firstName: string
-  lastName: string
-  pendingAmount: any
-  debtAlertEnabled: boolean
-  isActive: boolean
-}) => {
-  const pendingAmount = Number(client.pendingAmount || 0)
-  const title = `Cobro pendiente: ${client.firstName} ${client.lastName}`
-  const shouldAlert = client.isActive && client.debtAlertEnabled && pendingAmount > 0
-
-  if (!shouldAlert) {
-    await prisma.notification.updateMany({
-      where: {
-        type: 'PENDING_DEBT',
-        title,
-        isRead: false
-      },
-      data: {
-        isRead: true
-      }
-    })
-    return
-  }
-
-  const existing = await prisma.notification.findFirst({
-    where: {
-      type: 'PENDING_DEBT',
-      title,
-      isRead: false
-    }
-  })
-
-  const message = `El cliente tiene ${pendingAmount.toFixed(2)}€ pendientes de pago.`
-
-  if (existing) {
-    await prisma.notification.update({
-      where: { id: existing.id },
-      data: { message, priority: 'HIGH' }
-    })
-    return
-  }
-
-  await prisma.notification.create({
-    data: {
-      type: 'PENDING_DEBT',
-      title,
-      message,
-      priority: 'HIGH'
-    }
-  })
-}
-
 export const getClients = async (req: Request, res: Response) => {
   try {
-    const { search, isActive, paginated, page, limit, includeCounts } = req.query
+    const { search, isActive, paginated, page, limit, includeCounts, sortBy, sortDirection } = req.query
     const normalizedSearch = typeof search === 'string' ? search.trim() : ''
+    const searchTerms = normalizedSearch ? buildSearchTerms(normalizedSearch) : []
     const shouldPaginate = typeof paginated === 'boolean' ? paginated : paginated === 'true'
     const shouldIncludeCounts =
       typeof includeCounts === 'boolean' ? includeCounts : includeCounts !== 'false'
+    const normalizedSortBy = normalizeClientSortBy(sortBy)
+    const normalizedSortDirection = normalizeClientSortDirection(normalizedSortBy, sortDirection)
+    const isActiveFilter =
+      isActive !== undefined ? (typeof isActive === 'boolean' ? isActive : isActive === 'true') : undefined
 
     const where: Prisma.ClientWhereInput = {}
 
     if (normalizedSearch) {
-      const searchTerms = buildSearchTerms(normalizedSearch)
-
       where.AND = searchTerms.map((term) => ({
         OR: [
           { firstName: { contains: term } },
@@ -252,8 +413,8 @@ export const getClients = async (req: Request, res: Response) => {
       }))
     }
 
-    if (isActive !== undefined) {
-      where.isActive = typeof isActive === 'boolean' ? isActive : isActive === 'true'
+    if (isActiveFilter !== undefined) {
+      where.isActive = isActiveFilter
     }
 
     const include: Prisma.ClientInclude = {
@@ -285,7 +446,7 @@ export const getClients = async (req: Request, res: Response) => {
         : 50
       const skip = (pageNumber - 1) * pageSize
 
-      const [total, activeCount, debtAlertCount, clients] = await prisma.$transaction([
+      const [total, activeCount, debtAlertCount, orderedClientIds] = await Promise.all([
         prisma.client.count({ where }),
         prisma.client.count({
           where: {
@@ -294,17 +455,22 @@ export const getClients = async (req: Request, res: Response) => {
         }),
         prisma.client.count({
           where: {
-            AND: [where, { debtAlertEnabled: true, pendingAmount: { gt: 0 } }]
+            AND: [where, { pendingAmount: { gt: 0 } }]
           }
         }),
-        prisma.client.findMany({
-          where,
-          include,
-          orderBy: { createdAt: 'desc' },
+        getOrderedClientIds({
+          searchTerms,
+          isActive: isActiveFilter,
+          sortBy: normalizedSortBy,
+          sortDirection: normalizedSortDirection,
           skip,
           take: pageSize
         })
       ])
+      const clients = await loadClientsByOrderedIds({
+        clientIds: orderedClientIds,
+        include
+      })
 
       const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
@@ -324,10 +490,15 @@ export const getClients = async (req: Request, res: Response) => {
       })
     }
 
-    const clients = await prisma.client.findMany({
-      where,
-      include,
-      orderBy: { createdAt: 'desc' }
+    const orderedClientIds = await getOrderedClientIds({
+      searchTerms,
+      isActive: isActiveFilter,
+      sortBy: normalizedSortBy,
+      sortDirection: normalizedSortDirection
+    })
+    const clients = await loadClientsByOrderedIds({
+      clientIds: orderedClientIds,
+      include
     })
 
     res.json(clients)
@@ -356,10 +527,68 @@ export const getClientById = async (req: Request, res: Response) => {
         },
         sales: {
           include: {
-            items: true
+            items: true,
+            pendingPayment: {
+              include: {
+                collections: {
+                  orderBy: [{ operationDate: 'desc' }, { createdAt: 'desc' }],
+                  select: {
+                    id: true,
+                    amount: true,
+                    paymentMethod: true,
+                    showInOfficialCash: true,
+                    operationDate: true,
+                    createdAt: true
+                  }
+                }
+              }
+            }
           },
           orderBy: { date: 'desc' },
           take: 10
+        },
+        pendingPayments: {
+          include: {
+            collections: {
+              orderBy: [{ operationDate: 'desc' }, { createdAt: 'desc' }],
+              select: {
+                id: true,
+                amount: true,
+                paymentMethod: true,
+                showInOfficialCash: true,
+                operationDate: true,
+                createdAt: true
+              }
+            },
+            sale: {
+              select: {
+                id: true,
+                saleNumber: true,
+                date: true,
+                total: true,
+                status: true,
+                paymentMethod: true,
+                notes: true,
+                items: {
+                  select: {
+                    description: true,
+                    quantity: true,
+                    product: {
+                      select: {
+                        name: true
+                      }
+                    },
+                    service: {
+                      select: {
+                        name: true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          orderBy: [{ createdAt: 'desc' }]
         },
         clientHistory: {
           orderBy: { date: 'desc' }
@@ -438,7 +667,7 @@ export const createClient = async (req: AuthRequest, res: Response) => {
       data: data as Prisma.ClientCreateInput
     })
 
-    await syncDebtNotification(client)
+    await syncDebtNotification(prisma, client)
     await notifyAdminsAboutResourceCreation(req.user, 'client', 1)
 
     res.status(201).json(client)
@@ -477,7 +706,7 @@ export const updateClient = async (req: Request, res: Response) => {
       data: data as Prisma.ClientUpdateInput
     })
 
-    await syncDebtNotification(client)
+    await syncDebtNotification(prisma, client)
 
     res.json(client)
   } catch (error) {

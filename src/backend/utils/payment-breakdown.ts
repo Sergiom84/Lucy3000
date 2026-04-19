@@ -8,11 +8,15 @@ export type TopUpPaymentMethod = (typeof TOP_UP_PAYMENT_METHODS)[number]
 
 type SaleLike = {
   paymentMethod?: string | null
+  paymentBreakdown?: string | null
   total: number | string | Prisma.Decimal
   accountBalanceMovements?: Array<{
     type?: string | null
     amount?: number | string | Prisma.Decimal | null
   }>
+  pendingPayment?: {
+    collections?: Array<PendingCollectionLike>
+  } | null
 }
 
 type TopUpLike = {
@@ -21,11 +25,50 @@ type TopUpLike = {
   amount: number | string | Prisma.Decimal
 }
 
+type PendingCollectionLike = {
+  paymentMethod?: string | null
+  amount: number | string | Prisma.Decimal
+  showInOfficialCash?: boolean | null
+}
+
+type StoredPaymentBreakdownLike = {
+  paymentMethod?: string | null
+  amount?: number | string | Prisma.Decimal | null
+}
+
 const roundCurrency = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100
 
 const toNumber = (value: number | string | Prisma.Decimal | null | undefined) => Number(value || 0)
 const toCents = (value: number) => Math.round(roundCurrency(value) * 100)
 const fromCents = (value: number) => roundCurrency(value / 100)
+
+const parseStoredPaymentBreakdown = (paymentBreakdown?: string | null) => {
+  if (!paymentBreakdown) {
+    return [] as Array<{ method: CommercialPaymentMethod; amount: number }>
+  }
+
+  try {
+    const parsed = JSON.parse(paymentBreakdown)
+    if (!Array.isArray(parsed)) {
+      return [] as Array<{ method: CommercialPaymentMethod; amount: number }>
+    }
+
+    return parsed.reduce<Array<{ method: CommercialPaymentMethod; amount: number }>>((entries, item) => {
+      const row = item as StoredPaymentBreakdownLike
+      const method = normalizeCommercialSalePaymentMethod(row.paymentMethod)
+      const amount = roundCurrency(toNumber(row.amount))
+
+      if (!method || amount <= 0) {
+        return entries
+      }
+
+      entries.push({ method, amount })
+      return entries
+    }, [])
+  } catch {
+    return [] as Array<{ method: CommercialPaymentMethod; amount: number }>
+  }
+}
 
 export const createCommercialPaymentBuckets = () =>
   COMMERCIAL_PAYMENT_METHODS.reduce<Record<CommercialPaymentMethod, number>>((acc, method) => {
@@ -77,6 +120,21 @@ export const getSaleCollectedAmount = (sale: SaleLike) => {
 }
 
 export const getSalePaymentBreakdown = (sale: SaleLike) => {
+  const storedEntries = parseStoredPaymentBreakdown(sale.paymentBreakdown)
+  if (storedEntries.length > 0) {
+    return storedEntries
+  }
+
+  const collectionEntries = Array.isArray(sale.pendingPayment?.collections)
+    ? sale.pendingPayment.collections
+        .map((collection) => getPendingCollectionEntry(collection))
+        .filter((entry): entry is { method: CommercialPaymentMethod; amount: number } => Boolean(entry))
+    : []
+
+  if (collectionEntries.length > 0) {
+    return collectionEntries
+  }
+
   const total = roundCurrency(toNumber(sale.total))
   const normalizedMethod = normalizeCommercialSalePaymentMethod(sale.paymentMethod)
   const abonoAmount = Math.min(total, Math.max(0, getSaleAccountBalanceAmount(sale)))
@@ -120,6 +178,36 @@ export const getTopUpCollectedEntry = (movement: TopUpLike) => {
     method: paymentMethod,
     amount
   }
+}
+
+export const getPendingCollectionEntry = (collection: PendingCollectionLike) => {
+  const paymentMethod = normalizeCommercialSalePaymentMethod(collection.paymentMethod)
+  if (!paymentMethod) {
+    return null
+  }
+
+  if (paymentMethod === 'CASH' && collection.showInOfficialCash === false) {
+    return null
+  }
+
+  const amount = roundCurrency(toNumber(collection.amount))
+  if (amount <= 0) {
+    return null
+  }
+
+  return {
+    method: paymentMethod,
+    amount
+  }
+}
+
+export const getPendingCollectionCollectedAmount = (collection: PendingCollectionLike) => {
+  const entry = getPendingCollectionEntry(collection)
+  if (!entry || entry.method === 'ABONO') {
+    return 0
+  }
+
+  return entry.amount
 }
 
 export const addBreakdownEntriesToBuckets = (

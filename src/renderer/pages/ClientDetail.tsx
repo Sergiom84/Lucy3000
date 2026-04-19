@@ -3,28 +3,19 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
   CreditCard,
-  Edit,
   Phone,
   Mail,
   MapPin,
   Calendar,
-  History,
-  ShoppingBag,
-  CalendarCheck,
-  User,
   Cake,
   Link2,
   AlertTriangle,
   Ticket,
-  BarChart3,
-  Scale,
-  ClipboardList,
   FileText,
-  FolderOpen,
   Printer,
   StickyNote,
-  Plus,
-  Trash2
+  Trash2,
+  Pencil
 } from 'lucide-react'
 import api from '../utils/api'
 import { formatCurrency, formatDate, formatPhone, formatDateTime, getInitials } from '../utils/format'
@@ -36,7 +27,14 @@ import {
   normalizeDesktopAssetUrl,
   printTicket
 } from '../utils/desktop'
-import { buildSaleTicketPayload, buildQuoteHtml, paymentMethodLabel } from '../utils/tickets'
+import {
+  buildPendingCollectionTicketPayload,
+  buildSaleTicketPayload,
+  buildQuoteHtml,
+  paymentMethodLabel,
+  salePaymentMethodLabel
+} from '../utils/tickets'
+import { buildClientPendingSummary, type PendingPaymentRow } from '../utils/clientPendingPayments'
 import toast from 'react-hot-toast'
 import Modal from '../components/Modal'
 import ClientForm from '../components/ClientForm'
@@ -46,13 +44,10 @@ import AppointmentForm from '../components/AppointmentForm'
 import ClientAssetExplorer from '../components/ClientAssetExplorer'
 
 const toolbarItems = [
+  { icon: AlertTriangle, label: 'Pendientes', tab: 'pending' as const },
   { icon: CreditCard, label: 'Abonos', tab: 'abonos' as const },
   { icon: Ticket, label: 'Bonos', tab: 'bonos' as const },
-  { icon: FileText, label: 'Presupuestos', tab: 'quotes' as const },
-  { icon: BarChart3, label: 'Análisis' },
-  { icon: Scale, label: 'Control Peso' },
-  { icon: ClipboardList, label: 'Ficha Bio' },
-  { icon: FolderOpen, label: 'Documentos' }
+  { icon: FileText, label: 'Presupuestos', tab: 'quotes' as const }
 ]
 
 type AccountBalanceMovement = {
@@ -74,6 +69,22 @@ const accountBalanceMovementTypeLabel: Record<AccountBalanceMovement['type'], st
 }
 
 const accountBalanceDateInput = () => new Date().toISOString().split('T')[0]
+const pendingSettlementDateTimeInput = () => {
+  const now = new Date()
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
+  return local.toISOString().slice(0, 16)
+}
+
+type PendingCollectionExecutionOptions = {
+  paymentMethod: 'CASH' | 'CARD' | 'BIZUM' | 'ABONO'
+  accountBalanceUsageAmount?: number
+}
+
+const pendingPaymentStatusLabel: Record<PendingPaymentRow['status'], string> = {
+  OPEN: 'Abierto',
+  SETTLED: 'Saldado',
+  CANCELLED: 'Cancelado'
+}
 
 const getSaleTreatmentLabel = (sale: any) => {
   const labels = Array.isArray(sale?.items)
@@ -106,7 +117,7 @@ export default function ClientDetail() {
   const [client, setClient] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [showEditModal, setShowEditModal] = useState(false)
-  const [activeTab, setActiveTab] = useState<'overview' | 'appointments' | 'sales' | 'history' | 'bonos' | 'abonos' | 'quotes'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'appointments' | 'sales' | 'pending' | 'history' | 'bonos' | 'abonos' | 'quotes'>('overview')
   const [clientQuotes, setClientQuotes] = useState<any[]>([])
   const [quotesLoading, setQuotesLoading] = useState(false)
   const [clientAssets, setClientAssets] = useState<ClientAssetsResponse | null>(null)
@@ -126,6 +137,22 @@ export default function ClientDetail() {
   const [showBonoPackModal, setShowBonoPackModal] = useState(false)
   const [showBonoAppointmentModal, setShowBonoAppointmentModal] = useState(false)
   const [selectedBonoForAppointment, setSelectedBonoForAppointment] = useState<any | null>(null)
+  const [pendingSettlementTarget, setPendingSettlementTarget] = useState<PendingPaymentRow | null>(null)
+  const [pendingSettlementModalOpen, setPendingSettlementModalOpen] = useState(false)
+  const [pendingSettlementSaving, setPendingSettlementSaving] = useState(false)
+  const [pendingSettlementDraft, setPendingSettlementDraft] = useState({
+    settledAt: pendingSettlementDateTimeInput(),
+    amount: '',
+    paymentMethod: 'CASH' as 'CASH' | 'CARD' | 'BIZUM' | 'ABONO'
+  })
+  const [pendingCashDecisionModalOpen, setPendingCashDecisionModalOpen] = useState(false)
+  const [pendingRemainderModalOpen, setPendingRemainderModalOpen] = useState(false)
+  const [pendingCollectionExecution, setPendingCollectionExecution] = useState<PendingCollectionExecutionOptions | null>(null)
+  const [pendingAccountBalanceUsage, setPendingAccountBalanceUsage] = useState(0)
+  const [pendingRemainderAmount, setPendingRemainderAmount] = useState(0)
+  const [manualPendingModalOpen, setManualPendingModalOpen] = useState(false)
+  const [manualPendingSaving, setManualPendingSaving] = useState(false)
+  const [manualPendingDraft, setManualPendingDraft] = useState('')
 
   useEffect(() => {
     if (id) {
@@ -241,6 +268,200 @@ export default function ClientDetail() {
   const handleBonoAppointmentSuccess = async () => {
     handleCloseBonoAppointmentModal()
     await fetchClient()
+  }
+
+  const handleOpenPendingSettlementModal = (pendingPayment: PendingPaymentRow) => {
+    setPendingSettlementTarget(pendingPayment)
+    setPendingSettlementDraft({
+      settledAt: pendingSettlementDateTimeInput(),
+      amount: pendingPayment.remainingAmount > 0 ? pendingPayment.remainingAmount.toFixed(2).replace('.', ',') : '',
+      paymentMethod: 'CASH'
+    })
+    setPendingSettlementModalOpen(true)
+  }
+
+  const handleClosePendingSettlementModal = () => {
+    if (pendingSettlementSaving) return
+    setPendingSettlementModalOpen(false)
+    setPendingCashDecisionModalOpen(false)
+    setPendingRemainderModalOpen(false)
+    setPendingCollectionExecution(null)
+    setPendingAccountBalanceUsage(0)
+    setPendingRemainderAmount(0)
+    setPendingSettlementTarget(null)
+  }
+
+  const handleOpenManualPendingModal = (amount: number) => {
+    setManualPendingDraft(amount > 0 ? amount.toFixed(2).replace('.', ',') : '')
+    setManualPendingModalOpen(true)
+  }
+
+  const handleCloseManualPendingModal = () => {
+    if (manualPendingSaving) return
+    setManualPendingModalOpen(false)
+  }
+
+  const resolvePendingCollectionDraft = () => {
+    const pendingOpenAmount = Number(pendingSettlementTarget?.remainingAmount || 0)
+    const settledAt = new Date(pendingSettlementDraft.settledAt)
+    if (Number.isNaN(settledAt.getTime())) {
+      throw new Error('Indica una fecha y hora válidas')
+    }
+
+    const normalizedAmount = pendingSettlementDraft.amount.trim().replace(',', '.')
+    const amountToCollect = Number.parseFloat(normalizedAmount)
+    if (!Number.isFinite(amountToCollect) || amountToCollect <= 0) {
+      throw new Error('Indica un importe válido a cobrar')
+    }
+
+    if (amountToCollect > pendingOpenAmount) {
+      throw new Error('El importe a cobrar no puede superar el pendiente actual')
+    }
+
+    return {
+      operationDate: settledAt,
+      amountToCollect: Math.round((amountToCollect + Number.EPSILON) * 100) / 100,
+      pendingOpenAmount
+    }
+  }
+
+  const executePendingCollection = async (options: {
+    paymentMethod: 'CASH' | 'CARD' | 'BIZUM' | 'ABONO'
+    accountBalanceUsageAmount?: number
+    printTicketAfterCollection: boolean
+    showInOfficialCash: boolean
+  }) => {
+    if (!pendingSettlementTarget?.sale?.id) return
+
+    let collectionDraft: ReturnType<typeof resolvePendingCollectionDraft>
+    try {
+      collectionDraft = resolvePendingCollectionDraft()
+    } catch (error: any) {
+      toast.error(error.message || 'No se pudo preparar el cobro')
+      return
+    }
+
+    const accountBalanceUsageAmount = Math.min(
+      collectionDraft.amountToCollect,
+      Math.max(0, Number(options.accountBalanceUsageAmount || 0))
+    )
+    const remainingAmount = Math.max(0, collectionDraft.pendingOpenAmount - collectionDraft.amountToCollect)
+
+    try {
+      setPendingSettlementSaving(true)
+      const response = await api.post(`/sales/${pendingSettlementTarget.sale.id}/collect-pending`, {
+        amount: collectionDraft.amountToCollect,
+        paymentMethod: options.paymentMethod,
+        operationDate: collectionDraft.operationDate.toISOString(),
+        showInOfficialCash: options.showInOfficialCash,
+        accountBalanceUsageAmount: accountBalanceUsageAmount > 0 ? accountBalanceUsageAmount : undefined
+      })
+
+      if (options.printTicketAfterCollection) {
+        try {
+          const printResult = await printTicket(
+            buildPendingCollectionTicketPayload({
+              sale: response.data,
+              operationDate: collectionDraft.operationDate.toISOString(),
+              collectedAmount: collectionDraft.amountToCollect,
+              paymentMethod: options.paymentMethod,
+              accountBalanceAmount: accountBalanceUsageAmount,
+              remainingAmount
+            })
+          )
+          toast.success(getPrintTicketSuccessMessage(printResult))
+        } catch (error: any) {
+          toast.error(error.message || 'El cobro se guardó, pero no se pudo imprimir el ticket')
+        }
+      }
+
+      toast.success(
+        remainingAmount > 0 ? 'Cobro parcial registrado correctamente' : 'Pendiente saldado correctamente'
+      )
+      setPendingSettlementModalOpen(false)
+      setPendingCashDecisionModalOpen(false)
+      setPendingRemainderModalOpen(false)
+      setPendingCollectionExecution(null)
+      setPendingAccountBalanceUsage(0)
+      setPendingRemainderAmount(0)
+      setPendingSettlementTarget(null)
+      await fetchClient()
+    } catch (error: any) {
+      console.error('Error collecting pending payment:', error)
+      toast.error(error.response?.data?.error || 'No se pudo registrar el cobro pendiente')
+    } finally {
+      setPendingSettlementSaving(false)
+    }
+  }
+
+  const handlePendingRemainderPaymentSelection = async (method: 'CASH' | 'CARD' | 'BIZUM') => {
+    setPendingRemainderModalOpen(false)
+
+    if (method === 'CASH') {
+      setPendingCollectionExecution({
+        paymentMethod: method,
+        accountBalanceUsageAmount: pendingAccountBalanceUsage
+      })
+      setPendingCashDecisionModalOpen(true)
+      return
+    }
+
+    await executePendingCollection({
+      paymentMethod: method,
+      accountBalanceUsageAmount: pendingAccountBalanceUsage,
+      printTicketAfterCollection: true,
+      showInOfficialCash: true
+    })
+  }
+
+  const handleConfirmPendingSettlement = async () => {
+    let collectionDraft: ReturnType<typeof resolvePendingCollectionDraft>
+    try {
+      collectionDraft = resolvePendingCollectionDraft()
+    } catch (error: any) {
+      toast.error(error.message || 'No se pudo preparar el cobro')
+      return
+    }
+
+    if (pendingSettlementDraft.paymentMethod === 'ABONO') {
+      const availableAccountBalance = Math.max(0, Number(client?.accountBalance || 0))
+      if (availableAccountBalance <= 0) {
+        toast.error('El cliente no tiene saldo disponible en su abono')
+        return
+      }
+
+      const usableAmount = Math.min(availableAccountBalance, collectionDraft.amountToCollect)
+      if (usableAmount < collectionDraft.amountToCollect) {
+        setPendingAccountBalanceUsage(Math.round((usableAmount + Number.EPSILON) * 100) / 100)
+        setPendingRemainderAmount(
+          Math.round((collectionDraft.amountToCollect - usableAmount + Number.EPSILON) * 100) / 100
+        )
+        setPendingRemainderModalOpen(true)
+        return
+      }
+
+      await executePendingCollection({
+        paymentMethod: 'ABONO',
+        accountBalanceUsageAmount: usableAmount,
+        printTicketAfterCollection: false,
+        showInOfficialCash: false
+      })
+      return
+    }
+
+    if (pendingSettlementDraft.paymentMethod === 'CASH') {
+      setPendingCollectionExecution({
+        paymentMethod: 'CASH'
+      })
+      setPendingCashDecisionModalOpen(true)
+      return
+    }
+
+    await executePendingCollection({
+      paymentMethod: pendingSettlementDraft.paymentMethod,
+      printTicketAfterCollection: true,
+      showInOfficialCash: true
+    })
   }
 
   const handlePrintSale = async (saleId: string) => {
@@ -421,6 +642,51 @@ export default function ClientDetail() {
     return client.bonoPacks.filter((bonoPack: any) => !bonoPack?.clientId || bonoPack.clientId === client?.id)
   }, [client?.bonoPacks, client?.id])
 
+  const pendingSummary = useMemo(() => buildClientPendingSummary(client), [client])
+  const clientPendingPayments = pendingSummary.rows
+  const clientPendingTotal = pendingSummary.openAmount
+  const manualPendingAmount = pendingSummary.manualAmount
+  const salePendingAmount = pendingSummary.saleOpenAmount
+  const pendingSettlementOpenAmount = Number(pendingSettlementTarget?.remainingAmount || 0)
+  const pendingSettlementDraftAmount = (() => {
+    const normalized = pendingSettlementDraft.amount.trim().replace(',', '.')
+    const parsed = Number.parseFloat(normalized)
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : 0
+  })()
+  const pendingSettlementRemainingAfterCharge = Math.max(
+    0,
+    Math.round((pendingSettlementOpenAmount - pendingSettlementDraftAmount + Number.EPSILON) * 100) / 100
+  )
+
+  const handleConfirmManualPendingUpdate = async () => {
+    if (!client?.id) return
+
+    const normalizedAmount = manualPendingDraft.trim().replace(',', '.')
+    const parsedManualAmount = normalizedAmount.length === 0 ? 0 : Number.parseFloat(normalizedAmount)
+
+    if (!Number.isFinite(parsedManualAmount) || parsedManualAmount < 0) {
+      toast.error('Indica un importe pendiente válido')
+      return
+    }
+
+    const nextPendingAmount = Math.round((salePendingAmount + parsedManualAmount + Number.EPSILON) * 100) / 100
+
+    try {
+      setManualPendingSaving(true)
+      await api.put(`/clients/${client.id}`, {
+        pendingAmount: nextPendingAmount
+      })
+      toast.success(parsedManualAmount === 0 ? 'Pendiente de ficha saldado' : 'Pendiente de ficha actualizado')
+      setManualPendingModalOpen(false)
+      await fetchClient()
+    } catch (error: any) {
+      console.error('Error updating manual pending amount:', error)
+      toast.error(error.response?.data?.error || 'No se pudo actualizar el pendiente de ficha')
+    } finally {
+      setManualPendingSaving(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -438,13 +704,10 @@ export default function ClientDetail() {
   }
 
   const tabs = [
-    { id: 'overview', label: 'Resumen', icon: User },
-    { id: 'appointments', label: 'Citas', icon: CalendarCheck, count: client.appointments?.length || 0 },
-    { id: 'sales', label: 'Ventas', icon: ShoppingBag, count: client.sales?.length || 0 },
-    { id: 'abonos', label: 'Abonos', icon: CreditCard, count: accountBalanceHistory.length },
-    { id: 'bonos', label: 'Bonos', icon: Ticket, count: clientBonoPacks.length },
-    { id: 'quotes', label: 'Presupuestos', icon: FileText, count: clientQuotes.length },
-    { id: 'history', label: 'Historial', icon: History, count: client.clientHistory?.length || 0 }
+    { id: 'overview', label: 'Resumen' },
+    { id: 'appointments', label: 'Citas', count: client.appointments?.length || 0 },
+    { id: 'sales', label: 'Ventas', count: client.sales?.length || 0 },
+    { id: 'history', label: 'Historial', count: client.clientHistory?.length || 0 }
   ]
 
   return (
@@ -467,14 +730,12 @@ export default function ClientDetail() {
             onClick={() => navigate(`/sales?clientId=${client.id}`)}
             className="btn btn-secondary"
           >
-            <CreditCard className="w-5 h-5 mr-2" />
             Cobrar
           </button>
           <button
             onClick={() => setShowEditModal(true)}
             className="btn btn-primary"
           >
-            <Edit className="w-5 h-5 mr-2" />
             Editar
           </button>
         </div>
@@ -615,8 +876,8 @@ export default function ClientDetail() {
                 </div>
                 <div className="text-center">
                   <p className="text-xs text-gray-500 dark:text-gray-400">Pendiente</p>
-                  <p className={`text-lg font-bold ${Number(client.pendingAmount || 0) > 0 ? 'text-red-600' : 'text-gray-900 dark:text-white'}`}>
-                    {formatCurrency(Number(client.pendingAmount || 0))}
+                  <p className={`text-lg font-bold ${clientPendingTotal > 0 ? 'text-red-600' : 'text-gray-900 dark:text-white'}`}>
+                    {formatCurrency(clientPendingTotal)}
                   </p>
                 </div>
               </div>
@@ -656,7 +917,6 @@ export default function ClientDetail() {
       <div className="border-b border-gray-200 dark:border-gray-700">
         <div className="flex space-x-6 overflow-x-auto">
           {tabs.map((tab) => {
-            const Icon = tab.icon
             return (
               <button
                 key={tab.id}
@@ -667,7 +927,6 @@ export default function ClientDetail() {
                     : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
               >
-                <Icon className="w-5 h-5" />
                 <span className="font-medium">{tab.label}</span>
                 {tab.count !== undefined && (
                   <span className="badge badge-secondary">{tab.count}</span>
@@ -756,7 +1015,6 @@ export default function ClientDetail() {
                         className="btn btn-primary btn-sm"
                         disabled={noteSaving || !noteDraft.trim()}
                       >
-                        <Plus className="w-4 h-4 mr-2" />
                         {noteSaving ? 'Guardando...' : 'Añadir nota'}
                       </button>
                     </div>
@@ -883,7 +1141,7 @@ export default function ClientDetail() {
                         </span>
                         {appointment.sale?.status === 'COMPLETED' ? (
                           <div className="mt-2 text-xs text-green-600">
-                            Cobrada · {paymentMethodLabel(appointment.sale.paymentMethod)}
+                            Cobrada · {salePaymentMethodLabel(appointment.sale)}
                           </div>
                         ) : (
                           <button
@@ -976,10 +1234,14 @@ export default function ClientDetail() {
                           </span>
                         </td>
                         <td className="py-3 px-4 text-right">
-                          <button onClick={() => handlePrintSale(sale.id)} className="btn btn-sm btn-secondary">
-                            <Printer className="w-4 h-4 mr-2" />
-                            Ticket
-                          </button>
+                          {sale.status !== 'PENDING' ? (
+                            <button onClick={() => handlePrintSale(sale.id)} className="btn btn-sm btn-secondary">
+                              <Printer className="w-4 h-4 mr-2" />
+                              Ticket
+                            </button>
+                          ) : (
+                            <span className="text-sm text-gray-400">-</span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -989,6 +1251,226 @@ export default function ClientDetail() {
             ) : (
               <p className="text-center py-8 text-gray-500 dark:text-gray-400">
                 No hay ventas registradas
+              </p>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'pending' && (
+          <div className="card">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Historial de pendientes
+              </h3>
+              <span className="badge badge-secondary">{clientPendingPayments.length}</span>
+            </div>
+
+            <div className="mb-5 grid gap-3 md:grid-cols-2">
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 dark:border-amber-900 dark:bg-amber-950/30">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700 dark:text-amber-300">
+                      Importado
+                    </p>
+                    <p className="mt-2 text-sm text-amber-900 dark:text-amber-100">
+                      Importe heredado del perfil del cliente o de un backup
+                    </p>
+                  </div>
+                  {manualPendingAmount > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenManualPendingModal(manualPendingAmount)}
+                      className="rounded-lg border border-amber-300 bg-white p-2 text-amber-700 transition hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-900/40"
+                      title="Editar pendiente de ficha"
+                      aria-label="Editar pendiente de ficha"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                  ) : null}
+                </div>
+                <p className="mt-3 text-lg font-semibold text-amber-900 dark:text-amber-100">
+                  {formatCurrency(manualPendingAmount)}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-4 dark:border-sky-900 dark:bg-sky-950/30">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700 dark:text-sky-300">
+                  Leyenda · Ventas
+                </p>
+                <p className="mt-2 text-sm text-sky-900 dark:text-sky-100">
+                  Pendientes creados de una venta.
+                </p>
+                <p className="mt-3 text-lg font-semibold text-sky-900 dark:text-sky-100">
+                  {formatCurrency(salePendingAmount)}
+                </p>
+              </div>
+            </div>
+
+            {clientPendingPayments.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-200 dark:border-gray-700">
+                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                        Origen
+                      </th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                        Referencia
+                      </th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                        Tratamiento / producto
+                      </th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                        Registrado
+                      </th>
+                      <th className="text-right py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                        Importe
+                      </th>
+                      <th className="text-center py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                        Estado
+                      </th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                        Saldado
+                      </th>
+                      <th className="text-center py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                        Editar
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {clientPendingPayments.map((pendingPayment) => (
+                      <tr
+                        key={pendingPayment.id}
+                        className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
+                      >
+                        <td className="py-3 px-4 text-sm">
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                              pendingPayment.source === 'MANUAL'
+                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200'
+                                : 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200'
+                            }`}
+                          >
+                            {pendingPayment.source === 'MANUAL' ? 'Ficha / importado' : 'Ventas'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-sm text-gray-900 dark:text-white">
+                          <div className="space-y-1">
+                            <p className="font-medium">
+                              {pendingPayment.label || pendingPayment.sale?.saleNumber || 'Venta pendiente'}
+                            </p>
+                            {pendingPayment.note ? (
+                              <p className="text-xs text-gray-500 dark:text-gray-400">
+                                {pendingPayment.note}
+                              </p>
+                            ) : pendingPayment.sale?.notes ? (
+                              <p className="text-xs text-gray-500 dark:text-gray-400">
+                                {pendingPayment.sale.notes}
+                              </p>
+                            ) : null}
+                            {pendingPayment.collections.length > 0 ? (
+                              <div className="pt-2 space-y-1">
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500 dark:text-gray-400">
+                                  Cobros registrados
+                                </p>
+                                {pendingPayment.collections.map((collection) => (
+                                  <p
+                                    key={collection.id}
+                                    className="text-xs text-gray-500 dark:text-gray-400"
+                                  >
+                                    {formatDateTime(collection.operationDate)} · {formatCurrency(collection.amount)} ·{' '}
+                                    {paymentMethodLabel(collection.paymentMethod)}
+                                    {collection.paymentMethod === 'CASH' && !collection.showInOfficialCash
+                                      ? ' · Sin ticket'
+                                      : ''}
+                                  </p>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400">
+                          {pendingPayment.sale?.items?.length ? (
+                            <span className="block max-w-xs line-clamp-2">
+                              {getSaleTreatmentLabel(pendingPayment.sale)}
+                            </span>
+                          ) : (
+                            '-'
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400">
+                          {formatDateTime(pendingPayment.createdAt)}
+                        </td>
+                        <td className="py-3 px-4 text-sm text-right font-medium text-gray-900 dark:text-white">
+                          <div className="space-y-1">
+                            <p>{formatCurrency(Number(pendingPayment.amount || 0))}</p>
+                            {pendingPayment.status === 'OPEN' && pendingPayment.collections.length > 0 ? (
+                              <p className="text-[11px] font-normal text-gray-500 dark:text-gray-400">
+                                Restante
+                              </p>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <span
+                            className={`badge ${
+                              pendingPayment.status === 'SETTLED'
+                                ? 'badge-success'
+                                : pendingPayment.status === 'CANCELLED'
+                                  ? 'badge-danger'
+                                  : 'badge-warning'
+                            }`}
+                          >
+                            {pendingPaymentStatusLabel[pendingPayment.status] || pendingPayment.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400">
+                          {pendingPayment.settledAt ? (
+                            <div className="space-y-1">
+                              <p>{formatDateTime(pendingPayment.settledAt)}</p>
+                              {pendingPayment.settledPaymentMethod ? (
+                                <p className="text-xs">
+                                  {paymentMethodLabel(pendingPayment.settledPaymentMethod)}
+                                </p>
+                              ) : null}
+                            </div>
+                          ) : (
+                            '-'
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          {pendingPayment.status === 'OPEN' && pendingPayment.source === 'MANUAL' ? (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenManualPendingModal(pendingPayment.amount)}
+                              className="inline-flex rounded-lg border border-amber-300 bg-white p-2 text-amber-700 transition hover:bg-amber-50 dark:border-amber-700 dark:bg-gray-900 dark:text-amber-200 dark:hover:bg-amber-950/20"
+                              title="Editar pendiente de ficha"
+                              aria-label="Editar pendiente de ficha"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                          ) : pendingPayment.status === 'OPEN' && pendingPayment.sale?.id ? (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenPendingSettlementModal(pendingPayment)}
+                              className="inline-flex rounded-lg border border-sky-300 bg-white p-2 text-sky-700 transition hover:bg-sky-50 dark:border-sky-700 dark:bg-gray-900 dark:text-sky-200 dark:hover:bg-sky-950/20"
+                              title="Editar cobro pendiente"
+                              aria-label="Editar cobro pendiente"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                          ) : (
+                            <span className="text-sm text-gray-400">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-center py-8 text-gray-500 dark:text-gray-400">
+                No hay pendientes registrados
               </p>
             )}
           </div>
@@ -1379,6 +1861,249 @@ export default function ClientDetail() {
           onSuccess={handleFormSuccess}
           onCancel={() => setShowEditModal(false)}
         />
+      </Modal>
+
+      <Modal
+        isOpen={pendingSettlementModalOpen}
+        onClose={handleClosePendingSettlementModal}
+        title="Cobro pendiente"
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+            Gestiona aquí el cobro del pendiente de {pendingSettlementTarget?.sale?.saleNumber || 'la venta'}.
+            El importe que no se cobre ahora seguirá abierto para más adelante.
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-gray-200 px-4 py-3 dark:border-gray-700">
+              <p className="text-sm text-gray-500 dark:text-gray-400">Pendiente actual</p>
+              <p className="font-semibold text-gray-900 dark:text-white">
+                {formatCurrency(pendingSettlementOpenAmount)}
+              </p>
+            </div>
+            <div className="rounded-lg border border-gray-200 px-4 py-3 dark:border-gray-700">
+              <p className="text-sm text-gray-500 dark:text-gray-400">Restará pendiente</p>
+              <p className="font-semibold text-amber-700 dark:text-amber-300">
+                {formatCurrency(pendingSettlementRemainingAfterCharge)}
+              </p>
+            </div>
+          </div>
+
+          <div>
+            <label className="label">Importe a cobrar ahora</label>
+            <input
+              type="text"
+              value={pendingSettlementDraft.amount}
+              onChange={(event) =>
+                setPendingSettlementDraft((current) => ({
+                  ...current,
+                  amount: event.target.value
+                }))
+              }
+              className="input"
+              placeholder="0,00"
+            />
+          </div>
+
+          <div>
+            <label className="label">Fecha y hora de cobro</label>
+            <input
+              type="datetime-local"
+              value={pendingSettlementDraft.settledAt}
+              onChange={(event) =>
+                setPendingSettlementDraft((current) => ({
+                  ...current,
+                  settledAt: event.target.value
+                }))
+              }
+              className="input"
+            />
+          </div>
+
+          <div>
+            <label className="label">Método de pago</label>
+            <select
+              value={pendingSettlementDraft.paymentMethod}
+              onChange={(event) =>
+                setPendingSettlementDraft((current) => ({
+                  ...current,
+                  paymentMethod: event.target.value as 'CASH' | 'CARD' | 'BIZUM' | 'ABONO'
+                }))
+              }
+              className="input"
+            >
+              <option value="CASH">Efectivo</option>
+              <option value="CARD">Tarjeta</option>
+              <option value="BIZUM">Bizum</option>
+              <option value="ABONO">Abono</option>
+            </select>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={handleClosePendingSettlementModal}
+              className="btn btn-secondary"
+              disabled={pendingSettlementSaving}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleConfirmPendingSettlement()}
+              className="btn btn-primary"
+              disabled={pendingSettlementSaving}
+            >
+              {pendingSettlementSaving ? 'Guardando...' : 'Cobro'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={pendingRemainderModalOpen}
+        onClose={() => {
+          if (pendingSettlementSaving) return
+          setPendingRemainderModalOpen(false)
+          setPendingAccountBalanceUsage(0)
+          setPendingRemainderAmount(0)
+        }}
+        title="Abono insuficiente"
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-700 dark:text-gray-300">
+            El abono cubrirá {formatCurrency(pendingAccountBalanceUsage)} y quedarán{' '}
+            {formatCurrency(pendingRemainderAmount)} por cobrar.
+          </p>
+          <p className="text-sm font-medium text-gray-900 dark:text-white">
+            ¿Cómo se va a cobrar el importe restante?
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <button
+              onClick={() => void handlePendingRemainderPaymentSelection('CASH')}
+              className="btn btn-secondary"
+              disabled={pendingSettlementSaving}
+            >
+              Efectivo
+            </button>
+            <button
+              onClick={() => void handlePendingRemainderPaymentSelection('CARD')}
+              className="btn btn-secondary"
+              disabled={pendingSettlementSaving}
+            >
+              Tarjeta
+            </button>
+            <button
+              onClick={() => void handlePendingRemainderPaymentSelection('BIZUM')}
+              className="btn btn-secondary"
+              disabled={pendingSettlementSaving}
+            >
+              Bizum
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={pendingCashDecisionModalOpen}
+        onClose={() => {
+          if (pendingSettlementSaving) return
+          setPendingCashDecisionModalOpen(false)
+          setPendingCollectionExecution(null)
+        }}
+        title="Cobro en efectivo"
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-700 dark:text-gray-300">
+            ¿Quieres imprimir ticket para este cobro en efectivo?
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Si eliges <strong>No imprimir ticket</strong>, el cobro quedará en la sección privada y no afectará a los movimientos oficiales.
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <button
+              onClick={() => {
+                setPendingCashDecisionModalOpen(false)
+                void executePendingCollection({
+                  paymentMethod: pendingCollectionExecution?.paymentMethod || 'CASH',
+                  accountBalanceUsageAmount: pendingCollectionExecution?.accountBalanceUsageAmount,
+                  printTicketAfterCollection: true,
+                  showInOfficialCash: true
+                })
+              }}
+              className="btn btn-primary"
+              disabled={pendingSettlementSaving}
+            >
+              Imprimir ticket
+            </button>
+            <button
+              onClick={() => {
+                setPendingCashDecisionModalOpen(false)
+                void executePendingCollection({
+                  paymentMethod: pendingCollectionExecution?.paymentMethod || 'CASH',
+                  accountBalanceUsageAmount: pendingCollectionExecution?.accountBalanceUsageAmount,
+                  printTicketAfterCollection: false,
+                  showInOfficialCash: false
+                })
+              }}
+              className="btn btn-secondary"
+              disabled={pendingSettlementSaving}
+            >
+              Sin imprimir
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={manualPendingModalOpen}
+        onClose={handleCloseManualPendingModal}
+        title="Editar pendiente de ficha"
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+            Este importe corresponde al pendiente guardado en la ficha del cliente o importado desde otro sistema.
+            No modifica los pendientes generados desde ventas.
+          </div>
+
+          <div>
+            <label className="label">Importe pendiente de ficha</label>
+            <input
+              type="text"
+              value={manualPendingDraft}
+              onChange={(event) => setManualPendingDraft(event.target.value)}
+              className="input"
+              placeholder="0,00"
+            />
+          </div>
+
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Pendiente abierto en ventas: {formatCurrency(salePendingAmount)}
+          </p>
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={handleCloseManualPendingModal}
+              className="btn btn-secondary"
+              disabled={manualPendingSaving}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleConfirmManualPendingUpdate()}
+              className="btn btn-primary"
+              disabled={manualPendingSaving}
+            >
+              {manualPendingSaving ? 'Guardando...' : 'Guardar pendiente'}
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   )

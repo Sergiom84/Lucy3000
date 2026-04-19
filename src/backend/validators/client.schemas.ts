@@ -70,6 +70,9 @@ const nullableMoneySchema = z
 const requiredTextSchema = (field: string, maxLength: number) =>
   z.string().trim().min(1, `${field} is required`).max(maxLength, `${field} is too long`)
 
+const clientSortBySchema = z.enum(['lastVisit', 'name', 'clientNumber', 'totalSpent', 'pendingAmount'])
+const sortDirectionSchema = z.enum(['asc', 'desc'])
+
 export const clientIdParamSchema = uuidParamSchema
 
 export const clientsQuerySchema = z.object({
@@ -77,6 +80,8 @@ export const clientsQuerySchema = z.object({
   isActive: booleanQuerySchema.optional(),
   paginated: booleanQuerySchema.optional(),
   includeCounts: booleanQuerySchema.optional(),
+  sortBy: clientSortBySchema.optional(),
+  sortDirection: sortDirectionSchema.optional(),
   page: z.coerce.number().int().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional()
 })

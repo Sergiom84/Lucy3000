@@ -8,15 +8,20 @@ import {
   COMMERCIAL_PAYMENT_METHODS,
   addBreakdownEntriesToBuckets,
   createCommercialPaymentBuckets,
+  getPendingCollectionCollectedAmount,
+  getPendingCollectionEntry,
   getSalePaymentBreakdown,
   getTopUpCollectedEntry
 } from '../utils/payment-breakdown'
 import {
   accountBalanceTopUpSummarySelect,
+  buildPendingCollectionAnalyticsRows,
   buildSaleAnalyticsRows,
   formatProfessionalName,
   getCollectedRevenue,
   getWorkPerformedRevenue,
+  pendingCollectionAnalyticsInclude,
+  pendingCollectionSummarySelect,
   saleAnalyticsInclude,
   saleSummarySelect
 } from '../utils/sales-reporting'
@@ -85,11 +90,30 @@ const commercialSaleRangeWhere = (start: Date, end: Date): Prisma.SaleWhereInput
   }
 })
 
+const regularCommercialSaleRangeWhere = (start: Date, end: Date): Prisma.SaleWhereInput => ({
+  ...commercialSaleRangeWhere(start, end),
+  pendingPayment: null
+})
+
 const topUpRangeWhere = (start: Date, end: Date): Prisma.AccountBalanceMovementWhereInput => ({
   type: 'TOP_UP',
   operationDate: {
     gte: start,
     lte: end
+  }
+})
+
+const pendingCollectionRangeWhere = (
+  start: Date,
+  end: Date
+): Prisma.PendingPaymentCollectionWhereInput => ({
+  operationDate: {
+    gte: start,
+    lte: end
+  },
+  NOT: {
+    paymentMethod: 'CASH',
+    showInOfficialCash: false
   }
 })
 
@@ -128,7 +152,21 @@ const buildCashSummary = async (referenceDate: Date) => {
   const { start: monthStart, end: monthEnd } = getPeriodRange('MONTH', referenceDate)
   const { start: yearStart, end: yearEnd } = getPeriodRange('YEAR', referenceDate)
 
-  const [activeCashRegister, daySales, monthSales, yearSales, dayTopUps, monthTopUps, yearTopUps] =
+  const [
+    activeCashRegister,
+    daySales,
+    monthSales,
+    yearSales,
+    dayPerformedSales,
+    monthPerformedSales,
+    yearPerformedSales,
+    dayCollections,
+    monthCollections,
+    yearCollections,
+    dayTopUps,
+    monthTopUps,
+    yearTopUps
+  ] =
     await prisma.$transaction([
     prisma.cashRegister.findFirst({
       where: { status: 'OPEN' },
@@ -145,6 +183,18 @@ const buildCashSummary = async (referenceDate: Date) => {
       orderBy: { openedAt: 'desc' }
     }),
     prisma.sale.findMany({
+      where: regularCommercialSaleRangeWhere(dayStart, dayEnd),
+      select: saleSummarySelect
+    }),
+    prisma.sale.findMany({
+      where: regularCommercialSaleRangeWhere(monthStart, monthEnd),
+      select: saleSummarySelect
+    }),
+    prisma.sale.findMany({
+      where: regularCommercialSaleRangeWhere(yearStart, yearEnd),
+      select: saleSummarySelect
+    }),
+    prisma.sale.findMany({
       where: commercialSaleRangeWhere(dayStart, dayEnd),
       select: saleSummarySelect
     }),
@@ -155,6 +205,18 @@ const buildCashSummary = async (referenceDate: Date) => {
     prisma.sale.findMany({
       where: commercialSaleRangeWhere(yearStart, yearEnd),
       select: saleSummarySelect
+    }),
+    prisma.pendingPaymentCollection.findMany({
+      where: pendingCollectionRangeWhere(dayStart, dayEnd),
+      select: pendingCollectionSummarySelect
+    }),
+    prisma.pendingPaymentCollection.findMany({
+      where: pendingCollectionRangeWhere(monthStart, monthEnd),
+      select: pendingCollectionSummarySelect
+    }),
+    prisma.pendingPaymentCollection.findMany({
+      where: pendingCollectionRangeWhere(yearStart, yearEnd),
+      select: pendingCollectionSummarySelect
     }),
     prisma.accountBalanceMovement.findMany({
       where: topUpRangeWhere(dayStart, dayEnd),
@@ -174,6 +236,13 @@ const buildCashSummary = async (referenceDate: Date) => {
 
   for (const sale of daySales) {
     addBreakdownEntriesToBuckets(paymentsByMethod, getSalePaymentBreakdown(sale))
+  }
+
+  for (const collection of dayCollections) {
+    const collectionEntry = getPendingCollectionEntry(collection)
+    if (collectionEntry) {
+      addBreakdownEntriesToBuckets(paymentsByMethod, [collectionEntry])
+    }
   }
 
   for (const topUp of dayTopUps) {
@@ -205,18 +274,23 @@ const buildCashSummary = async (referenceDate: Date) => {
       openingBalance,
       paymentsByMethod,
       income: {
-        day: getCollectedRevenue(daySales) + dayTopUps.reduce((sum, topUp) => sum + (getTopUpCollectedEntry(topUp)?.amount || 0), 0),
+        day:
+          getCollectedRevenue(daySales) +
+          dayCollections.reduce((sum, collection) => sum + getPendingCollectionCollectedAmount(collection), 0) +
+          dayTopUps.reduce((sum, topUp) => sum + (getTopUpCollectedEntry(topUp)?.amount || 0), 0),
         month:
           getCollectedRevenue(monthSales) +
+          monthCollections.reduce((sum, collection) => sum + getPendingCollectionCollectedAmount(collection), 0) +
           monthTopUps.reduce((sum, topUp) => sum + (getTopUpCollectedEntry(topUp)?.amount || 0), 0),
         year:
           getCollectedRevenue(yearSales) +
+          yearCollections.reduce((sum, collection) => sum + getPendingCollectionCollectedAmount(collection), 0) +
           yearTopUps.reduce((sum, topUp) => sum + (getTopUpCollectedEntry(topUp)?.amount || 0), 0)
       },
       workPerformed: {
-        day: getWorkPerformedRevenue(daySales),
-        month: getWorkPerformedRevenue(monthSales),
-        year: getWorkPerformedRevenue(yearSales)
+        day: getWorkPerformedRevenue(dayPerformedSales),
+        month: getWorkPerformedRevenue(monthPerformedSales),
+        year: getWorkPerformedRevenue(yearPerformedSales)
       },
       currentBalance,
       manualAdjustments: {
@@ -257,22 +331,49 @@ const getAnalyticsRows = async (query: Request['query'] | undefined) => {
   if (type === 'SERVICE') itemFilter.serviceId = { not: null }
   if (type === 'PRODUCT') itemFilter.productId = { not: null }
 
-  const sales = await prisma.sale.findMany({
-    where: {
-      ...commercialSaleRangeWhere(start, end),
-      ...(clientId ? { clientId } : {}),
-      ...(serviceId || productId || type !== 'ALL' ? { items: { some: itemFilter } } : {})
-    },
-    include: saleAnalyticsInclude,
-    orderBy: { date: 'desc' }
-  })
+  const [sales, pendingCollections] = await prisma.$transaction([
+    prisma.sale.findMany({
+      where: {
+        ...regularCommercialSaleRangeWhere(start, end),
+        ...(clientId ? { clientId } : {}),
+        ...(serviceId || productId || type !== 'ALL' ? { items: { some: itemFilter } } : {})
+      },
+      include: saleAnalyticsInclude,
+      orderBy: { date: 'desc' }
+    }),
+    prisma.pendingPaymentCollection.findMany({
+      where: {
+        ...pendingCollectionRangeWhere(start, end),
+        ...(clientId ? { clientId } : {}),
+        ...(serviceId || productId || type !== 'ALL'
+          ? {
+              sale: {
+                items: {
+                  some: itemFilter
+                }
+              }
+            }
+          : {})
+      },
+      include: pendingCollectionAnalyticsInclude,
+      orderBy: [{ operationDate: 'desc' }, { createdAt: 'desc' }]
+    })
+  ])
 
-  return buildSaleAnalyticsRows(sales, {
+  const saleRows = buildSaleAnalyticsRows(sales, {
     paymentMethod,
     serviceId,
     productId,
     type
   })
+  const collectionRows = buildPendingCollectionAnalyticsRows(pendingCollections, {
+    paymentMethod,
+    serviceId,
+    productId,
+    type
+  })
+
+  return [...saleRows, ...collectionRows].sort((a, b) => b.date.getTime() - a.date.getTime())
 }
 
 export const getPrivateNoTicketCashSales = async (req: Request, res: Response) => {
@@ -282,42 +383,85 @@ export const getPrivateNoTicketCashSales = async (req: Request, res: Response) =
       return res.status(403).json({ error: 'PIN incorrecto' })
     }
 
-    const sales = await prisma.sale.findMany({
-      where: {
-        status: 'COMPLETED',
-        paymentMethod: 'CASH',
-        showInOfficialCash: false
-      },
-      include: {
-        client: {
-          select: {
-            firstName: true,
-            lastName: true
+    const [sales, collections] = await prisma.$transaction([
+      prisma.sale.findMany({
+        where: {
+          status: 'COMPLETED',
+          paymentMethod: 'CASH',
+          showInOfficialCash: false,
+          pendingPayment: null
+        },
+        include: {
+          client: {
+            select: {
+              firstName: true,
+              lastName: true
+            }
+          },
+          appointment: {
+            select: {
+              guestName: true
+            }
+          },
+          user: {
+            select: {
+              name: true
+            }
           }
         },
-        appointment: {
-          select: {
-            guestName: true
+        orderBy: { date: 'desc' }
+      }),
+      prisma.pendingPaymentCollection.findMany({
+        where: {
+          paymentMethod: 'CASH',
+          showInOfficialCash: false
+        },
+        include: {
+          sale: {
+            include: {
+              client: {
+                select: {
+                  firstName: true,
+                  lastName: true
+                }
+              },
+              appointment: {
+                select: {
+                  guestName: true
+                }
+              },
+              user: {
+                select: {
+                  name: true
+                }
+              }
+            }
           }
         },
-        user: {
-          select: {
-            name: true
-          }
-        }
-      },
-      orderBy: { date: 'desc' }
-    })
+        orderBy: [{ operationDate: 'desc' }, { createdAt: 'desc' }]
+      })
+    ])
 
-    const rows = sales.map((sale) => ({
-      id: sale.id,
-      saleNumber: sale.saleNumber,
-      date: sale.date,
-      amount: Number(sale.total),
-      description: sale.notes || null,
-      clientName: getSaleDisplayName(sale),
-      professionalName: formatProfessionalName(sale.professional, sale.user?.name)
-    }))
+    const rows = [
+      ...sales.map((sale) => ({
+        id: sale.id,
+        saleNumber: sale.saleNumber,
+        date: sale.date,
+        amount: Number(sale.total),
+        description: sale.notes || null,
+        clientName: getSaleDisplayName(sale),
+        professionalName: formatProfessionalName(sale.professional, sale.user?.name)
+      })),
+      ...collections.map((collection) => ({
+        id: collection.id,
+        saleNumber: collection.sale.saleNumber,
+        date: collection.operationDate,
+        amount: Number(collection.amount),
+        description: 'Cobro pendiente sin ticket',
+        clientName: getSaleDisplayName(collection.sale),
+        professionalName: formatProfessionalName(collection.sale.professional, collection.sale.user?.name)
+      }))
+    ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
     res.json({
       rows,

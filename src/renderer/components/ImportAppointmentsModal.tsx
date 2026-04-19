@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertCircle, CheckCircle, Download, FileSpreadsheet, Upload, X } from 'lucide-react'
+import { AlertCircle, CheckCircle, FileSpreadsheet } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Modal from './Modal'
 import { useAuthStore } from '../stores/authStore'
@@ -378,7 +378,6 @@ export default function ImportAppointmentsModal({
 
       <div>
         <button onClick={handleDownloadTemplate} className="btn btn-secondary w-full">
-          <Download className="mr-2 h-5 w-5" />
           Descargar Plantilla de Excel
         </button>
       </div>
@@ -479,7 +478,6 @@ export default function ImportAppointmentsModal({
                   className="btn btn-primary"
                   disabled={!canResolveMissing}
                 >
-                  <Upload className="mr-2 h-4 w-4" />
                   Crear fichas e importar
                 </button>
                 <button
@@ -491,7 +489,6 @@ export default function ImportAppointmentsModal({
                   className="btn btn-secondary"
                   disabled={!canResolveMissing}
                 >
-                  <X className="mr-2 h-4 w-4" />
                   Omitir esas citas e importar
                 </button>
               </div>
@@ -595,7 +592,6 @@ export default function ImportAppointmentsModal({
           className="btn btn-secondary"
           disabled={loading}
         >
-          <X className="mr-2 h-4 w-4" />
           {results ? 'Cerrar' : 'Cancelar'}
         </button>
         {!preview && (
@@ -605,7 +601,6 @@ export default function ImportAppointmentsModal({
             className="btn btn-primary"
             disabled={!canAnalyze}
           >
-            <Upload className="mr-2 h-4 w-4" />
             {loading ? 'Analizando...' : 'Analizar archivo'}
           </button>
         )}
@@ -616,7 +611,6 @@ export default function ImportAppointmentsModal({
             className="btn btn-primary"
             disabled={!canCommit}
           >
-            <Upload className="mr-2 h-4 w-4" />
             {loading ? 'Importando...' : 'Confirmar importación'}
           </button>
         )}

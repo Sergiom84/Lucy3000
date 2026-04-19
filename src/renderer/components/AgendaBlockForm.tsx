@@ -161,7 +161,7 @@ export default function AgendaBlockForm({
     setProfessionalTouched(false)
     setFormData((prev) => ({
       ...prev,
-        professional: prev.professional || '',
+      professional: prev.professional || '',
       calendarInviteEmail: '',
       cabin: initialCabin,
       date: preselectedDate ? getLocalDateInputValue(preselectedDate) : prev.date
@@ -190,12 +190,16 @@ export default function AgendaBlockForm({
     setFormData((prev) => ({ ...prev, professional: fallbackProfessional }))
   }, [agendaBlock, formData.professional, professionalTouched, professionals])
 
-  const professionalSuggestions = useMemo(() => {
+  const professionalOptions = useMemo(() => {
+    const baseProfessionals = professionals.filter((item) => item.trim().length > 0)
     const mergedProfessionals = formData.professional.trim()
-      ? [...professionals, formData.professional.trim()]
-      : professionals
+      ? [...baseProfessionals, formData.professional.trim()]
+      : baseProfessionals
 
-    return [...new Set(mergedProfessionals.filter((item) => item.trim().length > 0))]
+    return [...new Set(mergedProfessionals)].map((professional) => ({
+      value: professional,
+      label: professional
+    }))
   }, [formData.professional, professionals])
 
   const handleChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -364,21 +368,26 @@ export default function AgendaBlockForm({
           <label className="label">
             Profesional <span className="text-red-500">*</span>
           </label>
-          <input
-            type="text"
+          <select
             name="professional"
             value={formData.professional}
             onChange={handleChange}
             className="input"
-            placeholder={professionalsLoading ? 'Cargando sugerencias...' : 'Escribe el nombre del profesional'}
-            list="agenda-block-professional-options"
             required
-          />
-          <datalist id="agenda-block-professional-options">
-            {professionalSuggestions.map((professional) => (
-              <option key={professional} value={professional} />
-            ))}
-          </datalist>
+            disabled={professionalsLoading && professionalOptions.length === 0}
+          >
+            {professionalOptions.length === 0 ? (
+              <option value="">
+                {professionalsLoading ? 'Cargando profesionales...' : 'Sin profesionales configurados'}
+              </option>
+            ) : (
+              professionalOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))
+            )}
+          </select>
         </div>
 
         <div>

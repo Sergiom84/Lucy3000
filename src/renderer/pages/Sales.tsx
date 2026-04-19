@@ -3,12 +3,9 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Clock,
   CreditCard,
-  DollarSign,
   FileText,
-  Package,
   Plus,
   Receipt,
-  Scissors,
   Search,
   ShoppingCart,
   Trash2
@@ -21,14 +18,17 @@ import api from '../utils/api'
 import {
   loadActiveProducts,
   loadAppointmentClients,
+  loadAppointmentLegendItems,
   loadAppointmentProfessionals,
   loadAppointmentServices,
   loadBonoTemplates,
-  preloadPointOfSaleCatalogs
+  preloadPointOfSaleCatalogs,
+  type AppointmentLegendCatalogItem
 } from '../utils/appointmentCatalogs'
 import { printTicket } from '../utils/desktop'
 import { getPrintTicketSuccessMessage } from '../utils/desktop'
 import { formatCurrency } from '../utils/format'
+import { resolveAppointmentLegend } from '../utils/appointmentColors'
 import { buildSearchTokens, filterRankedItems } from '../utils/searchableOptions'
 import {
   buildSaleTicketPayload,
@@ -109,8 +109,25 @@ interface Sale {
   tax: number
   total: number
   paymentMethod: string
+  paymentBreakdown?: string | null
   status: string
   items: any[]
+  pendingPayment?: {
+    id: string
+    amount: number | string
+    status: string
+    createdAt: string
+    settledAt?: string | null
+    settledPaymentMethod?: string | null
+    collections?: Array<{
+      id: string
+      amount: number | string
+      paymentMethod: string
+      showInOfficialCash?: boolean
+      operationDate: string
+      createdAt: string
+    }>
+  } | null
   accountBalanceMovements?: Array<{
     id: string
     type: string
@@ -140,6 +157,17 @@ interface AccountBalanceHistoryRow {
     id: string
     saleNumber: string
     paymentMethod: string
+    paymentBreakdown?: string | null
+    status?: string
+    pendingPayment?: {
+      collections?: Array<{
+        amount: number | string
+        paymentMethod: string
+        showInOfficialCash?: boolean
+        operationDate?: string
+        createdAt?: string
+      }>
+    } | null
   } | null
 }
 
@@ -150,10 +178,16 @@ type CatalogItem =
 type CatalogType = 'all' | 'products' | 'services' | 'bonos'
 type SalesView = 'pos' | 'history' | 'account-balance'
 type SalePaymentMethod = 'CASH' | 'CARD' | 'BIZUM' | 'ABONO'
+type CombinedSecondaryPaymentMethod = SalePaymentMethod | 'PENDING'
 type SaleMode = 'NORMAL' | 'PENDING' | 'ON_HOLD' | 'QUOTE'
 type PendingSaleExecutionOptions = {
   paymentMethodOverride?: SalePaymentMethod
   accountBalanceUsageAmount?: number
+}
+type CombinedPaymentDraft = {
+  primaryMethod: SalePaymentMethod
+  primaryAmount: string
+  secondaryMethod: CombinedSecondaryPaymentMethod
 }
 
 const formatFamilyLabel = (value: string): string =>
@@ -186,6 +220,7 @@ export default function Sales() {
   const [selectedClient, setSelectedClient] = useState<Client | null>(null)
   const [discount, setDiscount] = useState(0)
   const [paymentMethod, setPaymentMethod] = useState<SalePaymentMethod>('CASH')
+  const [paymentMode, setPaymentMode] = useState<'SINGLE' | 'COMBINED'>('SINGLE')
   const [professional, setProfessional] = useState('')
   const [professionals, setProfessionals] = useState<string[]>([])
   const [saleMode, setSaleMode] = useState<SaleMode>('NORMAL')
@@ -197,6 +232,7 @@ export default function Sales() {
   const [products, setProducts] = useState<Product[]>([])
   const [services, setServices] = useState<Service[]>([])
   const [bonoTemplates, setBonoTemplates] = useState<BonoTemplate[]>([])
+  const [legendItems, setLegendItems] = useState<AppointmentLegendCatalogItem[]>([])
   const [catalogSearch, setCatalogSearch] = useState('')
   const [catalogType, setCatalogType] = useState<CatalogType>('services')
   const [selectedServiceFamily, setSelectedServiceFamily] = useState<string | null>(null)
@@ -219,10 +255,16 @@ export default function Sales() {
   const [dateFilter, setDateFilter] = useState({ startDate: '', endDate: '' })
   const [accountBalanceConfirmModalOpen, setAccountBalanceConfirmModalOpen] = useState(false)
   const [cashTicketDecisionModalOpen, setCashTicketDecisionModalOpen] = useState(false)
+  const [combinedPaymentModalOpen, setCombinedPaymentModalOpen] = useState(false)
   const [accountBalanceRemainderModalOpen, setAccountBalanceRemainderModalOpen] = useState(false)
   const [pendingSaleExecution, setPendingSaleExecution] = useState<PendingSaleExecutionOptions | null>(null)
   const [pendingAccountBalanceUsage, setPendingAccountBalanceUsage] = useState(0)
   const [pendingRemainderAmount, setPendingRemainderAmount] = useState(0)
+  const [combinedPaymentDraft, setCombinedPaymentDraft] = useState<CombinedPaymentDraft>({
+    primaryMethod: 'CASH',
+    primaryAmount: '',
+    secondaryMethod: 'CARD'
+  })
 
   const [loading, setLoading] = useState(false)
   const prefillApplied = useRef({ client: false, service: false, sale: false })
@@ -281,11 +323,12 @@ export default function Sales() {
 
   const loadCatalog = async () => {
     try {
-      const [productsResult, servicesResult, bonosResult, professionalsResult] = await Promise.allSettled([
+      const [productsResult, servicesResult, bonosResult, professionalsResult, legendItemsResult] = await Promise.allSettled([
         loadActiveProducts(),
         loadAppointmentServices(),
         loadBonoTemplates(),
-        loadAppointmentProfessionals()
+        loadAppointmentProfessionals(),
+        loadAppointmentLegendItems()
       ])
 
       if (productsResult.status === 'fulfilled') {
@@ -312,6 +355,13 @@ export default function Sales() {
       } else {
         console.error('Error loading professionals:', professionalsResult.reason)
         setProfessionals([])
+      }
+
+      if (legendItemsResult.status === 'fulfilled') {
+        setLegendItems(legendItemsResult.value)
+      } else {
+        console.error('Error loading appointment legends:', legendItemsResult.reason)
+        setLegendItems([])
       }
     } catch (error) {
       console.error('Error loading catalog:', error)
@@ -421,11 +471,85 @@ export default function Sales() {
     }
   }
 
+  const parseCombinedPrimaryAmount = () => {
+    const parsed = Number.parseFloat(combinedPaymentDraft.primaryAmount.replace(',', '.'))
+    return Number.isFinite(parsed) ? roundCurrency(parsed) : 0
+  }
+
+  const getCombinedSecondaryAmount = () => {
+    const { total } = calculateTotals()
+    return roundCurrency(Math.max(0, total - parseCombinedPrimaryAmount()))
+  }
+
+  const resetCombinedPaymentDraft = () => {
+    setCombinedPaymentDraft({
+      primaryMethod: 'CASH',
+      primaryAmount: '',
+      secondaryMethod: 'CARD'
+    })
+  }
+
+  const resolveCombinedPayment = () => {
+    const { total } = calculateTotals()
+    const primaryAmount = parseCombinedPrimaryAmount()
+    const secondaryAmount = roundCurrency(total - primaryAmount)
+
+    if (total <= 0) {
+      toast.error('El importe de la venta debe ser mayor que cero')
+      return null
+    }
+
+    if (primaryAmount <= 0 || primaryAmount >= total) {
+      toast.error('La primera cuantía debe ser mayor que cero y menor que el total')
+      return null
+    }
+
+    if (secondaryAmount <= 0) {
+      toast.error('La segunda cuantía debe ser mayor que cero')
+      return null
+    }
+
+    if (
+      combinedPaymentDraft.secondaryMethod !== 'PENDING' &&
+      combinedPaymentDraft.primaryMethod === combinedPaymentDraft.secondaryMethod
+    ) {
+      toast.error('Selecciona dos formas distintas para el pago combinado')
+      return null
+    }
+
+    const accountBalanceAmount =
+      (combinedPaymentDraft.primaryMethod === 'ABONO' ? primaryAmount : 0) +
+      (combinedPaymentDraft.secondaryMethod === 'ABONO' ? secondaryAmount : 0)
+
+    if (accountBalanceAmount > 0 && !selectedClient?.id) {
+      toast.error('Selecciona un cliente para usar abono')
+      return null
+    }
+
+    if (accountBalanceAmount > availableAccountBalance) {
+      toast.error('El cliente no tiene saldo suficiente en su abono')
+      return null
+    }
+
+    return {
+      primaryMethod: combinedPaymentDraft.primaryMethod,
+      primaryAmount,
+      secondaryMethod: combinedPaymentDraft.secondaryMethod as CombinedSecondaryPaymentMethod,
+      secondaryAmount
+    }
+  }
+
   const completeSaleRequest = async (options: {
     printTicketAfterSale: boolean
     showInOfficialCash: boolean
     paymentMethodOverride?: SalePaymentMethod
     accountBalanceUsageAmount?: number
+    combinedPayment?: {
+      primaryMethod: SalePaymentMethod
+      primaryAmount: number
+      secondaryMethod: CombinedSecondaryPaymentMethod
+      secondaryAmount: number
+    }
   }) => {
     if (cart.length === 0) {
       toast.error('El carrito está vacío')
@@ -439,10 +563,16 @@ export default function Sales() {
       notes?: string | null
     } | undefined
 
-    const effectivePaymentMethod = options.paymentMethodOverride || paymentMethod
+    const combinedPayment = options.combinedPayment
+    const effectivePaymentMethod =
+      combinedPayment
+        ? combinedPayment.primaryMethod
+        : saleMode === 'PENDING'
+          ? 'CASH'
+          : options.paymentMethodOverride || paymentMethod
 
     const shouldUseAccountBalance =
-      options.accountBalanceUsageAmount !== undefined || effectivePaymentMethod === 'ABONO'
+      !combinedPayment && (options.accountBalanceUsageAmount !== undefined || effectivePaymentMethod === 'ABONO')
 
     if (shouldUseAccountBalance) {
       if (!selectedClient?.id) {
@@ -472,7 +602,13 @@ export default function Sales() {
     try {
       setLoading(true)
       const { subtotal, discountAmount } = calculateTotals()
-      const saleStatus = saleMode === 'PENDING' ? 'PENDING' : 'COMPLETED'
+      const saleStatus = combinedPayment
+        ? combinedPayment.secondaryMethod === 'PENDING'
+          ? 'PENDING'
+          : 'COMPLETED'
+        : saleMode === 'PENDING'
+          ? 'PENDING'
+          : 'COMPLETED'
       const response = await api.post('/sales', {
         clientId: selectedClient?.id || null,
         appointmentId: linkedAppointmentId,
@@ -491,6 +627,13 @@ export default function Sales() {
         professional,
         status: saleStatus,
         accountBalanceUsage: accountBalanceUsagePayload,
+        combinedPayment: combinedPayment
+          ? {
+              primaryMethod: combinedPayment.primaryMethod,
+              primaryAmount: combinedPayment.primaryAmount,
+              secondaryMethod: combinedPayment.secondaryMethod
+            }
+          : undefined,
         showInOfficialCash: options.showInOfficialCash,
         notes: saleMode === 'ON_HOLD' ? `[EN ESPERA] ${notes}`.trim() : notes
       })
@@ -510,6 +653,8 @@ export default function Sales() {
       setDiscount(0)
       setNotes('')
       setPaymentMethod('CASH')
+      setPaymentMode('SINGLE')
+      resetCombinedPaymentDraft()
       setProfessional(professionals[0] || '')
       setSaleMode('NORMAL')
       setLastCompletedQuote(null)
@@ -567,14 +712,26 @@ export default function Sales() {
     }
 
     if (saleMode === 'PENDING') {
-      if (paymentMethod === 'ABONO') {
-        toast.error('No puedes guardar una venta pendiente con abono')
+      await completeSaleRequest({
+        printTicketAfterSale: false,
+        showInOfficialCash: false
+      })
+      return
+    }
+
+    if (paymentMode === 'COMBINED') {
+      const combinedPayment = resolveCombinedPayment()
+      if (!combinedPayment) {
+        setCombinedPaymentModalOpen(true)
         return
       }
 
       await completeSaleRequest({
-        printTicketAfterSale: false,
-        showInOfficialCash: false
+        printTicketAfterSale:
+          combinedPayment.secondaryMethod !== 'PENDING' &&
+          [combinedPayment.primaryMethod, combinedPayment.secondaryMethod].includes('CARD'),
+        showInOfficialCash: true,
+        combinedPayment
       })
       return
     }
@@ -1097,17 +1254,16 @@ export default function Sales() {
 
                 <div className="flex gap-2">
                   {[
-                    { value: 'services', label: 'Servicios', icon: Scissors },
-                    { value: 'products', label: 'Productos', icon: Package },
-                    { value: 'bonos', label: 'Bonos', icon: Receipt },
-                    { value: 'all', label: 'Todos', icon: null }
+                    { value: 'services', label: 'Servicios' },
+                    { value: 'products', label: 'Productos' },
+                    { value: 'bonos', label: 'Bonos' },
+                    { value: 'all', label: 'Todos' }
                   ].map((option) => (
                     <button
                       key={option.value}
                       onClick={() => handleCatalogTypeChange(option.value as typeof catalogType)}
                       className={`btn ${catalogType === option.value ? 'btn-primary' : 'btn-secondary'}`}
                     >
-                      {option.icon && <option.icon className="w-4 h-4 mr-2" />}
                       {option.label}
                     </button>
                   ))}
@@ -1144,32 +1300,43 @@ export default function Sales() {
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
                       {activeFamilyCards.map((card) => (
-                        <button
-                          key={card.family}
-                          type="button"
-                          onClick={() => handleToggleFamily(card.family)}
-                          className={`rounded-lg border p-3 text-left transition-colors ${
-                            activeFamily === card.family
-                              ? 'border-primary-600 bg-primary-50 dark:bg-primary-900/20'
-                              : 'border-gray-200 dark:border-gray-700 hover:border-primary-500'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <p className="text-sm font-semibold text-gray-900 dark:text-white">
-                              {card.label}
-                            </p>
-                            {catalogType === 'services' ? (
-                              <Scissors className="w-4 h-4 text-primary-600" />
-                            ) : catalogType === 'bonos' ? (
-                              <Receipt className="w-4 h-4 text-primary-600" />
-                            ) : (
-                              <Package className="w-4 h-4 text-primary-600" />
-                            )}
-                          </div>
-                          <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                            {card.total} {catalogTypeLabels[catalogType as Exclude<CatalogType, 'all'>]}
-                          </p>
-                        </button>
+                        (() => {
+                          const matchedLegend =
+                            catalogType === 'services'
+                              ? resolveAppointmentLegend(legendItems, card.family)
+                              : null
+                          const isSelected = activeFamily === card.family
+
+                          return (
+                            <button
+                              key={card.family}
+                              type="button"
+                              onClick={() => handleToggleFamily(card.family)}
+                              className={`rounded-lg border p-3 text-left transition-all ${
+                                matchedLegend
+                                  ? 'hover:brightness-[0.98]'
+                                  : isSelected
+                                    ? 'border-primary-600 bg-primary-50 dark:bg-primary-900/20'
+                                    : 'border-gray-200 dark:border-gray-700 hover:border-primary-500'
+                              }`}
+                              style={
+                                matchedLegend
+                                  ? {
+                                      borderColor: matchedLegend.color,
+                                      boxShadow: isSelected ? `0 0 0 2px ${matchedLegend.color}33` : undefined
+                                    }
+                                  : undefined
+                              }
+                            >
+                              <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                                {card.label}
+                              </p>
+                              <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                                {card.total} {catalogTypeLabels[catalogType as Exclude<CatalogType, 'all'>]}
+                              </p>
+                            </button>
+                          )
+                        })()
                       ))}
                     </div>
                   )}
@@ -1200,16 +1367,7 @@ export default function Sales() {
                         onClick={() => addToCart(item, item.type)}
                         className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-blue-500 text-left transition-colors"
                       >
-                        <div className="flex items-center gap-2 mb-2">
-                          {item.type === 'product' ? (
-                            <Package className="w-5 h-5 text-blue-600" />
-                          ) : item.type === 'service' ? (
-                            <Scissors className="w-5 h-5 text-purple-600" />
-                          ) : (
-                            <Receipt className="w-5 h-5 text-amber-600" />
-                          )}
-                          <span className="font-semibold text-gray-900 dark:text-white">{item.name}</span>
-                        </div>
+                        <p className="mb-2 font-semibold text-gray-900 dark:text-white">{item.name}</p>
                         <p className="text-sm text-gray-600 dark:text-gray-400">
                           {item.type === 'bono' ? item.serviceName : item.category}
                         </p>
@@ -1337,29 +1495,44 @@ export default function Sales() {
                   />
                 </div>
 
-                <div>
-                  <label className="label">Método de pago</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { value: 'CASH', label: 'Efectivo', icon: DollarSign },
-                      { value: 'CARD', label: 'Tarjeta', icon: CreditCard },
-                      { value: 'BIZUM', label: 'Bizum', icon: Receipt },
-                      { value: 'ABONO', label: 'Abono', icon: CreditCard }
-                    ].map((option) => {
-                      const Icon = option.icon
-                      return (
+                {saleMode !== 'PENDING' ? (
+                  <div>
+                    <label className="label">Método de pago</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { value: 'CASH', label: 'Efectivo' },
+                        { value: 'CARD', label: 'Tarjeta' },
+                        { value: 'BIZUM', label: 'Bizum' },
+                        { value: 'ABONO', label: 'Abono' }
+                      ].map((option) => (
                         <button
                           key={option.value}
-                          onClick={() => setPaymentMethod(option.value as typeof paymentMethod)}
-                          className={`btn ${paymentMethod === option.value ? 'btn-primary' : 'btn-secondary'}`}
+                          type="button"
+                          onClick={() => {
+                            setPaymentMode('SINGLE')
+                            setPaymentMethod(option.value as typeof paymentMethod)
+                          }}
+                          className={`btn ${
+                            paymentMode === 'SINGLE' && paymentMethod === option.value ? 'btn-primary' : 'btn-secondary'
+                          }`}
                         >
-                          <Icon className="w-4 h-4 mr-2" />
                           {option.label}
                         </button>
-                      )
-                    })}
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setCombinedPaymentModalOpen(true)}
+                      className={`btn mt-2 w-full ${paymentMode === 'COMBINED' ? 'btn-primary' : 'btn-secondary'}`}
+                    >
+                      Combinado
+                    </button>
                   </div>
-                </div>
+                ) : (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                    La forma de pago se registrará cuando se salde la deuda desde la ficha del cliente.
+                  </div>
+                )}
 
                 <div>
                   <label className="label">Profesional</label>
@@ -1386,7 +1559,13 @@ export default function Sales() {
                   <label className="label">Estado</label>
                   <select
                     value={saleMode}
-                    onChange={(event) => setSaleMode(event.target.value as SaleMode)}
+                    onChange={(event) => {
+                      const nextSaleMode = event.target.value as SaleMode
+                      setSaleMode(nextSaleMode)
+                      if (nextSaleMode === 'PENDING') {
+                        setPaymentMode('SINGLE')
+                      }
+                    }}
                     className="input"
                   >
                     <option value="NORMAL">Normal</option>
@@ -1444,9 +1623,11 @@ export default function Sales() {
                   {lastCompletedSale.status === 'PENDING' ? 'guardada como pendiente.' : 'completada.'}
                 </p>
                 <div className="flex gap-3 mt-4">
-                  <button onClick={() => void handlePrintSale(lastCompletedSale)} className="btn btn-primary flex-1">
-                    Emitir ticket
-                  </button>
+                  {lastCompletedSale.status !== 'PENDING' ? (
+                    <button onClick={() => void handlePrintSale(lastCompletedSale)} className="btn btn-primary flex-1">
+                      Emitir ticket
+                    </button>
+                  ) : null}
                   <button onClick={() => void viewSaleDetail(lastCompletedSale.id)} className="btn btn-secondary flex-1">
                     Ver detalle
                   </button>
@@ -1547,9 +1728,11 @@ export default function Sales() {
                             <button onClick={() => void viewSaleDetail(sale.id)} className="btn btn-sm btn-secondary">
                               Ver detalle
                             </button>
-                            <button onClick={() => void handlePrintSale(sale)} className="btn btn-sm btn-primary">
-                              Ticket
-                            </button>
+                            {sale.status !== 'PENDING' ? (
+                              <button onClick={() => void handlePrintSale(sale)} className="btn btn-sm btn-primary">
+                                Ticket
+                              </button>
+                            ) : null}
                           </div>
                         </td>
                       </tr>
@@ -1781,6 +1964,128 @@ export default function Sales() {
       </Modal>
 
       <Modal
+        isOpen={combinedPaymentModalOpen}
+        onClose={() => {
+          if (loading) return
+          setCombinedPaymentModalOpen(false)
+        }}
+        title="Pago combinado"
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3">
+            <p className="text-sm text-gray-500 dark:text-gray-400">Total de la venta</p>
+            <p className="text-lg font-semibold text-gray-900 dark:text-white">{formatCurrency(total)}</p>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-[1.2fr_0.8fr]">
+            <div>
+              <label className="label">Método de pago</label>
+              <select
+                value={combinedPaymentDraft.primaryMethod}
+                onChange={(event) =>
+                  setCombinedPaymentDraft((current) => ({
+                    ...current,
+                    primaryMethod: event.target.value as SalePaymentMethod
+                  }))
+                }
+                className="input"
+              >
+                <option value="CASH">Metálico</option>
+                <option value="CARD">Tarjeta</option>
+                <option value="BIZUM">Bizum</option>
+                <option value="ABONO">Abono</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Cuantía</label>
+              <input
+                type="number"
+                min="0.01"
+                step="0.01"
+                max={Math.max(0, total - 0.01)}
+                value={combinedPaymentDraft.primaryAmount}
+                onChange={(event) =>
+                  setCombinedPaymentDraft((current) => ({
+                    ...current,
+                    primaryAmount: event.target.value
+                  }))
+                }
+                className="input"
+                placeholder="0,00"
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-[1.2fr_0.8fr]">
+            <div>
+              <label className="label">Segunda forma</label>
+              <select
+                value={combinedPaymentDraft.secondaryMethod}
+                onChange={(event) =>
+                  setCombinedPaymentDraft((current) => ({
+                    ...current,
+                    secondaryMethod: event.target.value as CombinedSecondaryPaymentMethod
+                  }))
+                }
+                className="input"
+              >
+                <option value="CASH">Metálico</option>
+                <option value="CARD">Tarjeta</option>
+                <option value="BIZUM">Bizum</option>
+                <option value="ABONO">Abono</option>
+                <option value="PENDING">Pendiente</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Cuantía calculada</label>
+              <input
+                type="text"
+                value={formatCurrency(getCombinedSecondaryAmount())}
+                className="input"
+                readOnly
+              />
+            </div>
+          </div>
+
+          {combinedPaymentDraft.secondaryMethod === 'PENDING' ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+              El importe restante se registrará como pendiente y aparecerá en la ficha del cliente, pestaña Pendiente - caja.
+            </div>
+          ) : null}
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setCombinedPaymentModalOpen(false)
+                if (paymentMode !== 'COMBINED') {
+                  resetCombinedPaymentDraft()
+                }
+              }}
+              className="btn btn-secondary"
+              disabled={loading}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const resolvedPayment = resolveCombinedPayment()
+                if (!resolvedPayment) return
+                setPaymentMode('COMBINED')
+                setCombinedPaymentModalOpen(false)
+              }}
+              className="btn btn-primary"
+              disabled={loading}
+            >
+              Aplicar
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
         isOpen={cashTicketDecisionModalOpen}
         onClose={() => {
           if (loading) return
@@ -1948,12 +2253,14 @@ export default function Sales() {
               </div>
             </div>
 
-            <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
-              <button onClick={() => void handlePrintSale(selectedSale)} className="btn btn-primary flex-1">
-                <Receipt className="w-4 h-4 mr-2" />
-                Imprimir Ticket
-              </button>
-            </div>
+            {selectedSale.status !== 'PENDING' ? (
+              <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <button onClick={() => void handlePrintSale(selectedSale)} className="btn btn-primary flex-1">
+                  <Receipt className="w-4 h-4 mr-2" />
+                  Imprimir Ticket
+                </button>
+              </div>
+            ) : null}
           </div>
         )}
       </Modal>

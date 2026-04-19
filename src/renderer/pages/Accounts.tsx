@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, Lock, Mail, Pencil, ShieldCheck, User, UserPlus, Users, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Pencil, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Modal from '../components/Modal'
 import { useAuthStore } from '../stores/authStore'
@@ -292,7 +292,6 @@ export default function Accounts() {
         <div className="card">
           <div className="flex items-center justify-between">
             <span className="text-sm text-gray-600 dark:text-gray-400">Cuentas totales</span>
-            <Users className="h-5 w-5 text-primary-600" />
           </div>
           <p className="mt-3 text-3xl font-bold text-gray-900 dark:text-white">{summary.total}</p>
         </div>
@@ -300,7 +299,6 @@ export default function Accounts() {
         <div className="card">
           <div className="flex items-center justify-between">
             <span className="text-sm text-gray-600 dark:text-gray-400">Cuentas activas</span>
-            <ShieldCheck className="h-5 w-5 text-green-600" />
           </div>
           <p className="mt-3 text-3xl font-bold text-gray-900 dark:text-white">{summary.active}</p>
         </div>
@@ -308,7 +306,6 @@ export default function Accounts() {
         <div className="card">
           <div className="flex items-center justify-between">
             <span className="text-sm text-gray-600 dark:text-gray-400">Admins</span>
-            <ShieldCheck className="h-5 w-5 text-amber-600" />
           </div>
           <p className="mt-3 text-3xl font-bold text-gray-900 dark:text-white">{summary.admins}</p>
         </div>
@@ -316,18 +313,14 @@ export default function Accounts() {
 
       <div className="grid gap-6 xl:grid-cols-[minmax(320px,420px)_1fr]">
         <form onSubmit={handleCreateAccount} className="card space-y-5">
-          <div className="flex items-center gap-3">
-            <UserPlus className="h-5 w-5 text-primary-600" />
+          <div>
             <div>
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Nueva cuenta</h2>
             </div>
           </div>
 
           <div>
-            <label className="label">
-              <User className="mr-2 inline h-4 w-4" />
-              Nombre visible
-            </label>
+            <label className="label">Nombre visible</label>
             <input
               type="text"
               value={name}
@@ -339,10 +332,7 @@ export default function Accounts() {
           </div>
 
           <div>
-            <label className="label">
-              <User className="mr-2 inline h-4 w-4" />
-              Usuario para iniciar sesion
-            </label>
+            <label className="label">Usuario para iniciar sesion</label>
             <input
               type="text"
               value={username}
@@ -353,10 +343,7 @@ export default function Accounts() {
           </div>
 
           <div>
-            <label className="label">
-              <Mail className="mr-2 inline h-4 w-4" />
-              Correo electronico
-            </label>
+            <label className="label">Correo electronico</label>
             <input
               type="email"
               value={email}
@@ -383,10 +370,7 @@ export default function Accounts() {
           </div>
 
           <div>
-            <label className="label">
-              <Lock className="mr-2 inline h-4 w-4" />
-              Contraseña
-            </label>
+            <label className="label">Contraseña</label>
             <input
               type="password"
               value={password}
@@ -399,10 +383,7 @@ export default function Accounts() {
           </div>
 
           <div>
-            <label className="label">
-              <Lock className="mr-2 inline h-4 w-4" />
-              Repetir contraseña
-            </label>
+            <label className="label">Repetir contraseña</label>
             <input
               type="password"
               value={passwordConfirm}
@@ -415,7 +396,6 @@ export default function Accounts() {
           </div>
 
           <button type="submit" className="btn btn-primary w-full" disabled={creating}>
-            <UserPlus className="mr-2 h-4 w-4" />
             {creating ? 'Creando cuenta...' : 'Crear cuenta'}
           </button>
         </form>

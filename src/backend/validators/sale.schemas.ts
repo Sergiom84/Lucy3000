@@ -3,6 +3,9 @@ import { dateQuerySchema, optionalNullableTextSchema, uuidParamSchema } from './
 
 const saleStatusSchema = z.enum(['PENDING', 'COMPLETED', 'CANCELLED', 'REFUNDED'])
 const paymentMethodSchema = z.enum(['CASH', 'CARD', 'BIZUM', 'ABONO', 'OTHER'])
+const collectPendingPaymentMethodSchema = z.enum(['CASH', 'CARD', 'BIZUM', 'ABONO'])
+const combinedPrimaryPaymentMethodSchema = z.enum(['CASH', 'CARD', 'BIZUM', 'ABONO'])
+const combinedSecondaryPaymentMethodSchema = z.enum(['CASH', 'CARD', 'BIZUM', 'ABONO', 'PENDING'])
 const professionalSchema = z.string().trim().min(1, 'Professional is required').max(120, 'Professional is too long')
 const createSaleStatusSchema = z.enum(['PENDING', 'COMPLETED']).default('COMPLETED')
 
@@ -52,6 +55,14 @@ export const salesQuerySchema = z
     }
   )
 
+const combinedPaymentSchema = z
+  .object({
+    primaryMethod: combinedPrimaryPaymentMethodSchema,
+    primaryAmount: positiveMoneySchema,
+    secondaryMethod: combinedSecondaryPaymentMethodSchema
+  })
+  .strict()
+
 export const createSaleBodySchema = z
   .object({
     clientId: z.string().uuid('Invalid clientId').nullable().optional(),
@@ -63,6 +74,7 @@ export const createSaleBodySchema = z
     status: createSaleStatusSchema,
     professional: professionalSchema.default('Lucy'),
     accountBalanceUsage: accountBalanceUsageSchema.optional(),
+    combinedPayment: combinedPaymentSchema.optional(),
     showInOfficialCash: z.boolean().optional().default(true),
     notes: optionalNullableTextSchema(1000),
     subtotal: moneySchema.optional()
@@ -73,9 +85,20 @@ export const updateSaleBodySchema = z
   .object({
     status: saleStatusSchema.optional(),
     paymentMethod: paymentMethodSchema.optional(),
+    settledAt: z.coerce.date().optional(),
     notes: optionalNullableTextSchema(1000)
   })
   .strict()
   .refine((payload) => Object.keys(payload).length > 0, {
     message: 'At least one field is required'
   })
+
+export const collectPendingSaleBodySchema = z
+  .object({
+    amount: positiveMoneySchema,
+    paymentMethod: collectPendingPaymentMethodSchema,
+    operationDate: z.coerce.date(),
+    showInOfficialCash: z.boolean().optional().default(true),
+    accountBalanceUsageAmount: moneySchema.optional()
+  })
+  .strict()

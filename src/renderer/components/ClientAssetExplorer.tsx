@@ -9,9 +9,6 @@ import {
   FileImage,
   FileText,
   FolderOpen,
-  Image,
-  ImagePlus,
-  ShieldCheck,
   Star,
   Trash2,
   Upload
@@ -50,7 +47,6 @@ type FolderDefinition = {
   emptyLabel: string
   accentClass: string
   accentTextClass: string
-  icon: typeof Image
 }
 
 const ROOT_FOLDERS: FolderDefinition[] = [
@@ -60,8 +56,7 @@ const ROOT_FOLDERS: FolderDefinition[] = [
     kind: 'photos',
     emptyLabel: 'No hay fotos en Antes',
     accentClass: 'from-amber-100 via-orange-50 to-white dark:from-amber-950/40 dark:via-orange-950/20 dark:to-gray-900',
-    accentTextClass: 'text-amber-700 dark:text-amber-300',
-    icon: Image
+    accentTextClass: 'text-amber-700 dark:text-amber-300'
   },
   {
     id: 'after',
@@ -69,8 +64,7 @@ const ROOT_FOLDERS: FolderDefinition[] = [
     kind: 'photos',
     emptyLabel: 'No hay fotos en Después',
     accentClass: 'from-emerald-100 via-teal-50 to-white dark:from-emerald-950/40 dark:via-teal-950/20 dark:to-gray-900',
-    accentTextClass: 'text-emerald-700 dark:text-emerald-300',
-    icon: Image
+    accentTextClass: 'text-emerald-700 dark:text-emerald-300'
   },
   {
     id: 'treatments',
@@ -78,8 +72,7 @@ const ROOT_FOLDERS: FolderDefinition[] = [
     kind: 'photos',
     emptyLabel: 'No hay fotos en Tratamientos',
     accentClass: 'from-sky-100 via-blue-50 to-white dark:from-sky-950/40 dark:via-blue-950/20 dark:to-gray-900',
-    accentTextClass: 'text-sky-700 dark:text-sky-300',
-    icon: Image
+    accentTextClass: 'text-sky-700 dark:text-sky-300'
   },
   {
     id: 'consents',
@@ -87,8 +80,7 @@ const ROOT_FOLDERS: FolderDefinition[] = [
     kind: 'consents',
     emptyLabel: 'No hay consentimientos',
     accentClass: 'from-violet-100 via-fuchsia-50 to-white dark:from-violet-950/40 dark:via-fuchsia-950/20 dark:to-gray-900',
-    accentTextClass: 'text-violet-700 dark:text-violet-300',
-    icon: ShieldCheck
+    accentTextClass: 'text-violet-700 dark:text-violet-300'
   },
   {
     id: 'documents',
@@ -96,8 +88,7 @@ const ROOT_FOLDERS: FolderDefinition[] = [
     kind: 'documents',
     emptyLabel: 'No hay documentos',
     accentClass: 'from-slate-200 via-slate-50 to-white dark:from-slate-900 dark:via-slate-950/70 dark:to-gray-900',
-    accentTextClass: 'text-slate-700 dark:text-slate-300',
-    icon: FileText
+    accentTextClass: 'text-slate-700 dark:text-slate-300'
   },
   {
     id: 'unclassified',
@@ -105,8 +96,7 @@ const ROOT_FOLDERS: FolderDefinition[] = [
     kind: 'photos',
     emptyLabel: 'No hay fotos sin clasificar',
     accentClass: 'from-stone-200 via-stone-50 to-white dark:from-stone-900 dark:via-stone-950/70 dark:to-gray-900',
-    accentTextClass: 'text-stone-700 dark:text-stone-300',
-    icon: Image
+    accentTextClass: 'text-stone-700 dark:text-stone-300'
   }
 ]
 
@@ -401,15 +391,12 @@ export default function ClientAssetExplorer({
 
         <div className="flex flex-wrap gap-3">
           <button type="button" onClick={() => setPhotoImportPickerOpen(true)} className="btn btn-primary btn-sm" disabled={assetsLoading}>
-            <ImagePlus className="mr-2 h-4 w-4" />
             Subir fotos
           </button>
           <button type="button" onClick={() => handleImport('consents')} className="btn btn-secondary btn-sm" disabled={assetsLoading}>
-            <Upload className="mr-2 h-4 w-4" />
             Subir consentimiento
           </button>
           <button type="button" onClick={() => handleImport('documents')} className="btn btn-secondary btn-sm" disabled={assetsLoading}>
-            <Upload className="mr-2 h-4 w-4" />
             Subir documento
           </button>
         </div>
@@ -557,7 +544,6 @@ export default function ClientAssetExplorer({
         ) : (
           <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
             {folderEntries.map((folder) => {
-              const Icon = folder.icon
               const coverAsset = folder.latestAsset
               return (
                 <button
@@ -570,9 +556,6 @@ export default function ClientAssetExplorer({
                     <div className="min-w-0 pr-2">
                       <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${folder.accentTextClass}`}>Carpeta</p>
                       <h4 className="mt-2 break-words text-base font-semibold leading-tight text-gray-900 dark:text-white">{folder.label}</h4>
-                    </div>
-                    <div className="rounded-2xl bg-white/80 p-3 shadow-sm dark:bg-gray-900/70">
-                      <Icon className={`h-5 w-5 ${folder.accentTextClass}`} />
                     </div>
                   </div>
 

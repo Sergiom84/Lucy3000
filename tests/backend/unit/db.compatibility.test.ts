@@ -92,13 +92,15 @@ describe('ensureSqliteCompatibilityMigrations', () => {
     )
   })
 
-  it('creates the agenda day notes table when it does not exist yet', async () => {
+  it('creates agenda helper tables when they do not exist yet', async () => {
     const { ensureSqliteCompatibilityMigrations, executeRawUnsafe } = await loadDbModule({
       "name='account_balance_movements'": [],
       "name='appointments'": [],
       "name='appointment_legends'": [],
       "name='agenda_blocks'": [],
-      "name='agenda_day_notes'": []
+      "name='agenda_day_notes'": [],
+      "name='dashboard_reminders'": [],
+      "name='pending_payments'": []
     })
 
     await ensureSqliteCompatibilityMigrations()
@@ -106,5 +108,9 @@ describe('ensureSqliteCompatibilityMigrations', () => {
     const executedSql = executeRawUnsafe.mock.calls.map(([sql]) => String(sql)).join('\n')
     expect(executedSql).toContain('CREATE TABLE "agenda_day_notes"')
     expect(executedSql).toContain('CREATE INDEX "agenda_day_notes_dayKey_createdAt_idx"')
+    expect(executedSql).toContain('CREATE TABLE "dashboard_reminders"')
+    expect(executedSql).toContain('CREATE INDEX "dashboard_reminders_isCompleted_createdAt_idx"')
+    expect(executedSql).toContain('CREATE TABLE "pending_payments"')
+    expect(executedSql).toContain('CREATE UNIQUE INDEX "pending_payments_saleId_key"')
   })
 })

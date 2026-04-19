@@ -6,6 +6,7 @@ import {
   addBreakdownEntriesToBuckets,
   allocateAmountByWeights,
   createCommercialPaymentBuckets,
+  getPendingCollectionEntry,
   getSaleCollectedAmount,
   getSalePaymentBreakdown,
   normalizeCommercialSalePaymentMethod,
@@ -21,9 +22,27 @@ const PROFESSIONAL_LABELS: Record<string, string> = {
   OTROS: 'Otros'
 }
 
+export const pendingCollectionSummarySelect = {
+  amount: true,
+  paymentMethod: true,
+  showInOfficialCash: true
+} satisfies Prisma.PendingPaymentCollectionSelect
+
+export type PendingCollectionSummaryRecord = Prisma.PendingPaymentCollectionGetPayload<{
+  select: typeof pendingCollectionSummarySelect
+}>
+
 export const saleSummarySelect = {
   total: true,
   paymentMethod: true,
+  paymentBreakdown: true,
+  pendingPayment: {
+    select: {
+      collections: {
+        select: pendingCollectionSummarySelect
+      }
+    }
+  },
   accountBalanceMovements: {
     select: {
       type: true,
@@ -73,6 +92,13 @@ export const saleAnalyticsInclude = {
       type: true,
       amount: true
     }
+  },
+  pendingPayment: {
+    select: {
+      collections: {
+        select: pendingCollectionSummarySelect
+      }
+    }
   }
 } satisfies Prisma.SaleInclude
 
@@ -86,6 +112,16 @@ export const accountBalanceTopUpSummarySelect = {
 
 export type AccountBalanceTopUpSummaryRecord = Prisma.AccountBalanceMovementGetPayload<{
   select: typeof accountBalanceTopUpSummarySelect
+}>
+
+export const pendingCollectionAnalyticsInclude = {
+  sale: {
+    include: saleAnalyticsInclude
+  }
+} satisfies Prisma.PendingPaymentCollectionInclude
+
+export type PendingCollectionAnalyticsRecord = Prisma.PendingPaymentCollectionGetPayload<{
+  include: typeof pendingCollectionAnalyticsInclude
 }>
 
 export type CashAnalyticsRow = {
@@ -201,6 +237,77 @@ export const buildSaleAnalyticsRows = (
           amount: roundCurrency(amount)
         })
       }
+    }
+  }
+
+  return rows.filter((row) => {
+    if (normalizedPaymentMethod && row.paymentMethod !== normalizedPaymentMethod) {
+      return false
+    }
+
+    if (filters.type === 'SERVICE' && row.itemType !== 'SERVICE') {
+      return false
+    }
+
+    if (filters.type === 'PRODUCT' && row.itemType !== 'PRODUCT') {
+      return false
+    }
+
+    if (filters.serviceId && row.serviceId !== filters.serviceId) {
+      return false
+    }
+
+    if (filters.productId && row.productId !== filters.productId) {
+      return false
+    }
+
+    return true
+  })
+}
+
+export const buildPendingCollectionAnalyticsRows = (
+  collections: Array<PendingCollectionAnalyticsRecord>,
+  filters: AnalyticsFilters = {}
+): CashAnalyticsRow[] => {
+  const normalizedPaymentMethod = normalizeCommercialSalePaymentMethod(filters.paymentMethod)
+  const rows: CashAnalyticsRow[] = []
+
+  for (const collection of collections) {
+    const breakdownEntry = getPendingCollectionEntry(collection)
+    if (!breakdownEntry) continue
+
+    const sale = collection.sale
+    if (!sale || sale.items.length === 0) continue
+
+    const itemWeights = sale.items.map((item) => Number(item.subtotal || 0))
+    const allocatedItemAmounts = allocateAmountByWeights(Number(collection.amount || 0), itemWeights)
+    const saleTotal = Number(sale.total || 0)
+
+    for (let index = 0; index < sale.items.length; index += 1) {
+      const item = sale.items[index]
+      const amount = Number(allocatedItemAmounts[index] || 0)
+      if (amount <= 0) continue
+
+      const quantityShare =
+        saleTotal > 0
+          ? roundQuantityShare((item.quantity || 0) * (breakdownEntry.amount / saleTotal))
+          : item.quantity || 0
+
+      rows.push({
+        saleId: sale.id,
+        saleNumber: sale.saleNumber,
+        date: collection.operationDate,
+        clientId: sale.clientId,
+        clientName: getSaleDisplayName(sale),
+        paymentMethod: breakdownEntry.method,
+        professionalName: formatProfessionalName(sale.professional, sale.user?.name),
+        itemType: item.serviceId ? 'SERVICE' : 'PRODUCT',
+        serviceId: item.serviceId,
+        productId: item.productId,
+        concept: item.service?.name || item.product?.name || item.description,
+        quantity: quantityShare,
+        amount: roundCurrency(amount)
+      })
     }
   }
 

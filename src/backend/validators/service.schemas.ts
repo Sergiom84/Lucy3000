@@ -42,7 +42,7 @@ export const createServiceBodySchema = z
     serviceCode: optionalNullableTextSchema(80),
     name: z.string().trim().min(1, 'Name is required').max(180, 'Name is too long'),
     description: optionalNullableTextSchema(2000),
-    category: z.string().trim().min(1, 'Category is required').max(120, 'Category is too long').optional(),
+    category: z.string().trim().min(1, 'Category is required').max(120, 'Category is too long'),
     price: positiveMoneySchema,
     taxRate: optionalMoneySchema,
     duration: durationSchema,

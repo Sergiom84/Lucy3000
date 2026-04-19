@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Save, X } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
 import {
@@ -689,11 +688,9 @@ export default function ClientForm({ client, onSuccess, onCancel }: ClientFormPr
           className="btn btn-secondary"
           disabled={loading}
         >
-          <X className="w-4 h-4 mr-2" />
           Cancelar
         </button>
         <button type="submit" className="btn btn-primary" disabled={loading}>
-          <Save className="w-4 h-4 mr-2" />
           {loading ? 'Guardando...' : client ? 'Actualizar' : 'Crear Cliente'}
         </button>
       </div>

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../utils/api'
+import AgendaBlockForm from './AgendaBlockForm'
 import { getAppointmentColorTheme } from '../utils/appointmentColors'
 import {
   loadAppointmentLegendItems,
@@ -51,6 +52,15 @@ const professionalLabels: Record<string, string> = {
   OTROS: 'Otros'
 }
 const INACTIVE_STATUSES = new Set(['COMPLETED', 'CANCELLED', 'NO_SHOW'])
+const cabinLabels: Record<string, string> = {
+  LUCY: 'Lucy',
+  TAMARA: 'Tamara',
+  CABINA_1: 'Cabina 1',
+  CABINA_2: 'Cabina 2'
+}
+
+const formatProfessionalLabel = (professional: string | null | undefined) =>
+  professionalLabels[String(professional || '')] || String(professional || '')
 
 interface ClientCalendarDockProps {
   onClose: () => void
@@ -58,6 +68,32 @@ interface ClientCalendarDockProps {
 }
 
 function AppointmentEvent({ event }: { event: any }) {
+  if (event.kind === 'agenda-block') {
+    const agendaBlock = event.agendaBlock
+    const timeRange = `${agendaBlock.startTime} - ${agendaBlock.endTime}`
+
+    return (
+      <div
+        title={[
+          'Bloqueo de agenda',
+          `Profesional: ${formatProfessionalLabel(agendaBlock.professional)}`,
+          timeRange,
+          `Cabina: ${cabinLabels[agendaBlock.cabin] || agendaBlock.cabin}`,
+          agendaBlock.notes ? `Observaciones: ${agendaBlock.notes}` : null
+        ]
+          .filter(Boolean)
+          .join('\n')}
+        className="h-full overflow-hidden leading-[1.15]"
+      >
+        <p className="truncate pt-0.5 text-[10px] font-semibold uppercase tracking-[0.08em]">
+          Bloqueo
+        </p>
+        <p className="truncate text-[10px]">{formatProfessionalLabel(agendaBlock.professional)}</p>
+        <p className="truncate text-[9px] opacity-80">{timeRange}</p>
+      </div>
+    )
+  }
+
   const isHighlighted = event.isHighlighted
   const durationMinutes = event.durationMinutes ?? 0
   const isTiny = durationMinutes <= 30
@@ -97,14 +133,18 @@ export default function ClientCalendarDock({
   selectedClientId = null
 }: ClientCalendarDockProps) {
   const [appointments, setAppointments] = useState<any[]>([])
+  const [agendaBlocks, setAgendaBlocks] = useState<any[]>([])
   const [legendItems, setLegendItems] = useState<AppointmentLegendCatalogItem[]>([])
   const [loading, setLoading] = useState(true)
   const [currentDate, setCurrentDate] = useState(new Date())
   const [view, setView] = useState<View>('day')
   const [showAppointmentModal, setShowAppointmentModal] = useState(false)
+  const [showBlockModal, setShowBlockModal] = useState(false)
   const [editingAppointment, setEditingAppointment] = useState<any>(null)
+  const [editingAgendaBlock, setEditingAgendaBlock] = useState<any>(null)
   const [selectedDate, setSelectedDate] = useState<Date | undefined>()
   const [preselectedStartTime, setPreselectedStartTime] = useState<string | undefined>()
+  const [preselectedEndTime, setPreselectedEndTime] = useState<string | undefined>()
   const [initialCabin, setInitialCabin] = useState<'LUCY' | 'TAMARA' | 'CABINA_1' | 'CABINA_2'>('LUCY')
 
   useEffect(() => {
@@ -137,14 +177,18 @@ export default function ClientCalendarDock({
         endDate = moment(currentDate).endOf('day').toDate()
       }
 
-      const response = await api.get('/appointments', {
-        params: {
-          startDate: startDate.toISOString(),
-          endDate: endDate.toISOString()
-        }
-      })
+      const params = {
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString()
+      }
 
-      setAppointments(response.data)
+      const [appointmentsResponse, agendaBlocksResponse] = await Promise.all([
+        api.get('/appointments', { params }),
+        api.get('/appointments/blocks', { params })
+      ])
+
+      setAppointments(Array.isArray(appointmentsResponse.data) ? appointmentsResponse.data : [])
+      setAgendaBlocks(Array.isArray(agendaBlocksResponse.data) ? agendaBlocksResponse.data : [])
     } catch (error) {
       console.error('Error fetching integrated calendar appointments:', error)
       toast.error('No se pudo cargar la agenda integrada')
@@ -164,8 +208,8 @@ export default function ClientCalendarDock({
   }
 
   const events = useMemo(
-    () =>
-      appointments.map((appointment) => {
+    () => [
+      ...appointments.map((appointment) => {
         const appointmentDate = new Date(appointment.date)
         const [startHours, startMinutes] = appointment.startTime.split(':')
         const [endHours, endMinutes] = appointment.endTime.split(':')
@@ -182,11 +226,33 @@ export default function ClientCalendarDock({
           end,
           resourceId: appointment.cabin,
           appointment,
+          kind: 'appointment',
           durationMinutes: (end.getTime() - start.getTime()) / 60000,
           isHighlighted: selectedClientId === appointment.clientId
         }
       }),
-    [appointments, selectedClientId]
+      ...agendaBlocks.map((agendaBlock) => {
+        const blockDate = new Date(agendaBlock.date)
+        const [startHours, startMinutes] = agendaBlock.startTime.split(':')
+        const [endHours, endMinutes] = agendaBlock.endTime.split(':')
+
+        const start = new Date(blockDate)
+        start.setHours(parseInt(startHours, 10), parseInt(startMinutes, 10), 0, 0)
+
+        const end = new Date(blockDate)
+        end.setHours(parseInt(endHours, 10), parseInt(endMinutes, 10), 0, 0)
+
+        return {
+          title: `Bloqueo - ${formatProfessionalLabel(agendaBlock.professional)}`,
+          start,
+          end,
+          resourceId: agendaBlock.cabin,
+          agendaBlock,
+          kind: 'agenda-block'
+        }
+      })
+    ],
+    [agendaBlocks, appointments, selectedClientId]
   )
 
   const pendingPayment = useMemo(
@@ -212,6 +278,21 @@ export default function ClientCalendarDock({
 
   const eventStyleGetter = useCallback(
     (event: any) => {
+      if (event.kind === 'agenda-block') {
+        return {
+          style: {
+            backgroundColor: '#FDE68A',
+            borderRadius: '10px',
+            color: '#7C2D12',
+            border: '1px dashed #D97706',
+            boxShadow: 'none',
+            opacity: 1,
+            padding: '3px 6px',
+            overflow: 'hidden'
+          }
+        }
+      }
+
       const theme = getThemeForAppointment(event.appointment)
       const isHighlighted = event.isHighlighted
       const durationMinutes = event.durationMinutes ?? 0
@@ -239,25 +320,62 @@ export default function ClientCalendarDock({
     [getThemeForAppointment]
   )
 
-  const handleSelectSlot = ({ start, resourceId }: { start: Date; resourceId?: string | number }) => {
+  const handleSelectSlot = ({
+    start,
+    end,
+    resourceId,
+    action
+  }: {
+    start: Date
+    end: Date
+    resourceId?: string | number
+    action: 'select' | 'click' | 'doubleClick'
+  }) => {
     setSelectedDate(start)
     const slotMinutes = start.getHours() * 60 + start.getMinutes()
-    setPreselectedStartTime(
+    const nextStartTime =
       slotMinutes >= BUSINESS_START_MINUTES && slotMinutes < BUSINESS_END_MINUTES
         ? getTimeInputValueFromDate(start)
         : undefined
-    )
+    setPreselectedStartTime(nextStartTime)
+    setPreselectedEndTime(nextStartTime ? getTimeInputValueFromDate(end) : undefined)
     const selectedCabin = String(resourceId || 'LUCY') as typeof initialCabin
     setInitialCabin(selectedCabin)
     setEditingAppointment(null)
+    setEditingAgendaBlock(null)
+
+    const shouldOpenBlockModal = action === 'select' && view === 'day' && Boolean(resourceId)
+
+    if (shouldOpenBlockModal) {
+      setShowAppointmentModal(false)
+      setShowBlockModal(true)
+      return
+    }
+
+    setShowBlockModal(false)
     setShowAppointmentModal(true)
   }
 
   const handleSelectEvent = (event: any) => {
+    if (event.kind === 'agenda-block') {
+      setEditingAppointment(null)
+      setEditingAgendaBlock(event.agendaBlock)
+      setInitialCabin(event.agendaBlock.cabin || 'LUCY')
+      setSelectedDate(undefined)
+      setPreselectedStartTime(undefined)
+      setPreselectedEndTime(undefined)
+      setShowAppointmentModal(false)
+      setShowBlockModal(true)
+      return
+    }
+
     setEditingAppointment(event.appointment)
+    setEditingAgendaBlock(null)
     setInitialCabin(event.appointment.cabin || 'LUCY')
     setSelectedDate(undefined)
     setPreselectedStartTime(undefined)
+    setPreselectedEndTime(undefined)
+    setShowBlockModal(false)
     setShowAppointmentModal(true)
   }
 
@@ -266,11 +384,26 @@ export default function ClientCalendarDock({
     setEditingAppointment(null)
     setSelectedDate(undefined)
     setPreselectedStartTime(undefined)
+    setPreselectedEndTime(undefined)
+    setInitialCabin('LUCY')
+  }
+
+  const handleCloseBlockModal = () => {
+    setShowBlockModal(false)
+    setEditingAgendaBlock(null)
+    setSelectedDate(undefined)
+    setPreselectedStartTime(undefined)
+    setPreselectedEndTime(undefined)
     setInitialCabin('LUCY')
   }
 
   const handleAppointmentSuccess = () => {
     handleCloseAppointmentModal()
+    fetchAppointments()
+  }
+
+  const handleAgendaBlockSuccess = () => {
+    handleCloseBlockModal()
     fetchAppointments()
   }
 
@@ -419,10 +552,10 @@ export default function ClientCalendarDock({
                         moment(current).subtract(view === 'week' ? 7 : 1, 'days').toDate()
                       )
                     }
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-200 transition hover:bg-white/10"
+                    className="inline-flex h-8 items-center justify-center rounded-full px-3 text-xs font-medium text-slate-200 transition hover:bg-white/10"
                     title="Anterior"
                   >
-                    <ChevronLeft className="h-4 w-4" />
+                    Anterior
                   </button>
                   <div className="min-w-[10rem] text-center text-sm font-medium text-white">
                     {view === 'week'
@@ -435,10 +568,10 @@ export default function ClientCalendarDock({
                         moment(current).add(view === 'week' ? 7 : 1, 'days').toDate()
                       )
                     }
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-200 transition hover:bg-white/10"
+                    className="inline-flex h-8 items-center justify-center rounded-full px-3 text-xs font-medium text-slate-200 transition hover:bg-white/10"
                     title="Siguiente"
                   >
-                    <ChevronRight className="h-4 w-4" />
+                    Siguiente
                   </button>
                 </div>
 
@@ -446,8 +579,11 @@ export default function ClientCalendarDock({
                   onClick={() => {
                     setSelectedDate(new Date(currentDate))
                     setPreselectedStartTime(undefined)
+                    setPreselectedEndTime(undefined)
                     setInitialCabin('LUCY')
                     setEditingAppointment(null)
+                    setEditingAgendaBlock(null)
+                    setShowBlockModal(false)
                     setShowAppointmentModal(true)
                   }}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/50 bg-cyan-500/20 px-3 py-1.5 text-xs font-semibold text-cyan-300 transition hover:bg-cyan-500/30"
@@ -489,11 +625,12 @@ export default function ClientCalendarDock({
                   onNavigate={setCurrentDate}
                   onSelectSlot={handleSelectSlot}
                   onSelectEvent={handleSelectEvent}
-                  selectable
+                  selectable="ignoreEvents"
                   eventPropGetter={eventStyleGetter}
                   style={{ height: '100%' }}
                   step={15}
                   timeslots={4}
+                  longPressThreshold={250}
                   min={new Date(2024, 0, 1, 8, 0, 0)}
                   max={new Date(2024, 0, 1, 21, 0, 0)}
                   dayLayoutAlgorithm="no-overlap"
@@ -593,9 +730,27 @@ export default function ClientCalendarDock({
             onCancel={handleCloseAppointmentModal}
             preselectedDate={selectedDate}
             preselectedStartTime={preselectedStartTime}
+            preselectedEndTime={preselectedEndTime}
             initialCabin={initialCabin}
           />
         </div>
+      </Modal>
+
+      <Modal
+        isOpen={showBlockModal}
+        onClose={handleCloseBlockModal}
+        title={editingAgendaBlock?.id ? 'Editar Bloqueo' : 'Nuevo Bloqueo'}
+        maxWidth="lg"
+      >
+        <AgendaBlockForm
+          agendaBlock={editingAgendaBlock?.id ? editingAgendaBlock : undefined}
+          onSuccess={handleAgendaBlockSuccess}
+          onCancel={handleCloseBlockModal}
+          preselectedDate={selectedDate}
+          preselectedStartTime={preselectedStartTime}
+          preselectedEndTime={preselectedEndTime}
+          initialCabin={initialCabin}
+        />
       </Modal>
     </aside>
   )

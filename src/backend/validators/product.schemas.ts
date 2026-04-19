@@ -18,6 +18,7 @@ const nonNegativeMoneySchema = z.coerce.number().finite().min(0, 'Value cannot b
 const productNameSchema = z.string().trim().min(1, 'Name is required').max(150, 'Name is too long')
 const skuSchema = z.string().trim().min(1, 'SKU is required').max(80, 'SKU is too long')
 const categorySchema = z.string().trim().min(1, 'Category is required').max(80, 'Category is too long')
+const brandSchema = z.string().trim().min(1, 'Brand is required').max(80, 'Brand is too long')
 const unitSchema = z.string().trim().min(1, 'Unit is required').max(20, 'Unit is too long')
 
 export const productIdParamSchema = uuidParamSchema
@@ -35,7 +36,7 @@ export const createProductBodySchema = z
     sku: skuSchema,
     barcode: optionalNullableTextSchema(80),
     category: categorySchema,
-    brand: optionalNullableTextSchema(80),
+    brand: brandSchema,
     price: positiveMoneySchema,
     cost: nonNegativeMoneySchema,
     stock: nonNegativeIntSchema,
@@ -62,7 +63,7 @@ export const updateProductBodySchema = z
     sku: skuSchema.optional(),
     barcode: optionalNullableTextSchema(80),
     category: categorySchema.optional(),
-    brand: optionalNullableTextSchema(80),
+    brand: brandSchema.optional(),
     price: positiveMoneySchema.optional(),
     cost: nonNegativeMoneySchema.optional(),
     stock: nonNegativeIntSchema.optional(),
@@ -101,4 +102,3 @@ export const addStockMovementBodySchema = z
     path: ['quantity'],
     message: 'Quantity must be positive for this movement type'
   })
-

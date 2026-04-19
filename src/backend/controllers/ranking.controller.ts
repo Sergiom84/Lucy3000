@@ -53,8 +53,11 @@ export const getClientRanking = async (_req: Request, res: Response) => {
           id: true,
           firstName: true,
           lastName: true,
+          externalCode: true,
           loyaltyPoints: true,
-          totalSpent: true
+          totalSpent: true,
+          pendingAmount: true,
+          lastVisit: true
         }
       }),
       prisma.appointment.groupBy({
@@ -82,10 +85,12 @@ export const getClientRanking = async (_req: Request, res: Response) => {
       const completedCount = completedStat?._count._all ?? 0
       const noShowCount = noShowStatsByClient.get(client.id) ?? 0
       const spent = Number(client.totalSpent || 0)
+      const pendingAmount = Number(client.pendingAmount || 0)
       totalRevenue += spent
 
       const firstService = completedStat?._min.date ? new Date(completedStat._min.date) : null
       const lastService = completedStat?._max.date ? new Date(completedStat._max.date) : null
+      const effectiveLastVisit = lastService ?? (client.lastVisit ? new Date(client.lastVisit) : null)
 
       let visitRatio: number | null = null
       if (completedCount >= 2 && firstService && lastService) {
@@ -106,11 +111,14 @@ export const getClientRanking = async (_req: Request, res: Response) => {
         firstName: client.firstName,
         lastName: client.lastName,
         name: `${client.firstName} ${client.lastName}`,
+        externalCode: client.externalCode,
         loyaltyPoints: client.loyaltyPoints,
         totalSpent: spent,
+        pendingAmount,
         noShowCount,
         firstService: firstService?.toISOString() || null,
         lastService: lastService?.toISOString() || null,
+        lastVisit: effectiveLastVisit?.toISOString() || null,
         visitRatio: visitRatio !== null ? Math.round(visitRatio * 10) / 10 : null,
         abandonmentRisk,
         completedCount

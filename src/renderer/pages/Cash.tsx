@@ -1,10 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  CreditCard,
-  DollarSign,
   Filter,
-  RefreshCw,
-  ShoppingBag,
   Unlock,
   Edit
 } from 'lucide-react'
@@ -416,7 +412,6 @@ export default function Cash() {
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm text-gray-600 dark:text-gray-400">Saldo inicial</span>
             <div className="flex items-center gap-2">
-              <DollarSign className="w-5 h-5 text-blue-600" />
               {activeCashRegister && (
                 <button
                   onClick={() => {
@@ -440,7 +435,6 @@ export default function Cash() {
         <div className="card">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm text-gray-600 dark:text-gray-400">Pagos por método</span>
-            <CreditCard className="w-5 h-5 text-purple-600" />
           </div>
           <div className="space-y-1 text-sm">
             {commercialPaymentMethods.map((method) => (
@@ -455,7 +449,6 @@ export default function Cash() {
         <div className="card">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm text-gray-600 dark:text-gray-400">Cobrado real</span>
-            <ShoppingBag className="w-5 h-5 text-green-600" />
           </div>
           <div className="space-y-1 text-sm">
             <div className="flex justify-between">
@@ -476,7 +469,6 @@ export default function Cash() {
         <div className="card">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm text-gray-600 dark:text-gray-400">Trabajo realizado</span>
-            <ShoppingBag className="w-5 h-5 text-blue-600" />
           </div>
           <div className="space-y-1 text-sm">
             <div className="flex justify-between">
@@ -497,12 +489,8 @@ export default function Cash() {
         <div className="card bg-gradient-to-br from-blue-600 to-blue-700 text-white">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm opacity-90">Saldo actual</span>
-            <DollarSign className="w-5 h-5" />
           </div>
           <p className="text-2xl font-bold">{formatCurrency(Number(currentCashBalance || 0))}</p>
-          <p className="text-xs opacity-80 mt-2">
-            Saldo inicial + cobros en efectivo + recargas en efectivo + depósitos - gastos - retiros
-          </p>
         </div>
       </div>
 
@@ -520,7 +508,6 @@ export default function Cash() {
               onClick={() => void Promise.all([loadAnalytics(), loadRanking(), loadSummary()])}
               className="btn btn-secondary btn-sm"
             >
-              <RefreshCw className="w-4 h-4 mr-2" />
               Actualizar
             </button>
           </div>

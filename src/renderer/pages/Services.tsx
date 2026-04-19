@@ -6,10 +6,8 @@ import {
   Edit,
   Euro,
   Package,
-  Scissors,
   Search,
-  Trash2,
-  TrendingUp
+  Trash2
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Modal from '../components/Modal'
@@ -20,9 +18,12 @@ import { exportBonoTemplatesWorkbook, exportServicesWorkbook } from '../utils/ex
 import { formatCurrency } from '../utils/format'
 import { buildSearchTokens, filterRankedItems } from '../utils/searchableOptions'
 import {
+  loadAppointmentLegendItems,
+  type AppointmentLegendCatalogItem,
   invalidateAppointmentServicesCache,
   invalidateBonoTemplatesCache
 } from '../utils/appointmentCatalogs'
+import { resolveAppointmentLegend } from '../utils/appointmentColors'
 import { useAuthStore } from '../stores/authStore'
 
 type ViewMode = 'all' | 'active' | null
@@ -57,12 +58,13 @@ export default function Services() {
   const [catalogMode, setCatalogMode] = useState<CatalogMode>('services')
   const [services, setServices] = useState<any[]>([])
   const [bonoTemplates, setBonoTemplates] = useState<any[]>([])
+  const [legendItems, setLegendItems] = useState<AppointmentLegendCatalogItem[]>([])
   const [loading, setLoading] = useState(true)
 
   const [serviceSearch, setServiceSearch] = useState('')
   const [serviceSelectedCategory, setServiceSelectedCategory] = useState<string | null>(null)
   const [serviceViewMode, setServiceViewMode] = useState<ViewMode>(null)
-  const [serviceShowCategories, setServiceShowCategories] = useState(false)
+  const [serviceShowCategories, setServiceShowCategories] = useState(true)
   const [serviceModalOpen, setServiceModalOpen] = useState(false)
   const [serviceImportModalOpen, setServiceImportModalOpen] = useState(false)
   const [editingService, setEditingService] = useState<any>(null)
@@ -101,9 +103,18 @@ export default function Services() {
   const loadCatalogs = async () => {
     setLoading(true)
     try {
-      await Promise.all([loadServices(), loadBonoTemplates()])
+      await Promise.all([loadServices(), loadBonoTemplates(), loadAppointmentLegendPalette()])
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadAppointmentLegendPalette = async () => {
+    try {
+      const nextLegendItems = await loadAppointmentLegendItems()
+      setLegendItems(nextLegendItems)
+    } catch (error) {
+      console.error('Error fetching appointment legends for services:', error)
     }
   }
 
@@ -165,6 +176,11 @@ export default function Services() {
       }))
       .sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' }))
   }, [services])
+
+  const serviceCategoryOptions = useMemo(
+    () => serviceCategoryCards.map((item) => item.category),
+    [serviceCategoryCards]
+  )
 
   const filteredServices = useMemo(() => {
     if (serviceSearch.trim()) {
@@ -421,49 +437,19 @@ export default function Services() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+          <div className="flex">
             <button
               type="button"
               onClick={() => handleViewMode('all')}
-              className={`card border text-left transition-all ${
+              className={`card w-full max-w-[14rem] border text-left transition-all ${
                 serviceViewMode === 'all'
                   ? 'border-primary-600 ring-2 ring-primary-200 dark:ring-primary-800'
                   : 'border-gray-200 dark:border-gray-700 hover:border-primary-500'
               }`}
             >
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Total Tratamientos</p>
-                  <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{services.length}</p>
-                </div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-500">
-                  <Scissors className="h-6 w-6 text-white" />
-                </div>
-              </div>
+              <p className="text-sm text-gray-600 dark:text-gray-400">Total Tratamientos</p>
+              <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{services.length}</p>
             </button>
-
-            <button
-              type="button"
-              onClick={() => handleViewMode('active')}
-              className={`card border text-left transition-all ${
-                serviceViewMode === 'active'
-                  ? 'border-green-500 ring-2 ring-green-200 dark:ring-green-800'
-                  : 'border-gray-200 dark:border-gray-700 hover:border-green-400'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Tratamientos Activos</p>
-                  <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">
-                    {activeServices.length}
-                  </p>
-                </div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-green-500">
-                  <TrendingUp className="h-6 w-6 text-white" />
-                </div>
-              </div>
-            </button>
-
           </div>
 
           <div className="space-y-3">
@@ -484,24 +470,38 @@ export default function Services() {
             {serviceShowCategories && (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 {serviceCategoryCards.map((item) => (
-                  <button
-                    key={item.category}
-                    type="button"
-                    onClick={() => handleSelectServiceCategory(item.category)}
-                    className={`card border text-left transition-all ${
-                      serviceSelectedCategory === item.category
-                        ? 'border-primary-600 ring-2 ring-primary-200 dark:ring-primary-800'
-                        : 'border-gray-200 dark:border-gray-700 hover:border-primary-500'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <p className="text-base font-semibold text-gray-900 dark:text-white">{item.label}</p>
-                      <Scissors className="h-4 w-4 text-primary-600" />
-                    </div>
-                    <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-                      {item.total} tratamientos
-                    </p>
-                  </button>
+                  (() => {
+                    const matchedLegend = resolveAppointmentLegend(legendItems, item.category)
+                    const isSelected = serviceSelectedCategory === item.category
+
+                    return (
+                      <button
+                        key={item.category}
+                        type="button"
+                        onClick={() => handleSelectServiceCategory(item.category)}
+                        className={`card border text-left transition-all ${
+                          matchedLegend
+                            ? 'hover:brightness-[0.98]'
+                            : isSelected
+                              ? 'border-primary-600 ring-2 ring-primary-200 dark:ring-primary-800'
+                              : 'border-gray-200 dark:border-gray-700 hover:border-primary-500'
+                        }`}
+                        style={
+                          matchedLegend
+                            ? {
+                                borderColor: matchedLegend.color,
+                                boxShadow: isSelected ? `0 0 0 2px ${matchedLegend.color}33` : undefined
+                              }
+                            : undefined
+                        }
+                      >
+                        <p className="text-base font-semibold text-gray-900 dark:text-white">{item.label}</p>
+                        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+                          {item.total} tratamientos
+                        </p>
+                      </button>
+                    )
+                  })()
                 ))}
               </div>
             )}
@@ -624,7 +624,12 @@ export default function Services() {
             title={editingService ? 'Editar Tratamiento' : 'Nuevo Tratamiento'}
             maxWidth="lg"
           >
-            <ServiceForm service={editingService} onSuccess={handleFormSuccess} onCancel={handleCloseModal} />
+            <ServiceForm
+              service={editingService}
+              categories={serviceCategoryOptions}
+              onSuccess={handleFormSuccess}
+              onCancel={handleCloseModal}
+            />
           </Modal>
 
           {isAdmin ? (
@@ -726,9 +731,6 @@ export default function Services() {
             <div className="mb-4 flex items-center justify-between">
               <div>
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{bonoTableTitle}</h3>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  Catálogo general de bonos disponible para ventas y clientes.
-                </p>
               </div>
               <span className="badge badge-secondary">{filteredBonos.length}</span>
             </div>

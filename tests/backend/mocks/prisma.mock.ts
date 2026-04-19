@@ -24,6 +24,17 @@ export const prismaMock: any = {
     delete: vi.fn()
   },
 
+  pendingPayment: {
+    findUnique: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn()
+  },
+
+  pendingPaymentCollection: {
+    findMany: vi.fn(),
+    create: vi.fn()
+  },
+
   client: {
     findUnique: vi.fn(),
     findMany: vi.fn(),
@@ -58,6 +69,7 @@ export const prismaMock: any = {
 
   appointment: {
     count: vi.fn(),
+    groupBy: vi.fn(),
     findMany: vi.fn(),
     findUnique: vi.fn(),
     create: vi.fn(),
@@ -82,6 +94,14 @@ export const prismaMock: any = {
     create: vi.fn(),
     update: vi.fn(),
     delete: vi.fn()
+  },
+
+  dashboardReminder: {
+    count: vi.fn(),
+    findMany: vi.fn(),
+    findUnique: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn()
   },
 
   service: {
