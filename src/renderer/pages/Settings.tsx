@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
-import { AlertCircle, Calendar, CheckCircle2, Database, FolderOpen, HardDrive, RotateCcw, Unlink } from 'lucide-react'
+import { CheckCircle2, FolderOpen, Unlink } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Modal from '../components/Modal'
 import {
@@ -19,7 +19,6 @@ import {
 import type { TicketPrinterConfig } from '../utils/desktop'
 import api from '../utils/api'
 import { useAuthStore } from '../stores/authStore'
-import { downloadAppointmentImportTemplateWorkbook } from '../utils/exports'
 import { buildTestTicketPayload } from '../utils/tickets'
 import { DEFAULT_NETWORK_TICKET_PORT } from '../../shared/ticketPrinter'
 
@@ -345,16 +344,6 @@ export default function Settings() {
     }
   }
 
-  const handleDownloadAppointmentTemplate = async () => {
-    try {
-      await downloadAppointmentImportTemplateWorkbook()
-      toast.success('Plantilla de citas descargada')
-    } catch (error) {
-      console.error('Error downloading appointment template:', error)
-      toast.error('No se pudo generar la plantilla de citas')
-    }
-  }
-
   const handleResetLocalInstall = async () => {
     if (!desktopMode) return
 
@@ -611,7 +600,6 @@ export default function Settings() {
 
         <div className="card space-y-5">
           <div className="flex items-center gap-3">
-            <Calendar className="h-5 w-5 text-primary-600" />
             <div>
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Google Calendar</h2>
             </div>
@@ -768,7 +756,6 @@ export default function Settings() {
         {isAdmin ? (
           <div className="card space-y-5">
             <div className="flex items-center gap-3">
-              <Database className="h-5 w-5 text-primary-600" />
               <div>
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Importar datos</h2>
               </div>
@@ -777,20 +764,12 @@ export default function Settings() {
             <div className="space-y-3">
               <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
                 <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Citas</h3>
-                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                  <button
-                    onClick={() => setImportModal('appointments')}
-                    className="btn btn-secondary w-full justify-start sm:flex-1"
-                  >
-                    Importar Citas
-                  </button>
-                  <button
-                    onClick={handleDownloadAppointmentTemplate}
-                    className="btn btn-secondary w-full justify-start sm:flex-1"
-                  >
-                    Descargar Plantilla
-                  </button>
-                </div>
+                <button
+                  onClick={() => setImportModal('appointments')}
+                  className="btn btn-secondary mt-3 w-full justify-start"
+                >
+                  Importar Citas
+                </button>
               </div>
 
               <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
@@ -854,17 +833,12 @@ export default function Settings() {
               </div>
             </div>
 
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-              La importacion no borra datos existentes. Los nuevos registros se anaden a los actuales.
-              En citas, Lucy3000 localiza cliente por numero de cliente y tratamiento por codigo + descripcion + minutos.
-            </div>
           </div>
         ) : null}
 
         {desktopMode && (
           <div className="card space-y-5">
             <div className="flex items-center gap-3">
-              <HardDrive className="h-5 w-5 text-primary-600" />
               <div>
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Backups</h2>
               </div>
@@ -943,7 +917,6 @@ export default function Settings() {
         {desktopMode && (
           <div className="card space-y-5">
             <div className="flex items-center gap-3">
-              <AlertCircle className="h-5 w-5 text-primary-600" />
               <div>
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Diagnostico y logs</h2>
               </div>
@@ -963,15 +936,12 @@ export default function Settings() {
 
             <div className="flex flex-wrap gap-3">
               <button onClick={handleOpenLogsFolder} className="btn btn-secondary">
-                <FolderOpen className="mr-2 h-4 w-4" />
                 Abrir carpeta de logs
               </button>
               <button onClick={handleOpenRuntimeFolder} className="btn btn-secondary">
-                <FolderOpen className="mr-2 h-4 w-4" />
                 Abrir carpeta de datos
               </button>
               <button onClick={handleResetLocalInstall} className="btn btn-secondary">
-                <RotateCcw className="mr-2 h-4 w-4" />
                 Restablecer instalación local
               </button>
             </div>

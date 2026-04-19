@@ -22,6 +22,7 @@ import { useAuthStore } from '../stores/authStore'
 import { paymentMethodLabel } from '../utils/tickets'
 import toast from 'react-hot-toast'
 import AgendaDayNotesPanel from '../components/AgendaDayNotesPanel'
+import ReminderModal from '../components/ReminderModal'
 import Modal from '../components/Modal'
 import AppointmentLegendModal from '../components/AppointmentLegendModal'
 import AppointmentForm from '../components/AppointmentForm'
@@ -146,6 +147,7 @@ export default function Appointments() {
   const [showBlockModal, setShowBlockModal] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
   const [showLegendModal, setShowLegendModal] = useState(false)
+  const [showReminderModal, setShowReminderModal] = useState(false)
   const [editingAppointment, setEditingAppointment] = useState<any>(null)
   const [editingAgendaBlock, setEditingAgendaBlock] = useState<any>(null)
   const [selectedDate, setSelectedDate] = useState<Date | undefined>()
@@ -493,9 +495,6 @@ export default function Appointments() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Agenda de Citas</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Haz clic en un hueco para crear una cita o arrastra en el calendario para bloquear una franja.
-          </p>
         </div>
         <div className="flex flex-wrap gap-3">
           <button onClick={() => setShowLegendModal(true)} className="btn btn-secondary">
@@ -610,6 +609,16 @@ export default function Appointments() {
                 </button>
               )
             })}
+          </div>
+
+          <div className="mt-4 border-t border-gray-200 pt-4 dark:border-gray-700">
+            <button
+              type="button"
+              onClick={() => setShowReminderModal(true)}
+              className="btn btn-secondary w-full"
+            >
+              Añadir recordatorio
+            </button>
           </div>
         </div>
       </div>
@@ -794,6 +803,11 @@ export default function Appointments() {
           </Suspense>
         ) : null}
       </Modal>
+
+      <ReminderModal
+        isOpen={showReminderModal}
+        onClose={() => setShowReminderModal(false)}
+      />
 
       {isAdmin ? (
         <Modal

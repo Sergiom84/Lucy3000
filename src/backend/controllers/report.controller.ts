@@ -103,17 +103,15 @@ export const getSalesReport = async (req: Request, res: Response) => {
         in: ['TOP_UP', 'CONSUMPTION']
       }
     }
-    const soldBonosWhere: Record<string, unknown> = {}
     let dateRange: ReturnType<typeof buildInclusiveDateRange> | undefined
 
     if (startDate && endDate) {
       dateRange = buildInclusiveDateRange(startDate as string, endDate as string)
       where.date = dateRange
       accountBalanceWhere.operationDate = dateRange
-      soldBonosWhere.purchaseDate = dateRange
     }
 
-    const [sales, accountBalanceMovements, soldBonos, consumedBonos, allCompletedSales, bonoTemplateKeys] =
+    const [sales, accountBalanceMovements, consumedBonos, allCompletedSales, bonoTemplateKeys] =
       await Promise.all([
         prisma.sale.findMany({
           where,
@@ -127,14 +125,9 @@ export const getSalesReport = async (req: Request, res: Response) => {
           }
         }),
         prisma.bonoPack.findMany({
-          where: soldBonosWhere,
           select: {
-            id: true,
-            name: true
-          }
-        }),
-        prisma.bonoPack.findMany({
-          select: {
+            price: true,
+            totalSessions: true,
             sessions: {
               where: dateRange
                 ? {
@@ -202,21 +195,17 @@ export const getSalesReport = async (req: Request, res: Response) => {
       }
     )
 
-    const topBonos = Array.from(
-      soldBonos.reduce((acc, bono) => {
-        const key = String(bono.name || '').trim() || 'Bono sin nombre'
-        acc.set(key, (acc.get(key) || 0) + 1)
-        return acc
-      }, new Map<string, number>())
-    )
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 3)
-      .map(([name, count]) => ({ name, count }))
-
     const bonoSummary = {
-      soldCount: soldBonos.length,
       consumedSessions: consumedBonos.reduce((sum, bono) => sum + bono.sessions.length, 0),
-      topBonos
+      consumedAmount: roundCurrency(
+        consumedBonos.reduce((sum, bono) => {
+          const totalSessions = Math.max(0, Number(bono.totalSessions || 0))
+          if (totalSessions <= 0) return sum
+
+          const sessionUnitValue = Number(bono.price || 0) / totalSessions
+          return sum + sessionUnitValue * bono.sessions.length
+        }, 0)
+      )
     }
 
     res.json({

@@ -1,10 +1,42 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { getServices, importServicesFromExcel } from '../../../src/backend/controllers/service.controller'
+import {
+  createService,
+  getServices,
+  importServicesFromExcel
+} from '../../../src/backend/controllers/service.controller'
 import { createMockRequest, createMockResponse } from '../helpers/http'
 import { prismaMock, resetPrismaMock } from '../mocks/prisma.mock'
 import { createWorkbookBuffer } from '../helpers/spreadsheet'
 
 vi.mock('../../../src/backend/db', async () => import('../mocks/db.mock'))
+
+describe('service.controller createService', () => {
+  beforeEach(() => {
+    resetPrismaMock()
+  })
+
+  it('rejects creating services without category', async () => {
+    const req = createMockRequest({
+      body: {
+        name: 'Limpieza facial',
+        price: '45',
+        duration: '60'
+      },
+      user: {
+        id: 'user-1',
+        role: 'ADMIN',
+        email: 'admin@example.com'
+      }
+    })
+    const res = createMockResponse()
+
+    await createService(req as any, res)
+
+    expect(prismaMock.service.create).not.toHaveBeenCalled()
+    expect(res.status).toHaveBeenCalledWith(400)
+    expect(res.json).toHaveBeenCalledWith({ error: 'Category is required' })
+  })
+})
 
 describe('service.controller importServicesFromExcel', () => {
   beforeEach(() => {

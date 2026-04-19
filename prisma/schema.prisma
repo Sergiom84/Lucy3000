@@ -99,6 +99,7 @@ model Client {
   // Relaciones
   appointments    Appointment[]
   sales           Sale[]
+  pendingPayments PendingPayment[]
   clientHistory   ClientHistory[]
   bonoPacks       BonoPack[]
   accountBalanceMovements AccountBalanceMovement[]
@@ -246,6 +247,18 @@ model AgendaDayNote {
   @@map("agenda_day_notes")
 }
 
+model DashboardReminder {
+  id          String   @id @default(uuid())
+  text        String
+  isCompleted Boolean  @default(false)
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isCompleted, createdAt])
+  @@map("dashboard_reminders")
+}
+
 // ============================================
 // PRODUCTOS Y ALMACEN
 // ============================================
@@ -315,10 +328,29 @@ model Sale {
   appointment     Appointment?  @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
   user            User          @relation(fields: [userId], references: [id])
   items           SaleItem[]
+  pendingPayment  PendingPayment?
   cashMovement    CashMovement?
   accountBalanceMovements AccountBalanceMovement[]
 
   @@map("sales")
+}
+
+model PendingPayment {
+  id                  String   @id @default(uuid())
+  saleId               String   @unique
+  clientId             String
+  amount               Decimal
+  status               String   @default("OPEN")
+  settledAt            DateTime?
+  settledPaymentMethod String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  sale   Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, status, createdAt])
+  @@map("pending_payments")
 }
 
 model SaleItem {

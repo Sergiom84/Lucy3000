@@ -1,14 +1,17 @@
-import { useState, useEffect } from 'react'
-import { Save, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
 import { invalidateAppointmentServicesCache } from '../utils/appointmentCatalogs'
 
 interface ServiceFormProps {
   service?: any
+  categories?: string[]
+  onSaved?: (savedService: any) => void
   onSuccess: () => void
   onCancel: () => void
 }
+
+const NEW_CATEGORY_OPTION = '__new_category__'
 
 const parseDecimalInput = (value: string): number | null => {
   if (!value.trim()) return null
@@ -24,10 +27,19 @@ const parseDurationInput = (value: string): number | null => {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-export default function ServiceForm({ service, onSuccess, onCancel }: ServiceFormProps) {
+export default function ServiceForm({
+  service,
+  categories = [],
+  onSaved,
+  onSuccess,
+  onCancel
+}: ServiceFormProps) {
   const [loading, setLoading] = useState(false)
+  const [categoryMode, setCategoryMode] = useState<'existing' | 'new'>('existing')
+  const [newCategoryName, setNewCategoryName] = useState('')
   const [formData, setFormData] = useState({
     serviceCode: '',
+    category: '',
     name: '',
     price: '',
     taxRate: '',
@@ -35,17 +47,45 @@ export default function ServiceForm({ service, onSuccess, onCancel }: ServiceFor
     isActive: true
   })
 
+  const categoryOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [...categories, String(service?.category || '').trim()]
+            .map((category) => String(category || '').trim())
+            .filter(Boolean)
+        )
+      ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' })),
+    [categories, service?.category]
+  )
+
   useEffect(() => {
     if (service) {
       setFormData({
         serviceCode: service.serviceCode || '',
+        category: String(service.category || '').trim(),
         name: service.name || '',
         price: service.price?.toString() || '',
         taxRate: service.taxRate?.toString() || '',
         duration: service.duration?.toString() || '',
         isActive: service.isActive ?? true
       })
+      setCategoryMode('existing')
+      setNewCategoryName('')
+      return
     }
+
+    setFormData({
+      serviceCode: '',
+      category: '',
+      name: '',
+      price: '',
+      taxRate: '',
+      duration: '',
+      isActive: true
+    })
+    setCategoryMode('existing')
+    setNewCategoryName('')
   }, [service])
 
   const handleChange = (
@@ -58,11 +98,35 @@ export default function ServiceForm({ service, onSuccess, onCancel }: ServiceFor
     }))
   }
 
+  const handleCategorySelection = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const { value } = event.target
+
+    if (value === NEW_CATEGORY_OPTION) {
+      setCategoryMode('new')
+      return
+    }
+
+    setCategoryMode('existing')
+    setFormData((prev) => ({
+      ...prev,
+      category: value
+    }))
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
 
     try {
+      const resolvedCategory =
+        categoryMode === 'new' ? newCategoryName.trim() : formData.category.trim()
+
+      if (!resolvedCategory) {
+        toast.error('La categoría es obligatoria')
+        setLoading(false)
+        return
+      }
+
       if (!formData.name.trim()) {
         toast.error('La descripción es requerida')
         setLoading(false)
@@ -92,6 +156,7 @@ export default function ServiceForm({ service, onSuccess, onCancel }: ServiceFor
 
       const dataToSend = {
         serviceCode: formData.serviceCode.trim() || null,
+        category: resolvedCategory,
         name: formData.name.trim(),
         price: formData.price.trim(),
         taxRate: formData.taxRate.trim() || null,
@@ -99,14 +164,22 @@ export default function ServiceForm({ service, onSuccess, onCancel }: ServiceFor
         isActive: formData.isActive
       }
 
+      let savedService: any
+
       if (service) {
-        await api.put(`/services/${service.id}`, dataToSend)
+        const response = await api.put(`/services/${service.id}`, dataToSend)
+        savedService = response.data
         invalidateAppointmentServicesCache()
         toast.success('Tratamiento actualizado')
       } else {
-        await api.post('/services', dataToSend)
+        const response = await api.post('/services', dataToSend)
+        savedService = response.data
         invalidateAppointmentServicesCache()
         toast.success('Tratamiento creado')
+      }
+
+      if (savedService) {
+        onSaved?.(savedService)
       }
 
       onSuccess()
@@ -136,7 +209,41 @@ export default function ServiceForm({ service, onSuccess, onCancel }: ServiceFor
               placeholder="Ej: TRAT-001"
             />
           </div>
-          <div className="md:col-span-1">
+          <div>
+            <label className="label">
+              Categoría <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={categoryMode === 'new' ? NEW_CATEGORY_OPTION : formData.category}
+              onChange={handleCategorySelection}
+              className="input"
+            >
+              <option value="">Selecciona una categoría</option>
+              <option value={NEW_CATEGORY_OPTION}>Crear nueva categoría</option>
+              {categoryOptions.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
+          </div>
+          {categoryMode === 'new' && (
+            <div>
+              <label className="label">
+                Nueva categoría <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={newCategoryName}
+                onChange={(event) => setNewCategoryName(event.target.value)}
+                className="input"
+                placeholder="Ej: Cejas y pestañas"
+                maxLength={120}
+                required
+              />
+            </div>
+          )}
+          <div className={categoryMode === 'new' ? 'md:col-span-2' : 'md:col-span-1'}>
             <label className="label">
               Descripción <span className="text-red-500">*</span>
             </label>
@@ -208,11 +315,9 @@ export default function ServiceForm({ service, onSuccess, onCancel }: ServiceFor
 
       <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200 dark:border-gray-700">
         <button type="button" onClick={onCancel} className="btn btn-secondary" disabled={loading}>
-          <X className="w-4 h-4 mr-2" />
           Cancelar
         </button>
         <button type="submit" className="btn btn-primary" disabled={loading}>
-          <Save className="w-4 h-4 mr-2" />
           {loading ? 'Guardando...' : service ? 'Actualizar' : 'Crear Tratamiento'}
         </button>
       </div>

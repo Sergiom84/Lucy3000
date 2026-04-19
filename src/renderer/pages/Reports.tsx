@@ -1,20 +1,8 @@
 import { useState, useEffect } from 'react'
 import {
-  TrendingUp,
-  TrendingDown,
-  Users,
-  Package,
-  DollarSign,
-  ShoppingCart,
   Filter,
-  Activity,
-  PieChart as PieChartIcon,
-  BarChart3,
   Maximize2,
-  Minimize2,
-  CreditCard,
-  Ticket,
-  Scissors
+  Minimize2
 } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
@@ -35,14 +23,13 @@ const formatCurrency = (value: number) =>
   }).format(value)
 
 // Componente para tarjeta expandible
-const ExpandableCard = ({ title, children, icon: Icon }: { title: string; children: React.ReactNode; icon: any }) => {
+const ExpandableCard = ({ title, children }: { title: string; children: React.ReactNode }) => {
   const [isExpanded, setIsExpanded] = useState(false)
   
   return (
     <div className={`card transition-all duration-300 cursor-pointer hover:shadow-lg ${isExpanded ? 'col-span-1 lg:col-span-2' : ''}`} onClick={() => setIsExpanded(!isExpanded)}>
       <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <Icon className="w-5 h-5 text-blue-600" />
+        <div>
           <h3 className={`font-semibold text-gray-900 dark:text-white ${isExpanded ? 'text-lg' : 'text-sm'}`}>
             {title}
           </h3>
@@ -70,6 +57,7 @@ const ExpandableCard = ({ title, children, icon: Icon }: { title: string; childr
 
 export default function Reports() {
   const [activeTab, setActiveTab] = useState<'overview' | 'sales' | 'clients' | 'products' | 'cash'>('overview')
+  const [showLowStockProducts, setShowLowStockProducts] = useState(true)
   const [dateRange, setDateRange] = useState<DateRange>({
     startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
     endDate: format(endOfMonth(new Date()), 'yyyy-MM-dd')
@@ -191,9 +179,8 @@ export default function Reports() {
   }
 
   const bonoSummary = salesReport?.bonoSummary || {
-    soldCount: 0,
     consumedSessions: 0,
-    topBonos: []
+    consumedAmount: 0
   }
 
   return (
@@ -300,9 +287,8 @@ export default function Reports() {
               {/* KPI Cards */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <div className="card">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="mb-2">
                     <span className="text-sm text-gray-600 dark:text-gray-400">Ventas Totales</span>
-                    <ShoppingCart className="w-5 h-5 text-blue-600" />
                   </div>
                   <p className="text-3xl font-bold text-gray-900 dark:text-white">
                     {salesReport?.totalSales || 0}
@@ -313,9 +299,8 @@ export default function Reports() {
                 </div>
 
                 <div className="card">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="mb-2">
                     <span className="text-sm text-gray-600 dark:text-gray-400">Venta Promedio</span>
-                    <TrendingUp className="w-5 h-5 text-green-600" />
                   </div>
                   <p className="text-3xl font-bold text-gray-900 dark:text-white">
                     {formatCurrency(Number(salesReport?.averageTicket || 0))}
@@ -323,9 +308,8 @@ export default function Reports() {
                 </div>
 
                 <div className="card">
-                  <div className="flex items-center justify-between gap-3 mb-3">
+                  <div className="mb-3">
                     <span className="text-sm text-gray-600 dark:text-gray-400">Abono</span>
-                    <CreditCard className="w-5 h-5 text-purple-600" />
                   </div>
                   <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Recargado</p>
                   <p className="text-2xl font-bold text-purple-600">
@@ -344,22 +328,15 @@ export default function Reports() {
                 </div>
 
                 <div className="card">
-                  <div className="flex items-center justify-between gap-3 mb-3">
+                  <div className="mb-3">
                     <span className="text-sm text-gray-600 dark:text-gray-400">Bono</span>
-                    <Ticket className="w-5 h-5 text-orange-600" />
                   </div>
-                  <p className="text-3xl font-bold text-gray-900 dark:text-white">
-                    {bonoSummary.soldCount || 0}
+                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Consumido</p>
+                  <p className="text-2xl font-bold text-orange-600">
+                    {formatCurrency(Number(bonoSummary.consumedAmount || 0))}
                   </p>
-                  <p className="text-sm text-orange-600 mt-1">
-                    {bonoSummary.consumedSessions || 0} sesiones consumidas
-                  </p>
-                  <p className="mt-4 text-xs text-gray-500 dark:text-gray-400">
-                    {Array.isArray(bonoSummary.topBonos) && bonoSummary.topBonos.length > 0
-                      ? `Top 3: ${bonoSummary.topBonos
-                          .map((bono: any) => `${bono.name} (${bono.count})`)
-                          .join(' · ')}`
-                      : 'Sin ventas de bonos en el periodo'}
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    {bonoSummary.consumedSessions || 0} usos
                   </p>
                 </div>
               </div>
@@ -367,7 +344,7 @@ export default function Reports() {
               {/* Expandable Charts Grid */}
               <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5 gap-4">
                 {/* Payment Methods Chart */}
-                <ExpandableCard title="Ventas por Método de Pago" icon={PieChartIcon}>
+                <ExpandableCard title="Ventas por Método de Pago">
                   {paymentMethodsData.length > 0 ? (
                     <ResponsiveContainer width="100%" height={300}>
                       <RePieChart>
@@ -396,7 +373,7 @@ export default function Reports() {
                 </ExpandableCard>
 
                 {/* Cash Flow Chart */}
-                <ExpandableCard title="Flujo de Caja" icon={BarChart3}>
+                <ExpandableCard title="Flujo de Caja">
                   {cashFlowData.length > 0 ? (
                     <ResponsiveContainer width="100%" height={300}>
                       <BarChart data={cashFlowData}>
@@ -420,7 +397,7 @@ export default function Reports() {
                 </ExpandableCard>
 
                 {/* Top Products Chart */}
-                <ExpandableCard title="Productos Más Vendidos" icon={Package}>
+                <ExpandableCard title="Productos Más Vendidos">
                   {topProductsData.length > 0 ? (
                     <ResponsiveContainer width="100%" height={300}>
                       <BarChart data={topProductsData} layout="vertical">
@@ -439,7 +416,7 @@ export default function Reports() {
                 </ExpandableCard>
 
                 {/* Top Services Chart */}
-                <ExpandableCard title="Tratamientos Más Vendidos" icon={Scissors}>
+                <ExpandableCard title="Tratamientos Más Vendidos">
                   {topServicesData.length > 0 ? (
                     <ResponsiveContainer width="100%" height={300}>
                       <BarChart data={topServicesData} layout="vertical">
@@ -458,7 +435,7 @@ export default function Reports() {
                 </ExpandableCard>
 
                 {/* Top Clients Chart */}
-                <ExpandableCard title="Top Clientes" icon={Users}>
+                <ExpandableCard title="Top Clientes">
                   {topClientsData.length > 0 ? (
                     <ResponsiveContainer width="100%" height={300}>
                       <BarChart data={topClientsData} layout="vertical">
@@ -484,9 +461,8 @@ export default function Reports() {
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
                 <div className="card">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="mb-2">
                     <span className="text-sm text-gray-600 dark:text-gray-400">Total Ventas</span>
-                    <ShoppingCart className="w-5 h-5 text-blue-600" />
                   </div>
                   <p className="text-3xl font-bold text-gray-900 dark:text-white">
                     {salesReport.totalSales}
@@ -494,9 +470,8 @@ export default function Reports() {
                 </div>
 
                 <div className="card">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="mb-2">
                     <span className="text-sm text-gray-600 dark:text-gray-400">Cobrado real</span>
-                    <DollarSign className="w-5 h-5 text-green-600" />
                   </div>
                   <p className="text-3xl font-bold text-green-600">
                     €{salesReport.collectedRevenue.toFixed(2)}
@@ -504,9 +479,8 @@ export default function Reports() {
                 </div>
 
                 <div className="card">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="mb-2">
                     <span className="text-sm text-gray-600 dark:text-gray-400">Trabajo realizado</span>
-                    <BarChart3 className="w-5 h-5 text-blue-600" />
                   </div>
                   <p className="text-3xl font-bold text-blue-600">
                     €{salesReport.workPerformedRevenue.toFixed(2)}
@@ -514,9 +488,8 @@ export default function Reports() {
                 </div>
 
                 <div className="card">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="mb-2">
                     <span className="text-sm text-gray-600 dark:text-gray-400">Ticket Promedio</span>
-                    <TrendingUp className="w-5 h-5 text-purple-600" />
                   </div>
                   <p className="text-3xl font-bold text-gray-900 dark:text-white">
                     €{salesReport.averageTicket.toFixed(2)}
@@ -575,9 +548,8 @@ export default function Reports() {
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="card">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="mb-2">
                     <span className="text-sm text-gray-600 dark:text-gray-400">Total Clientes</span>
-                    <Users className="w-5 h-5 text-blue-600" />
                   </div>
                   <p className="text-3xl font-bold text-gray-900 dark:text-white">
                     {clientReport.totalClients}
@@ -585,9 +557,8 @@ export default function Reports() {
                 </div>
 
                 <div className="card">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="mb-2">
                     <span className="text-sm text-gray-600 dark:text-gray-400">Gasto Total</span>
-                    <DollarSign className="w-5 h-5 text-green-600" />
                   </div>
                   <p className="text-3xl font-bold text-green-600">
                     €{clientReport.totalSpent.toFixed(2)}
@@ -595,9 +566,8 @@ export default function Reports() {
                 </div>
 
                 <div className="card">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="mb-2">
                     <span className="text-sm text-gray-600 dark:text-gray-400">Gasto Promedio</span>
-                    <TrendingUp className="w-5 h-5 text-purple-600" />
                   </div>
                   <p className="text-3xl font-bold text-gray-900 dark:text-white">
                     €{clientReport.averageSpent.toFixed(2)}
@@ -643,9 +613,8 @@ export default function Reports() {
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="card">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="mb-2">
                     <span className="text-sm text-gray-600 dark:text-gray-400">Total Productos</span>
-                    <Package className="w-5 h-5 text-blue-600" />
                   </div>
                   <p className="text-3xl font-bold text-gray-900 dark:text-white">
                     {productReport.totalProducts}
@@ -653,9 +622,8 @@ export default function Reports() {
                 </div>
 
                 <div className="card">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="mb-2">
                     <span className="text-sm text-gray-600 dark:text-gray-400">Valor Inventario</span>
-                    <DollarSign className="w-5 h-5 text-green-600" />
                   </div>
                   <p className="text-3xl font-bold text-green-600">
                     €{productReport.totalValue.toFixed(2)}
@@ -663,9 +631,8 @@ export default function Reports() {
                 </div>
 
                 <div className="card">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="mb-2">
                     <span className="text-sm text-gray-600 dark:text-gray-400">Stock Bajo</span>
-                    <TrendingDown className="w-5 h-5 text-red-600" />
                   </div>
                   <p className="text-3xl font-bold text-red-600">
                     {productReport.lowStockProducts.length}
@@ -676,19 +643,36 @@ export default function Reports() {
               {/* Low Stock Alert */}
               {productReport.lowStockProducts.length > 0 && (
                 <div className="card bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800">
-                  <h3 className="text-lg font-semibold text-red-900 dark:text-red-200 mb-4">
-                    ⚠️ Productos con Stock Bajo
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {productReport.lowStockProducts.map((product: any) => (
-                      <div key={product.id} className="p-3 bg-white dark:bg-gray-800 rounded-lg">
-                        <p className="font-semibold text-gray-900 dark:text-white">{product.name}</p>
-                        <p className="text-sm text-red-600">
-                          Stock: {product.stock} / Mínimo: {product.minStock}
-                        </p>
-                      </div>
-                    ))}
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <h3 className="text-lg font-semibold text-red-900 dark:text-red-200">
+                        Productos con Stock Bajo
+                      </h3>
+                      <p className="text-sm text-red-700 dark:text-red-300">
+                        {productReport.lowStockProducts.length} productos pendientes de reposición
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowLowStockProducts((current) => !current)}
+                      className="btn btn-secondary btn-sm"
+                    >
+                      {showLowStockProducts ? 'Ocultar productos en stock' : 'Mostrar productos en stock'}
+                    </button>
                   </div>
+
+                  {showLowStockProducts && (
+                    <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+                      {productReport.lowStockProducts.map((product: any) => (
+                        <div key={product.id} className="rounded-lg bg-white p-3 dark:bg-gray-800">
+                          <p className="font-semibold text-gray-900 dark:text-white">{product.name}</p>
+                          <p className="text-sm text-red-600">
+                            Stock: {product.stock} / Mínimo: {product.minStock}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -726,9 +710,8 @@ export default function Reports() {
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
                 <div className="card">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="mb-2">
                     <span className="text-sm text-gray-600 dark:text-gray-400">Ingresos</span>
-                    <TrendingUp className="w-5 h-5 text-green-600" />
                   </div>
                   <p className="text-2xl font-bold text-green-600">
                     €{cashReport.totalIncome.toFixed(2)}
@@ -736,9 +719,8 @@ export default function Reports() {
                 </div>
 
                 <div className="card">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="mb-2">
                     <span className="text-sm text-gray-600 dark:text-gray-400">Gastos</span>
-                    <TrendingDown className="w-5 h-5 text-red-600" />
                   </div>
                   <p className="text-2xl font-bold text-red-600">
                     €{cashReport.totalExpenses.toFixed(2)}
@@ -746,9 +728,8 @@ export default function Reports() {
                 </div>
 
                 <div className="card">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="mb-2">
                     <span className="text-sm text-gray-600 dark:text-gray-400">Depósitos</span>
-                    <DollarSign className="w-5 h-5 text-blue-600" />
                   </div>
                   <p className="text-2xl font-bold text-blue-600">
                     €{cashReport.totalDeposits.toFixed(2)}
@@ -756,9 +737,8 @@ export default function Reports() {
                 </div>
 
                 <div className="card">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="mb-2">
                     <span className="text-sm text-gray-600 dark:text-gray-400">Retiros</span>
-                    <DollarSign className="w-5 h-5 text-orange-600" />
                   </div>
                   <p className="text-2xl font-bold text-orange-600">
                     €{cashReport.totalWithdrawals.toFixed(2)}
@@ -766,9 +746,8 @@ export default function Reports() {
                 </div>
 
                 <div className="card bg-gradient-to-br from-blue-500 to-blue-600">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="mb-2">
                     <span className="text-sm text-white opacity-90">Flujo Neto</span>
-                    <Activity className="w-5 h-5 text-white" />
                   </div>
                   <p className="text-2xl font-bold text-white">
                     €{cashReport.netCashFlow.toFixed(2)}

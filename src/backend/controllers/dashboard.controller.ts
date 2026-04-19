@@ -76,6 +76,12 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       }
     })
 
+    const pendingReminders = await prisma.dashboardReminder.count({
+      where: {
+        isCompleted: false
+      }
+    })
+
     // Caja abierta
     const openCashRegister = await prisma.cashRegister.findFirst({
       where: { status: 'OPEN' },
@@ -164,6 +170,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       totals: {
         clients: totalClients,
         lowStockProducts,
+        pendingReminders,
         unreadNotifications
       },
       openCashRegister,

@@ -277,6 +277,114 @@ describe('sale.controller', () => {
     )
   })
 
+  it('creates a pending payment record when a sale is saved as pending', async () => {
+    const tx: any = {
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      sale: {
+        findFirst: vi.fn().mockResolvedValue({ saleNumber: 'V-000099' }),
+        create: vi.fn().mockResolvedValue({
+          id: 'sale-pending-1',
+          saleNumber: 'V-000100',
+          clientId: 'client-1',
+          appointmentId: null,
+          date: new Date('2026-04-19T10:30:00.000Z'),
+          total: 75,
+          showInOfficialCash: false,
+          client: { firstName: 'Ana', lastName: 'Lopez' },
+          items: []
+        }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'sale-pending-1',
+          saleNumber: 'V-000100',
+          total: 75,
+          status: 'PENDING',
+          paymentMethod: 'CASH',
+          client: { firstName: 'Ana', lastName: 'Lopez' },
+          pendingPayment: {
+            id: 'pending-1',
+            amount: 75,
+            status: 'OPEN'
+          },
+          items: [],
+          cashMovement: null
+        })
+      },
+      pendingPayment: {
+        create: vi.fn().mockResolvedValue({ id: 'pending-1' })
+      },
+      client: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'client-1',
+          firstName: 'Ana',
+          lastName: 'Lopez',
+          pendingAmount: 10,
+          debtAlertEnabled: false,
+          isActive: true
+        }),
+        update: vi.fn().mockResolvedValue({
+          id: 'client-1',
+          firstName: 'Ana',
+          lastName: 'Lopez',
+          pendingAmount: 85,
+          debtAlertEnabled: true,
+          isActive: true
+        })
+      },
+      notification: {
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue(undefined),
+        update: vi.fn().mockResolvedValue(undefined)
+      }
+    }
+
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx))
+
+    const req = createMockRequest<AuthRequest>({
+      user: { id: 'user-1', email: 'admin@lucy3000.com', role: 'ADMIN' },
+      body: {
+        clientId: 'client-1',
+        items: [
+          {
+            productId: null,
+            serviceId: null,
+            description: 'Limpieza facial',
+            quantity: 1,
+            price: 75
+          }
+        ],
+        discount: 0,
+        tax: 0,
+        paymentMethod: 'CASH',
+        status: 'PENDING',
+        notes: 'pendiente'
+      }
+    })
+
+    const res = createMockResponse()
+
+    await createSale(req, res)
+
+    expect(res.status).toHaveBeenCalledWith(201)
+    expect(tx.pendingPayment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          saleId: 'sale-pending-1',
+          clientId: 'client-1',
+          amount: 75
+        })
+      })
+    )
+    expect(tx.client.update).toHaveBeenCalledWith({
+      where: { id: 'client-1' },
+      data: expect.objectContaining({
+        pendingAmount: 85,
+        debtAlertEnabled: true
+      }),
+      select: expect.any(Object)
+    })
+  })
+
   it('creates bono packs when a pending sale is completed', async () => {
     prismaMock.setting.findUnique.mockResolvedValue({
       value: JSON.stringify([
@@ -328,7 +436,48 @@ describe('sale.controller', () => {
         findMany: vi.fn().mockResolvedValue([]),
         delete: vi.fn().mockResolvedValue(undefined)
       },
+      pendingPayment: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'pending-1',
+          saleId: 'sale-1',
+          clientId: 'client-1',
+          amount: 200,
+          status: 'OPEN'
+        }),
+        update: vi.fn().mockResolvedValue(undefined)
+      },
       client: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValueOnce({
+            id: 'client-1',
+            firstName: 'Ana',
+            lastName: 'Lopez',
+            pendingAmount: 200,
+            debtAlertEnabled: true,
+            isActive: true
+          })
+          .mockResolvedValueOnce({
+            id: 'client-1',
+            firstName: 'Ana',
+            lastName: 'Lopez',
+            pendingAmount: 0,
+            debtAlertEnabled: true,
+            isActive: true
+          }),
+        update: vi.fn().mockResolvedValue({
+          id: 'client-1',
+          firstName: 'Ana',
+          lastName: 'Lopez',
+          pendingAmount: 0,
+          debtAlertEnabled: true,
+          isActive: true
+        })
+      },
+      notification: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue(undefined),
         update: vi.fn().mockResolvedValue(undefined)
       },
       cashRegister: {
@@ -363,7 +512,17 @@ describe('sale.controller', () => {
     expect(tx.sale.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          status: 'COMPLETED'
+          status: 'COMPLETED',
+          showInOfficialCash: true
+        })
+      })
+    )
+    expect(tx.pendingPayment.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { saleId: 'sale-1' },
+        data: expect.objectContaining({
+          status: 'SETTLED',
+          settledPaymentMethod: 'CASH'
         })
       })
     )
@@ -812,7 +971,48 @@ describe('sale.controller', () => {
         create: vi.fn().mockResolvedValue(undefined),
         findMany: vi.fn().mockResolvedValue([])
       },
+      pendingPayment: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'pending-1',
+          saleId: 'sale-pending',
+          clientId: 'client-1',
+          amount: 120,
+          status: 'OPEN'
+        }),
+        update: vi.fn().mockResolvedValue(undefined)
+      },
       client: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValueOnce({
+            id: 'client-1',
+            firstName: 'Ana',
+            lastName: 'Lopez',
+            pendingAmount: 120,
+            debtAlertEnabled: true,
+            isActive: true
+          })
+          .mockResolvedValueOnce({
+            id: 'client-1',
+            firstName: 'Ana',
+            lastName: 'Lopez',
+            pendingAmount: 0,
+            debtAlertEnabled: true,
+            isActive: true
+          }),
+        update: vi.fn().mockResolvedValue({
+          id: 'client-1',
+          firstName: 'Ana',
+          lastName: 'Lopez',
+          pendingAmount: 0,
+          debtAlertEnabled: true,
+          isActive: true
+        })
+      },
+      notification: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue(undefined),
         update: vi.fn().mockResolvedValue(undefined)
       },
       cashMovement: {
@@ -845,7 +1045,16 @@ describe('sale.controller', () => {
     expect(tx.sale.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'sale-pending' },
-        data: expect.objectContaining({ status: 'COMPLETED' })
+        data: expect.objectContaining({ status: 'COMPLETED', showInOfficialCash: true })
+      })
+    )
+    expect(tx.pendingPayment.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { saleId: 'sale-pending' },
+        data: expect.objectContaining({
+          status: 'SETTLED',
+          settledPaymentMethod: 'CARD'
+        })
       })
     )
   })

@@ -32,7 +32,7 @@ export default function Products() {
   const [search, setSearch] = useState('')
   const [selectedFamily, setSelectedFamily] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>(null)
-  const [showFamilies, setShowFamilies] = useState(false)
+  const [showFamilies, setShowFamilies] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editingProduct, setEditingProduct] = useState<any>(null)
   const [showStockModal, setShowStockModal] = useState(false)
@@ -275,18 +275,13 @@ export default function Products() {
               : 'border-gray-200 dark:border-gray-700 hover:border-primary-500'
           }`}
         >
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                Total Productos
-              </p>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
-                {products.length}
-              </p>
-            </div>
-            <div className="w-12 h-12 bg-blue-500 rounded-lg flex items-center justify-center">
-              <Package className="w-6 h-6 text-white" />
-            </div>
+          <div>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Total Productos
+            </p>
+            <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
+              {products.length}
+            </p>
           </div>
         </button>
 
@@ -355,10 +350,7 @@ export default function Products() {
                     : 'border-gray-200 dark:border-gray-700 hover:border-primary-500'
                 }`}
               >
-                <div className="flex items-center justify-between">
-                  <p className="text-base font-semibold text-gray-900 dark:text-white">{item.label}</p>
-                  <Package className="w-4 h-4 text-primary-600" />
-                </div>
+                <p className="text-base font-semibold text-gray-900 dark:text-white">{item.label}</p>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
                   {item.total} productos
                 </p>
@@ -501,6 +493,7 @@ export default function Products() {
       >
         <ProductForm
           product={editingProduct}
+          availableCategories={familyCards.map((item) => item.family)}
           onSuccess={handleFormSuccess}
           onCancel={handleCloseModal}
         />

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle, X } from 'lucide-react'
+import { FileSpreadsheet, AlertCircle, CheckCircle } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
 import { invalidateActiveProductsCache } from '../utils/appointmentCatalogs'
@@ -135,7 +135,6 @@ export default function ImportProductsModal({ onSuccess, onCancel }: ImportProdu
           onClick={handleDownloadTemplate}
           className="btn btn-secondary w-full"
         >
-          <Download className="w-5 h-5 mr-2" />
           Descargar Plantilla de Excel
         </button>
       </div>
@@ -233,7 +232,6 @@ export default function ImportProductsModal({ onSuccess, onCancel }: ImportProdu
           className="btn btn-secondary"
           disabled={loading}
         >
-          <X className="w-4 h-4 mr-2" />
           {results ? 'Cerrar' : 'Cancelar'}
         </button>
         {!results && (
@@ -242,7 +240,6 @@ export default function ImportProductsModal({ onSuccess, onCancel }: ImportProdu
             className="btn btn-primary"
             disabled={loading || !file}
           >
-            <Upload className="w-4 h-4 mr-2" />
             {loading ? 'Importando...' : 'Importar Productos'}
           </button>
         )}

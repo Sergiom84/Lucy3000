@@ -3,6 +3,7 @@ import { Request, Response } from 'express'
 import { prisma } from '../db'
 import { AuthRequest } from '../middleware/auth.middleware'
 import { buildInclusiveDateRange } from '../utils/date-range'
+import { adjustClientPendingAmount } from '../utils/clientDebt'
 import { getAppointmentDisplayName, getSaleDisplayName } from '../utils/customer-display'
 import { withPostgresSequenceLock } from '../utils/sequence-lock'
 
@@ -53,6 +54,8 @@ type SaleBonoMatch = {
 
 const SALE_STATUSES: string[] = ['PENDING', 'COMPLETED', 'CANCELLED', 'REFUNDED']
 const PAYMENT_METHODS: string[] = ['CASH', 'CARD', 'BIZUM', 'ABONO', 'OTHER']
+const PENDING_PAYMENT_STATUSES: string[] = ['OPEN', 'SETTLED', 'CANCELLED']
+const SETTLED_PENDING_PAYMENT_METHODS: string[] = ['CASH', 'CARD', 'BIZUM', 'OTHER']
 const BONO_TEMPLATES_SETTING_KEY = 'bono_templates_catalog'
 const isAccountBalancePaymentMethod = (paymentMethod: string) =>
   ['ABONO', 'OTHER'].includes(String(paymentMethod || '').toUpperCase())
@@ -74,6 +77,7 @@ const saleInclude = {
       service: true
     }
   },
+  pendingPayment: true,
   accountBalanceMovements: {
     orderBy: [{ operationDate: 'desc' as const }, { createdAt: 'desc' as const }],
     select: {
@@ -134,6 +138,14 @@ const calculateTotals = (items: SaleItemInput[], discount: number, tax: number) 
 }
 
 const roundCurrency = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100
+
+const parseOptionalDate = (value: unknown): Date | null => {
+  if (value === null || value === undefined || value === '') return null
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value
+
+  const parsed = new Date(String(value))
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
 
 const normalizeSearchText = (value: unknown) =>
   String(value ?? '')
@@ -526,6 +538,118 @@ const applyAccountBalanceUsage = async (
   })
 }
 
+const createPendingPayment = async (
+  tx: TxClient,
+  payload: {
+    saleId: string
+    clientId: string | null
+    amount: number
+    createdAt: Date
+  }
+) => {
+  if (!payload.clientId) {
+    throw new BusinessError(400, 'Pending sales require a client')
+  }
+
+  await tx.pendingPayment.create({
+    data: {
+      saleId: payload.saleId,
+      clientId: payload.clientId,
+      amount: payload.amount,
+      createdAt: payload.createdAt
+    }
+  })
+
+  await adjustClientPendingAmount(tx, {
+    clientId: payload.clientId,
+    delta: payload.amount
+  })
+}
+
+const resolvePendingPayment = async (
+  tx: TxClient,
+  payload: {
+    saleId: string
+    resolutionStatus: 'SETTLED' | 'CANCELLED'
+    settledAt?: Date | null
+    settledPaymentMethod?: string | null
+  }
+) => {
+  if (!PENDING_PAYMENT_STATUSES.includes(payload.resolutionStatus)) {
+    throw new BusinessError(400, 'Invalid pending payment status')
+  }
+
+  const pendingPayment = await tx.pendingPayment.findUnique({
+    where: { saleId: payload.saleId }
+  })
+
+  if (!pendingPayment || pendingPayment.status !== 'OPEN') {
+    return pendingPayment
+  }
+
+  await tx.pendingPayment.update({
+    where: { saleId: payload.saleId },
+    data: {
+      status: payload.resolutionStatus,
+      settledAt: payload.resolutionStatus === 'SETTLED' ? payload.settledAt || new Date() : null,
+      settledPaymentMethod:
+        payload.resolutionStatus === 'SETTLED' ? payload.settledPaymentMethod || null : null
+    }
+  })
+
+  await adjustClientPendingAmount(tx, {
+    clientId: pendingPayment.clientId,
+    delta: -Number(pendingPayment.amount),
+    enableAlertOnPositive: false
+  })
+
+  return pendingPayment
+}
+
+const reopenPendingPayment = async (
+  tx: TxClient,
+  payload: {
+    saleId: string
+    clientId: string | null
+    amount: number
+    createdAt: Date
+  }
+) => {
+  if (!payload.clientId) {
+    throw new BusinessError(400, 'Pending sales require a client')
+  }
+
+  const existing = await tx.pendingPayment.findUnique({
+    where: { saleId: payload.saleId }
+  })
+
+  if (!existing) {
+    await createPendingPayment(tx, payload)
+    return
+  }
+
+  if (existing.status === 'OPEN') {
+    return
+  }
+
+  await tx.pendingPayment.update({
+    where: { saleId: payload.saleId },
+    data: {
+      clientId: payload.clientId,
+      amount: payload.amount,
+      status: 'OPEN',
+      settledAt: null,
+      settledPaymentMethod: null,
+      createdAt: payload.createdAt
+    }
+  })
+
+  await adjustClientPendingAmount(tx, {
+    clientId: payload.clientId,
+    delta: payload.amount
+  })
+}
+
 const rollbackSaleEffects = async (
   tx: TxClient,
   payload: {
@@ -725,6 +849,10 @@ export const createSale = async (req: AuthRequest, res: Response) => {
       }
 
       const nextStatus = status || 'COMPLETED'
+      if (!['PENDING', 'COMPLETED'].includes(nextStatus)) {
+        throw new BusinessError(400, 'Invalid sale status')
+      }
+
       if (nextStatus !== 'COMPLETED' && parsedAccountBalanceUsage) {
         throw new BusinessError(400, 'Account balance usage requires a completed sale')
       }
@@ -790,6 +918,10 @@ export const createSale = async (req: AuthRequest, res: Response) => {
 
         if (bonoMatches.length > 0 && !resolvedClientId) {
           throw new BusinessError(400, 'Sales with bonos require a client')
+        }
+
+        if (nextStatus === 'PENDING' && !resolvedClientId) {
+          throw new BusinessError(400, 'Pending sales require a client')
         }
 
         const saleNumber = await buildSaleNumber(tx)
@@ -863,6 +995,13 @@ export const createSale = async (req: AuthRequest, res: Response) => {
               usage: parsedAccountBalanceUsage
             })
           }
+        } else if (nextStatus === 'PENDING') {
+          await createPendingPayment(tx, {
+            saleId: createdSale.id,
+            clientId: createdSale.clientId,
+            amount: total,
+            createdAt: createdSale.date
+          })
         }
 
         return tx.sale.findUnique({
@@ -882,7 +1021,7 @@ export const createSale = async (req: AuthRequest, res: Response) => {
 export const updateSale = async (req: Request, res: Response) => {
   try {
     const { id } = req.params
-    const { status, paymentMethod, notes } = req.body
+    const { status, paymentMethod, notes, settledAt } = req.body
 
     const blockedFields = [
       'items',
@@ -908,6 +1047,11 @@ export const updateSale = async (req: Request, res: Response) => {
       throw new BusinessError(400, 'Invalid payment method')
     }
 
+    const parsedSettledAt = parseOptionalDate(settledAt)
+    if (settledAt !== undefined && !parsedSettledAt) {
+      throw new BusinessError(400, 'Invalid settlement date')
+    }
+
     const bonoTemplates = await readBonoTemplates()
 
     const updatedSale = await prisma.$transaction(async (tx) => {
@@ -929,7 +1073,7 @@ export const updateSale = async (req: Request, res: Response) => {
       }
 
       const nextStatus = (status || sale.status) as string
-      const nextstring = (paymentMethod || sale.paymentMethod) as string
+      let nextPaymentMethod = (paymentMethod || sale.paymentMethod) as string
       const normalizedItems = normalizeItemsFromSale(sale.items)
       const bonoMatches = getBonoMatchesForSale(
         normalizedItems.map((item) => ({
@@ -941,6 +1085,31 @@ export const updateSale = async (req: Request, res: Response) => {
         })),
         bonoTemplates
       )
+
+      if (sale.status === 'PENDING' && nextStatus === 'COMPLETED') {
+        const requestedPaymentMethod = String(paymentMethod || sale.paymentMethod || '').toUpperCase()
+        nextPaymentMethod = SETTLED_PENDING_PAYMENT_METHODS.includes(requestedPaymentMethod)
+          ? requestedPaymentMethod
+          : 'CASH'
+      }
+
+      if (nextStatus === 'PENDING') {
+        if (!sale.clientId) {
+          throw new BusinessError(400, 'Pending sales require a client')
+        }
+
+        const requestedPaymentMethod = String(paymentMethod || sale.paymentMethod || '').toUpperCase()
+        nextPaymentMethod = SETTLED_PENDING_PAYMENT_METHODS.includes(requestedPaymentMethod)
+          ? requestedPaymentMethod
+          : 'CASH'
+      }
+
+      const nextShowInOfficialCash =
+        nextStatus === 'PENDING'
+          ? false
+          : sale.status === 'PENDING' && nextStatus === 'COMPLETED'
+            ? true
+            : sale.showInOfficialCash
 
       if (sale.status === 'COMPLETED' && nextStatus !== 'COMPLETED') {
         await rollbackSaleEffects(tx, {
@@ -956,8 +1125,9 @@ export const updateSale = async (req: Request, res: Response) => {
         where: { id },
         data: {
           status: nextStatus,
-          paymentMethod: nextstring,
-          notes: notes ?? sale.notes
+          paymentMethod: nextPaymentMethod,
+          notes: notes ?? sale.notes,
+          showInOfficialCash: nextShowInOfficialCash
         },
         include: {
           client: true,
@@ -990,19 +1160,44 @@ export const updateSale = async (req: Request, res: Response) => {
           userId: sale.userId,
           appointmentId: sale.appointmentId,
           total: Number(sale.total),
-          paymentMethod: nextstring,
-          showInOfficialCash: sale.showInOfficialCash,
+          paymentMethod: nextPaymentMethod,
+          showInOfficialCash: nextShowInOfficialCash,
           items: normalizedItems
         })
-      } else if (sale.status === 'COMPLETED' && nextStatus === 'COMPLETED' && nextstring !== sale.paymentMethod) {
+      } else if (
+        sale.status === 'COMPLETED' &&
+        nextStatus === 'COMPLETED' &&
+        nextPaymentMethod !== sale.paymentMethod
+      ) {
         await syncAutomaticCashMovement(tx, {
           saleId: sale.id,
           saleNumber: sale.saleNumber,
           clientName: getSaleDisplayName(persisted, ''),
           userId: sale.userId,
           total: Number(sale.total),
-          paymentMethod: nextstring,
-          showInOfficialCash: sale.showInOfficialCash
+          paymentMethod: nextPaymentMethod,
+          showInOfficialCash: nextShowInOfficialCash
+        })
+      }
+
+      if (sale.status !== 'PENDING' && nextStatus === 'PENDING') {
+        await reopenPendingPayment(tx, {
+          saleId: sale.id,
+          clientId: sale.clientId,
+          amount: Number(sale.total),
+          createdAt: new Date(sale.date)
+        })
+      } else if (sale.status === 'PENDING' && nextStatus === 'COMPLETED') {
+        await resolvePendingPayment(tx, {
+          saleId: sale.id,
+          resolutionStatus: 'SETTLED',
+          settledAt: parsedSettledAt || new Date(),
+          settledPaymentMethod: nextPaymentMethod
+        })
+      } else if (sale.status === 'PENDING' && nextStatus !== 'PENDING') {
+        await resolvePendingPayment(tx, {
+          saleId: sale.id,
+          resolutionStatus: 'CANCELLED'
         })
       }
 
@@ -1043,6 +1238,11 @@ export const deleteSale = async (req: Request, res: Response) => {
           clientId: sale.clientId,
           total: Number(sale.total),
           items: normalizeItemsFromSale(sale.items)
+        })
+      } else if (sale.status === 'PENDING') {
+        await resolvePendingPayment(tx, {
+          saleId: sale.id,
+          resolutionStatus: 'CANCELLED'
         })
       }
 

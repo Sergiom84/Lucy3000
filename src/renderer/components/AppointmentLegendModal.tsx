@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
   createAppointmentLegendItem,
@@ -126,7 +125,6 @@ export default function AppointmentLegendModal({
                 className="btn btn-secondary btn-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30"
                 disabled={deletingId === item.id}
               >
-                <Trash2 className="mr-1 h-4 w-4" />
                 {deletingId === item.id ? 'Borrando...' : 'Eliminar'}
               </button>
             </div>
@@ -176,7 +174,6 @@ export default function AppointmentLegendModal({
               className="btn btn-primary w-full md:w-auto"
               disabled={saving || remainingCategories.length === 0 || !selectedCategory}
             >
-              <Plus className="mr-2 h-4 w-4" />
               {saving ? 'Añadiendo...' : 'Añadir'}
             </button>
           </div>

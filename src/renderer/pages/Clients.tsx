@@ -22,12 +22,22 @@ import { getPrintTicketSuccessMessage, printTicket } from '../utils/desktop'
 import { exportClientsWorkbook } from '../utils/exports'
 import { formatCurrency, formatDate, formatPhone } from '../utils/format'
 import { invalidateAppointmentClientsCache } from '../utils/appointmentCatalogs'
-import { buildSaleTicketPayload, paymentMethodLabel } from '../utils/tickets'
+import { buildSaleTicketPayload, salePaymentMethodLabel } from '../utils/tickets'
 import { useAuthStore } from '../stores/authStore'
 
 const PAGE_SIZE = 50
 const ClientCalendarDock = lazy(() => import('../components/ClientCalendarDock'))
 const ImportClientsModal = lazy(() => import('../components/ImportClientsModal'))
+const CLIENT_SORT_OPTIONS = [
+  { value: 'lastVisit', label: 'Última visita' },
+  { value: 'name', label: 'Cliente' },
+  { value: 'clientNumber', label: 'Nº cliente' },
+  { value: 'totalSpent', label: 'Facturado' },
+  { value: 'pendingAmount', label: 'Pendiente' }
+] as const
+
+type ClientSortBy = (typeof CLIENT_SORT_OPTIONS)[number]['value']
+type ClientSortDirection = 'asc' | 'desc'
 
 type ClientListPagination = {
   page: number
@@ -38,7 +48,6 @@ type ClientListPagination = {
 
 type ClientListSummary = {
   total: number
-  active: number
   debtAlerts: number
 }
 
@@ -51,8 +60,11 @@ export default function Clients() {
   const navigate = useNavigate()
   const [clients, setClients] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [sortBy, setSortBy] = useState<ClientSortBy>('lastVisit')
+  const [sortDirection, setSortDirection] = useState<ClientSortDirection>('desc')
   const [currentPage, setCurrentPage] = useState(1)
   const [pagination, setPagination] = useState<ClientListPagination>({
     page: 1,
@@ -62,7 +74,6 @@ export default function Clients() {
   })
   const [summary, setSummary] = useState<ClientListSummary>({
     total: 0,
-    active: 0,
     debtAlerts: 0
   })
   const [showModal, setShowModal] = useState(false)
@@ -87,17 +98,24 @@ export default function Clients() {
   }, [search])
 
   useEffect(() => {
-    void fetchClients(currentPage, debouncedSearch)
-  }, [currentPage, debouncedSearch])
+    void fetchClients(currentPage, debouncedSearch, sortBy, sortDirection)
+  }, [currentPage, debouncedSearch, sortBy, sortDirection])
 
-  const fetchClients = async (page = currentPage, searchTerm = debouncedSearch) => {
+  const fetchClients = async (
+    page = currentPage,
+    searchTerm = debouncedSearch,
+    requestedSortBy = sortBy,
+    requestedSortDirection = sortDirection
+  ) => {
     setLoading(true)
     try {
       const params = new URLSearchParams({
         paginated: 'true',
         includeCounts: 'true',
         page: String(page),
-        limit: String(PAGE_SIZE)
+        limit: String(PAGE_SIZE),
+        sortBy: requestedSortBy,
+        sortDirection: requestedSortDirection
       })
 
       if (searchTerm) {
@@ -119,7 +137,6 @@ export default function Clients() {
       setSummary(
         payload?.summary || {
           total: 0,
-          active: 0,
           debtAlerts: 0
         }
       )
@@ -132,6 +149,7 @@ export default function Clients() {
       toast.error('Error al cargar clientes')
     } finally {
       setLoading(false)
+      setHasLoadedOnce(true)
     }
   }
 
@@ -198,7 +216,9 @@ export default function Clients() {
   const handleExportClients = async () => {
     try {
       const params = new URLSearchParams({
-        includeCounts: 'false'
+        includeCounts: 'false',
+        sortBy,
+        sortDirection
       })
 
       if (debouncedSearch) {
@@ -229,7 +249,7 @@ export default function Clients() {
   const showingFrom = pagination.total === 0 ? 0 : (pagination.page - 1) * pagination.limit + 1
   const showingTo = pagination.total === 0 ? 0 : Math.min(pagination.page * pagination.limit, pagination.total)
 
-  if (loading) {
+  if (loading && !hasLoadedOnce) {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-primary-600"></div>
@@ -291,29 +311,76 @@ export default function Clients() {
           </div>
 
           <div className="card">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar por nombre, email o teléfono..."
-                className="input pl-10"
-              />
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-end">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Buscar por nombre, email o teléfono..."
+                  className="input pl-10"
+                />
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 xl:w-auto">
+                <div className="min-w-[180px]">
+                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    Ordenar por
+                  </label>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => {
+                      const nextSortBy = e.target.value as ClientSortBy
+                      const nextSortDirection: ClientSortDirection =
+                        nextSortBy === 'name' || nextSortBy === 'clientNumber' ? 'asc' : 'desc'
+                      setSortBy(nextSortBy)
+                      setSortDirection(nextSortDirection)
+                      setCurrentPage(1)
+                    }}
+                    className="input"
+                  >
+                    {CLIENT_SORT_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="min-w-[160px]">
+                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    Sentido
+                  </label>
+                  <select
+                    value={sortDirection}
+                    onChange={(e) => {
+                      setSortDirection(e.target.value as ClientSortDirection)
+                      setCurrentPage(1)
+                    }}
+                    className="input"
+                  >
+                    <option value="desc">Descendente</option>
+                    <option value="asc">Ascendente</option>
+                  </select>
+                </div>
+              </div>
             </div>
+
+            {loading && hasLoadedOnce ? (
+              <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">
+                Actualizando listado...
+              </p>
+            ) : null}
           </div>
 
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             <div className="card">
               <p className="text-sm text-gray-600 dark:text-gray-400">Total Clientes</p>
               <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{summary.total}</p>
             </div>
             <div className="card">
-              <p className="text-sm text-gray-600 dark:text-gray-400">Clientes Activos</p>
-              <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{summary.active}</p>
-            </div>
-            <div className="card">
-              <p className="text-sm text-gray-600 dark:text-gray-400">Alertas de Deuda</p>
+              <p className="text-sm text-gray-600 dark:text-gray-400">Pendiente</p>
               <p className="mt-1 text-2xl font-bold text-red-600">{summary.debtAlerts}</p>
             </div>
           </div>
@@ -336,7 +403,7 @@ export default function Clients() {
                       Relación
                     </th>
                     <th className="px-4 py-3 text-left text-sm font-medium text-gray-600 dark:text-gray-400">
-                      Cumpleaños
+                      Última visita
                     </th>
                     <th className="px-4 py-3 text-right text-sm font-medium text-gray-600 dark:text-gray-400">
                       Facturado
@@ -418,11 +485,8 @@ export default function Clients() {
                         </td>
 
                         <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                          {client.birthDate ? (
-                            <div className="flex items-center">
-                              <Calendar className="mr-1 h-4 w-4" />
-                              {formatDate(client.birthDate)}
-                            </div>
+                          {client.effectiveLastVisit ? (
+                            <span>{formatDate(client.effectiveLastVisit)}</span>
                           ) : (
                             '-'
                           )}
@@ -627,13 +691,17 @@ export default function Clients() {
                     <tr key={sale.id}>
                       <td className="font-mono text-sm">{sale.saleNumber}</td>
                       <td>{formatDate(sale.date)}</td>
-                      <td>{paymentMethodLabel(sale.paymentMethod)}</td>
+                      <td>{salePaymentMethodLabel(sale)}</td>
                       <td className="font-semibold">{formatCurrency(Number(sale.total))}</td>
                       <td>
-                        <button onClick={() => handlePrintSale(sale.id)} className="btn btn-sm btn-secondary">
-                          <Receipt className="mr-2 h-4 w-4" />
-                          Ticket
-                        </button>
+                        {sale.status !== 'PENDING' ? (
+                          <button onClick={() => handlePrintSale(sale.id)} className="btn btn-sm btn-secondary">
+                            <Receipt className="mr-2 h-4 w-4" />
+                            Ticket
+                          </button>
+                        ) : (
+                          <span className="text-sm text-gray-400">-</span>
+                        )}
                       </td>
                     </tr>
                   ))}

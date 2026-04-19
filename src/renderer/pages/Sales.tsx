@@ -3,12 +3,9 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Clock,
   CreditCard,
-  DollarSign,
   FileText,
-  Package,
   Plus,
   Receipt,
-  Scissors,
   Search,
   ShoppingCart,
   Trash2
@@ -21,14 +18,17 @@ import api from '../utils/api'
 import {
   loadActiveProducts,
   loadAppointmentClients,
+  loadAppointmentLegendItems,
   loadAppointmentProfessionals,
   loadAppointmentServices,
   loadBonoTemplates,
-  preloadPointOfSaleCatalogs
+  preloadPointOfSaleCatalogs,
+  type AppointmentLegendCatalogItem
 } from '../utils/appointmentCatalogs'
 import { printTicket } from '../utils/desktop'
 import { getPrintTicketSuccessMessage } from '../utils/desktop'
 import { formatCurrency } from '../utils/format'
+import { resolveAppointmentLegend } from '../utils/appointmentColors'
 import { buildSearchTokens, filterRankedItems } from '../utils/searchableOptions'
 import {
   buildSaleTicketPayload,
@@ -111,6 +111,14 @@ interface Sale {
   paymentMethod: string
   status: string
   items: any[]
+  pendingPayment?: {
+    id: string
+    amount: number | string
+    status: string
+    createdAt: string
+    settledAt?: string | null
+    settledPaymentMethod?: string | null
+  } | null
   accountBalanceMovements?: Array<{
     id: string
     type: string
@@ -197,6 +205,7 @@ export default function Sales() {
   const [products, setProducts] = useState<Product[]>([])
   const [services, setServices] = useState<Service[]>([])
   const [bonoTemplates, setBonoTemplates] = useState<BonoTemplate[]>([])
+  const [legendItems, setLegendItems] = useState<AppointmentLegendCatalogItem[]>([])
   const [catalogSearch, setCatalogSearch] = useState('')
   const [catalogType, setCatalogType] = useState<CatalogType>('services')
   const [selectedServiceFamily, setSelectedServiceFamily] = useState<string | null>(null)
@@ -281,11 +290,12 @@ export default function Sales() {
 
   const loadCatalog = async () => {
     try {
-      const [productsResult, servicesResult, bonosResult, professionalsResult] = await Promise.allSettled([
+      const [productsResult, servicesResult, bonosResult, professionalsResult, legendItemsResult] = await Promise.allSettled([
         loadActiveProducts(),
         loadAppointmentServices(),
         loadBonoTemplates(),
-        loadAppointmentProfessionals()
+        loadAppointmentProfessionals(),
+        loadAppointmentLegendItems()
       ])
 
       if (productsResult.status === 'fulfilled') {
@@ -312,6 +322,13 @@ export default function Sales() {
       } else {
         console.error('Error loading professionals:', professionalsResult.reason)
         setProfessionals([])
+      }
+
+      if (legendItemsResult.status === 'fulfilled') {
+        setLegendItems(legendItemsResult.value)
+      } else {
+        console.error('Error loading appointment legends:', legendItemsResult.reason)
+        setLegendItems([])
       }
     } catch (error) {
       console.error('Error loading catalog:', error)
@@ -439,7 +456,8 @@ export default function Sales() {
       notes?: string | null
     } | undefined
 
-    const effectivePaymentMethod = options.paymentMethodOverride || paymentMethod
+    const effectivePaymentMethod =
+      saleMode === 'PENDING' ? 'CASH' : options.paymentMethodOverride || paymentMethod
 
     const shouldUseAccountBalance =
       options.accountBalanceUsageAmount !== undefined || effectivePaymentMethod === 'ABONO'
@@ -567,11 +585,6 @@ export default function Sales() {
     }
 
     if (saleMode === 'PENDING') {
-      if (paymentMethod === 'ABONO') {
-        toast.error('No puedes guardar una venta pendiente con abono')
-        return
-      }
-
       await completeSaleRequest({
         printTicketAfterSale: false,
         showInOfficialCash: false
@@ -1097,17 +1110,16 @@ export default function Sales() {
 
                 <div className="flex gap-2">
                   {[
-                    { value: 'services', label: 'Servicios', icon: Scissors },
-                    { value: 'products', label: 'Productos', icon: Package },
-                    { value: 'bonos', label: 'Bonos', icon: Receipt },
-                    { value: 'all', label: 'Todos', icon: null }
+                    { value: 'services', label: 'Servicios' },
+                    { value: 'products', label: 'Productos' },
+                    { value: 'bonos', label: 'Bonos' },
+                    { value: 'all', label: 'Todos' }
                   ].map((option) => (
                     <button
                       key={option.value}
                       onClick={() => handleCatalogTypeChange(option.value as typeof catalogType)}
                       className={`btn ${catalogType === option.value ? 'btn-primary' : 'btn-secondary'}`}
                     >
-                      {option.icon && <option.icon className="w-4 h-4 mr-2" />}
                       {option.label}
                     </button>
                   ))}
@@ -1144,32 +1156,43 @@ export default function Sales() {
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
                       {activeFamilyCards.map((card) => (
-                        <button
-                          key={card.family}
-                          type="button"
-                          onClick={() => handleToggleFamily(card.family)}
-                          className={`rounded-lg border p-3 text-left transition-colors ${
-                            activeFamily === card.family
-                              ? 'border-primary-600 bg-primary-50 dark:bg-primary-900/20'
-                              : 'border-gray-200 dark:border-gray-700 hover:border-primary-500'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <p className="text-sm font-semibold text-gray-900 dark:text-white">
-                              {card.label}
-                            </p>
-                            {catalogType === 'services' ? (
-                              <Scissors className="w-4 h-4 text-primary-600" />
-                            ) : catalogType === 'bonos' ? (
-                              <Receipt className="w-4 h-4 text-primary-600" />
-                            ) : (
-                              <Package className="w-4 h-4 text-primary-600" />
-                            )}
-                          </div>
-                          <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                            {card.total} {catalogTypeLabels[catalogType as Exclude<CatalogType, 'all'>]}
-                          </p>
-                        </button>
+                        (() => {
+                          const matchedLegend =
+                            catalogType === 'services'
+                              ? resolveAppointmentLegend(legendItems, card.family)
+                              : null
+                          const isSelected = activeFamily === card.family
+
+                          return (
+                            <button
+                              key={card.family}
+                              type="button"
+                              onClick={() => handleToggleFamily(card.family)}
+                              className={`rounded-lg border p-3 text-left transition-all ${
+                                matchedLegend
+                                  ? 'hover:brightness-[0.98]'
+                                  : isSelected
+                                    ? 'border-primary-600 bg-primary-50 dark:bg-primary-900/20'
+                                    : 'border-gray-200 dark:border-gray-700 hover:border-primary-500'
+                              }`}
+                              style={
+                                matchedLegend
+                                  ? {
+                                      borderColor: matchedLegend.color,
+                                      boxShadow: isSelected ? `0 0 0 2px ${matchedLegend.color}33` : undefined
+                                    }
+                                  : undefined
+                              }
+                            >
+                              <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                                {card.label}
+                              </p>
+                              <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                                {card.total} {catalogTypeLabels[catalogType as Exclude<CatalogType, 'all'>]}
+                              </p>
+                            </button>
+                          )
+                        })()
                       ))}
                     </div>
                   )}
@@ -1200,16 +1223,7 @@ export default function Sales() {
                         onClick={() => addToCart(item, item.type)}
                         className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-blue-500 text-left transition-colors"
                       >
-                        <div className="flex items-center gap-2 mb-2">
-                          {item.type === 'product' ? (
-                            <Package className="w-5 h-5 text-blue-600" />
-                          ) : item.type === 'service' ? (
-                            <Scissors className="w-5 h-5 text-purple-600" />
-                          ) : (
-                            <Receipt className="w-5 h-5 text-amber-600" />
-                          )}
-                          <span className="font-semibold text-gray-900 dark:text-white">{item.name}</span>
-                        </div>
+                        <p className="mb-2 font-semibold text-gray-900 dark:text-white">{item.name}</p>
                         <p className="text-sm text-gray-600 dark:text-gray-400">
                           {item.type === 'bono' ? item.serviceName : item.category}
                         </p>
@@ -1337,29 +1351,31 @@ export default function Sales() {
                   />
                 </div>
 
-                <div>
-                  <label className="label">Método de pago</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { value: 'CASH', label: 'Efectivo', icon: DollarSign },
-                      { value: 'CARD', label: 'Tarjeta', icon: CreditCard },
-                      { value: 'BIZUM', label: 'Bizum', icon: Receipt },
-                      { value: 'ABONO', label: 'Abono', icon: CreditCard }
-                    ].map((option) => {
-                      const Icon = option.icon
-                      return (
+                {saleMode !== 'PENDING' ? (
+                  <div>
+                    <label className="label">Método de pago</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { value: 'CASH', label: 'Efectivo' },
+                        { value: 'CARD', label: 'Tarjeta' },
+                        { value: 'BIZUM', label: 'Bizum' },
+                        { value: 'ABONO', label: 'Abono' }
+                      ].map((option) => (
                         <button
                           key={option.value}
                           onClick={() => setPaymentMethod(option.value as typeof paymentMethod)}
                           className={`btn ${paymentMethod === option.value ? 'btn-primary' : 'btn-secondary'}`}
                         >
-                          <Icon className="w-4 h-4 mr-2" />
                           {option.label}
                         </button>
-                      )
-                    })}
+                      ))}
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                    La forma de pago se registrará cuando se salde la deuda desde la ficha del cliente.
+                  </div>
+                )}
 
                 <div>
                   <label className="label">Profesional</label>
@@ -1444,9 +1460,11 @@ export default function Sales() {
                   {lastCompletedSale.status === 'PENDING' ? 'guardada como pendiente.' : 'completada.'}
                 </p>
                 <div className="flex gap-3 mt-4">
-                  <button onClick={() => void handlePrintSale(lastCompletedSale)} className="btn btn-primary flex-1">
-                    Emitir ticket
-                  </button>
+                  {lastCompletedSale.status !== 'PENDING' ? (
+                    <button onClick={() => void handlePrintSale(lastCompletedSale)} className="btn btn-primary flex-1">
+                      Emitir ticket
+                    </button>
+                  ) : null}
                   <button onClick={() => void viewSaleDetail(lastCompletedSale.id)} className="btn btn-secondary flex-1">
                     Ver detalle
                   </button>
@@ -1547,9 +1565,11 @@ export default function Sales() {
                             <button onClick={() => void viewSaleDetail(sale.id)} className="btn btn-sm btn-secondary">
                               Ver detalle
                             </button>
-                            <button onClick={() => void handlePrintSale(sale)} className="btn btn-sm btn-primary">
-                              Ticket
-                            </button>
+                            {sale.status !== 'PENDING' ? (
+                              <button onClick={() => void handlePrintSale(sale)} className="btn btn-sm btn-primary">
+                                Ticket
+                              </button>
+                            ) : null}
                           </div>
                         </td>
                       </tr>
@@ -1948,12 +1968,14 @@ export default function Sales() {
               </div>
             </div>
 
-            <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
-              <button onClick={() => void handlePrintSale(selectedSale)} className="btn btn-primary flex-1">
-                <Receipt className="w-4 h-4 mr-2" />
-                Imprimir Ticket
-              </button>
-            </div>
+            {selectedSale.status !== 'PENDING' ? (
+              <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <button onClick={() => void handlePrintSale(selectedSale)} className="btn btn-primary flex-1">
+                  <Receipt className="w-4 h-4 mr-2" />
+                  Imprimir Ticket
+                </button>
+              </div>
+            ) : null}
           </div>
         )}
       </Modal>

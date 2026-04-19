@@ -73,6 +73,7 @@ export const updateSaleBodySchema = z
   .object({
     status: saleStatusSchema.optional(),
     paymentMethod: paymentMethodSchema.optional(),
+    settledAt: z.coerce.date().optional(),
     notes: optionalNullableTextSchema(1000)
   })
   .strict()

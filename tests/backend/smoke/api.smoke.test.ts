@@ -35,6 +35,7 @@ describe('API smoke tests', () => {
     prismaMock.appointment.findMany.mockResolvedValue([])
     prismaMock.agendaBlock.findMany.mockResolvedValue([])
     prismaMock.agendaDayNote.findMany.mockResolvedValue([])
+    prismaMock.dashboardReminder.findMany.mockResolvedValue([])
     prismaMock.setting.findUnique.mockResolvedValue(null)
     prismaMock.sale.findMany.mockResolvedValue([])
     prismaMock.quote.findMany.mockResolvedValue([])
@@ -358,6 +359,60 @@ describe('API smoke tests', () => {
         id: 'note-1',
         dayKey: '2026-04-18',
         text: 'Recordar cierre'
+      })
+    )
+  })
+
+  it('GET /api/reminders returns pending reminders', async () => {
+    prismaMock.dashboardReminder.findMany.mockResolvedValue([
+      {
+        id: 'reminder-1',
+        text: 'Revisar stock de mascarillas',
+        isCompleted: false,
+        completedAt: null,
+        createdAt: new Date('2026-04-19T08:00:00.000Z'),
+        updatedAt: new Date('2026-04-19T08:00:00.000Z')
+      }
+    ])
+
+    const response = await request(app)
+      .get('/api/reminders')
+      .set('Authorization', createAuthHeader())
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'reminder-1',
+          text: 'Revisar stock de mascarillas'
+        })
+      ])
+    )
+  })
+
+  it('POST /api/reminders creates a pending reminder', async () => {
+    prismaMock.dashboardReminder.create.mockResolvedValue({
+      id: 'reminder-1',
+      text: 'Confirmar cita de prueba',
+      isCompleted: false,
+      completedAt: null,
+      createdAt: new Date('2026-04-19T09:00:00.000Z'),
+      updatedAt: new Date('2026-04-19T09:00:00.000Z')
+    })
+
+    const response = await request(app)
+      .post('/api/reminders')
+      .set('Authorization', createAuthHeader())
+      .send({
+        text: 'Confirmar cita de prueba'
+      })
+
+    expect(response.status).toBe(201)
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        id: 'reminder-1',
+        text: 'Confirmar cita de prueba',
+        isCompleted: false
       })
     )
   })

@@ -1,25 +1,14 @@
-import { useState, useEffect } from 'react'
-import { Save, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
 import { invalidateActiveProductsCache } from '../utils/appointmentCatalogs'
 
 interface ProductFormProps {
   product?: any
+  availableCategories: string[]
   onSuccess: () => void
   onCancel: () => void
 }
-
-const categories = [
-  'Cuidado del Cabello',
-  'Coloración',
-  'Tratamientos',
-  'Manicura y Pedicura',
-  'Maquillaje',
-  'Cosmética Facial',
-  'Accesorios',
-  'Otros'
-]
 
 const units = [
   'unidad',
@@ -30,42 +19,46 @@ const units = [
   'pack'
 ]
 
-export default function ProductForm({ product, onSuccess, onCancel }: ProductFormProps) {
+const NEW_CATEGORY_OPTION = '__new_category__'
+
+const buildInitialFormData = (product?: any) => ({
+  name: product?.name || '',
+  description: product?.description || '',
+  sku: product?.sku || '',
+  barcode: product?.barcode || '',
+  category: String(product?.category || '').trim(),
+  brand: product?.brand || '',
+  price: product?.price?.toString() || '',
+  cost: product?.cost?.toString() || '',
+  stock: product?.stock?.toString() || '',
+  minStock: product?.minStock?.toString() || '',
+  maxStock: product?.maxStock?.toString() || '',
+  unit: product?.unit || 'unidad',
+  isActive: product?.isActive ?? true
+})
+
+export default function ProductForm({ product, availableCategories, onSuccess, onCancel }: ProductFormProps) {
   const [loading, setLoading] = useState(false)
-  const [formData, setFormData] = useState({
-    name: '',
-    description: '',
-    sku: '',
-    barcode: '',
-    category: categories[0],
-    brand: '',
-    price: '',
-    cost: '',
-    stock: '',
-    minStock: '5',
-    maxStock: '',
-    unit: 'unidad',
-    isActive: true
-  })
+  const [categoryMode, setCategoryMode] = useState<'existing' | 'new'>('existing')
+  const [newCategoryName, setNewCategoryName] = useState('')
+  const [formData, setFormData] = useState(buildInitialFormData(product))
+
+  const categoryOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [...availableCategories, String(product?.category || '').trim()]
+            .map((category) => String(category || '').trim())
+            .filter(Boolean)
+        )
+      ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' })),
+    [availableCategories, product?.category]
+  )
 
   useEffect(() => {
-    if (product) {
-      setFormData({
-        name: product.name || '',
-        description: product.description || '',
-        sku: product.sku || '',
-        barcode: product.barcode || '',
-        category: product.category || categories[0],
-        brand: product.brand || '',
-        price: product.price?.toString() || '',
-        cost: product.cost?.toString() || '',
-        stock: product.stock?.toString() || '',
-        minStock: product.minStock?.toString() || '5',
-        maxStock: product.maxStock?.toString() || '',
-        unit: product.unit || 'unidad',
-        isActive: product.isActive ?? true
-      })
-    }
+    setFormData(buildInitialFormData(product))
+    setCategoryMode('existing')
+    setNewCategoryName('')
   }, [product])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -76,11 +69,29 @@ export default function ProductForm({ product, onSuccess, onCancel }: ProductFor
     }))
   }
 
+  const handleCategorySelection = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const { value } = event.target
+
+    if (value === NEW_CATEGORY_OPTION) {
+      setCategoryMode('new')
+      return
+    }
+
+    setCategoryMode('existing')
+    setFormData((prev) => ({
+      ...prev,
+      category: value
+    }))
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
 
     try {
+      const resolvedCategory =
+        categoryMode === 'new' ? newCategoryName.trim() : formData.category.trim()
+
       // Validaciones
       if (!formData.name.trim()) {
         toast.error('El nombre del producto es requerido')
@@ -88,8 +99,20 @@ export default function ProductForm({ product, onSuccess, onCancel }: ProductFor
         return
       }
 
+      if (!resolvedCategory) {
+        toast.error('La categoría es obligatoria')
+        setLoading(false)
+        return
+      }
+
       if (!formData.sku.trim()) {
         toast.error('El SKU es requerido')
+        setLoading(false)
+        return
+      }
+
+      if (!formData.brand.trim()) {
+        toast.error('La marca es obligatoria')
         setLoading(false)
         return
       }
@@ -118,12 +141,12 @@ export default function ProductForm({ product, onSuccess, onCancel }: ProductFor
         description: formData.description.trim() || null,
         sku: formData.sku.trim(),
         barcode: formData.barcode.trim() || null,
-        category: formData.category,
-        brand: formData.brand.trim() || null,
+        category: resolvedCategory,
+        brand: formData.brand.trim(),
         price: parseFloat(formData.price),
         cost: parseFloat(formData.cost),
         stock: parseInt(formData.stock),
-        minStock: parseInt(formData.minStock) || 5,
+        minStock: formData.minStock.trim() === '' ? 0 : parseInt(formData.minStock, 10),
         maxStock: formData.maxStock ? parseInt(formData.maxStock) : null,
         unit: formData.unit,
         isActive: formData.isActive
@@ -166,7 +189,6 @@ export default function ProductForm({ product, onSuccess, onCancel }: ProductFor
               value={formData.name}
               onChange={handleChange}
               className="input"
-              placeholder="Ej: Champú Hidratante"
               required
             />
           </div>
@@ -182,7 +204,6 @@ export default function ProductForm({ product, onSuccess, onCancel }: ProductFor
                 value={formData.sku}
                 onChange={handleChange}
                 className="input"
-                placeholder="CHAMP-001"
                 required
               />
             </div>
@@ -195,39 +216,60 @@ export default function ProductForm({ product, onSuccess, onCancel }: ProductFor
                 value={formData.barcode}
                 onChange={handleChange}
                 className="input"
-                placeholder="1234567890123"
               />
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="label">Categoría</label>
+              <label className="label">
+                Categoría <span className="text-red-500">*</span>
+              </label>
               <select
-                name="category"
-                value={formData.category}
-                onChange={handleChange}
+                value={categoryMode === 'new' ? NEW_CATEGORY_OPTION : formData.category}
+                onChange={handleCategorySelection}
                 className="input"
               >
-                {categories.map((cat) => (
-                  <option key={cat} value={cat}>
-                    {cat}
+                <option value={NEW_CATEGORY_OPTION}>Crear nueva categoría</option>
+                <option value="">Selecciona una categoría</option>
+                {categoryOptions.map((category) => (
+                  <option key={category} value={category}>
+                    {category}
                   </option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="label">Marca</label>
+              <label className="label">
+                Marca <span className="text-red-500">*</span>
+              </label>
               <input
                 type="text"
                 name="brand"
                 value={formData.brand}
                 onChange={handleChange}
                 className="input"
-                placeholder="Ej: L'Oréal"
+                required
               />
             </div>
+
+            {categoryMode === 'new' && (
+              <div className="md:col-span-2">
+                <label className="label">
+                  Nueva categoría <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={newCategoryName}
+                  onChange={(event) => setNewCategoryName(event.target.value)}
+                  className="input"
+                  placeholder="Ej: Cosmética facial"
+                  maxLength={120}
+                  required
+                />
+              </div>
+            )}
           </div>
 
           <div>
@@ -260,7 +302,6 @@ export default function ProductForm({ product, onSuccess, onCancel }: ProductFor
               value={formData.price}
               onChange={handleChange}
               className="input"
-              placeholder="15.99"
               step="0.01"
               min="0"
               required
@@ -277,7 +318,6 @@ export default function ProductForm({ product, onSuccess, onCancel }: ProductFor
               value={formData.cost}
               onChange={handleChange}
               className="input"
-              placeholder="8.50"
               step="0.01"
               min="0"
               required
@@ -302,7 +342,6 @@ export default function ProductForm({ product, onSuccess, onCancel }: ProductFor
               value={formData.stock}
               onChange={handleChange}
               className="input"
-              placeholder="100"
               min="0"
               required
             />
@@ -332,7 +371,6 @@ export default function ProductForm({ product, onSuccess, onCancel }: ProductFor
               value={formData.minStock}
               onChange={handleChange}
               className="input"
-              placeholder="5"
               min="0"
             />
           </div>
@@ -345,7 +383,6 @@ export default function ProductForm({ product, onSuccess, onCancel }: ProductFor
               value={formData.maxStock}
               onChange={handleChange}
               className="input"
-              placeholder="500"
               min="0"
             />
           </div>
@@ -375,7 +412,6 @@ export default function ProductForm({ product, onSuccess, onCancel }: ProductFor
           className="btn btn-secondary"
           disabled={loading}
         >
-          <X className="w-4 h-4 mr-2" />
           Cancelar
         </button>
         <button
@@ -383,7 +419,6 @@ export default function ProductForm({ product, onSuccess, onCancel }: ProductFor
           className="btn btn-primary"
           disabled={loading}
         >
-          <Save className="w-4 h-4 mr-2" />
           {loading ? 'Guardando...' : product ? 'Actualizar' : 'Crear Producto'}
         </button>
       </div>

@@ -33,6 +33,10 @@ export const getSaleAccountBalanceMovement = (sale: any) => {
 }
 
 export const salePaymentMethodLabel = (sale: any) => {
+  if (String(sale?.status || '').toUpperCase() === 'PENDING') {
+    return 'Pendiente de cobro'
+  }
+
   const balanceMovement = getSaleAccountBalanceMovement(sale)
   const rawPaymentMethod = String(sale?.paymentMethod || '').toUpperCase()
 

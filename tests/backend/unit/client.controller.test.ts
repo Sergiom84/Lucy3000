@@ -6,6 +6,160 @@ import { prismaMock, resetPrismaMock } from '../mocks/prisma.mock'
 
 vi.mock('../../../src/backend/db', async () => import('../mocks/db.mock'))
 
+describe('client.controller list ordering', () => {
+  beforeEach(() => {
+    resetPrismaMock()
+  })
+
+  it('getClients returns paginated clients ordered by latest completed appointment activity', async () => {
+    prismaMock.client.count
+      .mockResolvedValueOnce(2)
+      .mockResolvedValueOnce(2)
+      .mockResolvedValueOnce(1)
+    prismaMock.$queryRaw.mockResolvedValue([{ id: 'client-2' }, { id: 'client-1' }])
+    prismaMock.appointment.groupBy.mockResolvedValue([
+      {
+        clientId: 'client-2',
+        _max: {
+          date: new Date('2026-04-10T00:00:00.000Z')
+        }
+      }
+    ])
+    prismaMock.client.findMany.mockResolvedValue([
+      {
+        id: 'client-1',
+        firstName: 'Ana',
+        lastName: 'Lopez',
+        lastVisit: new Date('2026-03-01T00:00:00.000Z')
+      },
+      {
+        id: 'client-2',
+        firstName: 'Beatriz',
+        lastName: 'Ruiz',
+        lastVisit: null
+      }
+    ])
+
+    const req = createMockRequest({
+      query: {
+        paginated: 'true',
+        includeCounts: 'true',
+        page: '1',
+        limit: '50'
+      }
+    })
+    const res = createMockResponse()
+
+    await getClients(req as any, res)
+
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1)
+    const sql = prismaMock.$queryRaw.mock.calls[0][0]?.sql || ''
+    expect(sql).toContain(`a."status" = 'COMPLETED'`)
+    expect(prismaMock.client.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: {
+            in: ['client-2', 'client-1']
+          }
+        }
+      })
+    )
+    expect(prismaMock.appointment.groupBy).toHaveBeenCalledWith({
+      by: ['clientId'],
+      where: {
+        clientId: {
+          in: ['client-2', 'client-1']
+        },
+        status: 'COMPLETED'
+      },
+      _max: {
+        date: true
+      }
+    })
+    expect(res.json).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          id: 'client-2',
+          effectiveLastVisit: new Date('2026-04-10T00:00:00.000Z')
+        }),
+        expect.objectContaining({
+          id: 'client-1',
+          effectiveLastVisit: new Date('2026-03-01T00:00:00.000Z')
+        })
+      ],
+      pagination: {
+        page: 1,
+        limit: 50,
+        total: 2,
+        totalPages: 1
+      },
+      summary: {
+        total: 2,
+        active: 2,
+        debtAlerts: 1
+      }
+    })
+  })
+
+  it('getClients uses numeric ordering when sorting by client number', async () => {
+    prismaMock.$queryRaw.mockResolvedValue([])
+
+    const req = createMockRequest({
+      query: {
+        sortBy: 'clientNumber',
+        sortDirection: 'asc'
+      }
+    })
+    const res = createMockResponse()
+
+    await getClients(req as any, res)
+
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1)
+    const sql = prismaMock.$queryRaw.mock.calls[0][0]?.sql || ''
+    expect(sql).toContain('CAST(TRIM(c."externalCode") AS INTEGER)')
+    expect(sql).toContain(`NOT GLOB '*[^0-9]*'`)
+  })
+
+  it('getClients summary counts clients with pending amount even without debt alert flag', async () => {
+    prismaMock.client.count
+      .mockResolvedValueOnce(20)
+      .mockResolvedValueOnce(18)
+      .mockResolvedValueOnce(13)
+    prismaMock.$queryRaw.mockResolvedValue([])
+    prismaMock.appointment.groupBy.mockResolvedValue([])
+    prismaMock.client.findMany.mockResolvedValue([])
+
+    const req = createMockRequest({
+      query: {
+        paginated: 'true',
+        includeCounts: 'true',
+        isActive: 'true'
+      }
+    })
+    const res = createMockResponse()
+
+    await getClients(req as any, res)
+
+    expect(prismaMock.client.count.mock.calls[2][0]).toEqual({
+      where: {
+        AND: [
+          { isActive: true },
+          { pendingAmount: { gt: 0 } }
+        ]
+      }
+    })
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        summary: {
+          total: 20,
+          active: 18,
+          debtAlerts: 13
+        }
+      })
+    )
+  })
+})
+
 describe('client.controller gender validation', () => {
   beforeEach(() => {
     resetPrismaMock()
@@ -557,6 +711,7 @@ describe('client.controller gender validation', () => {
   })
 
   it('getClients splits multi-term search into token clauses', async () => {
+    prismaMock.$queryRaw.mockResolvedValue([])
     prismaMock.client.findMany.mockResolvedValue([])
 
     const req = createMockRequest({
@@ -570,26 +725,9 @@ describe('client.controller gender validation', () => {
 
     await getClients(req as any, res)
 
-    expect(prismaMock.client.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          isActive: true,
-          AND: [
-            {
-              OR: expect.arrayContaining([
-                { firstName: { contains: 'ser' } },
-                { lastName: { contains: 'ser' } }
-              ])
-            },
-            {
-              OR: expect.arrayContaining([
-                { firstName: { contains: 'her' } },
-                { lastName: { contains: 'her' } }
-              ])
-            }
-          ]
-        })
-      })
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1)
+    expect(prismaMock.$queryRaw.mock.calls[0][0].values).toEqual(
+      expect.arrayContaining(['%ser%', '%her%', true])
     )
     expect(res.json).toHaveBeenCalledWith([])
   })

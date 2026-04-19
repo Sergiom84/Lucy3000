@@ -44,7 +44,7 @@ const normalizeServicePayload = (payload: Record<string, any>, partial = false) 
 
   if (!partial || data.category !== undefined) {
     const category = String(data.category || '').trim()
-    data.category = category || 'General'
+    data.category = category
   }
 
   if (data.description !== undefined) {
@@ -133,6 +133,10 @@ export const createService = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Description is required' })
     }
 
+    if (!data.category) {
+      return res.status(400).json({ error: 'Category is required' })
+    }
+
     if (data.price === null || data.price <= 0) {
       return res.status(400).json({ error: 'Tariff must be greater than 0' })
     }
@@ -165,6 +169,10 @@ export const updateService = async (req: Request, res: Response) => {
 
     if (data.duration !== undefined && (data.duration === null || data.duration <= 0)) {
       return res.status(400).json({ error: 'Duration must be greater than 0 minutes' })
+    }
+
+    if (data.category !== undefined && !data.category) {
+      return res.status(400).json({ error: 'Category is required' })
     }
 
     const service = await prisma.service.update({

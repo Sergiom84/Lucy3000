@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle, X } from 'lucide-react'
+import { FileSpreadsheet, AlertCircle, CheckCircle } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
 import { invalidateBonoTemplatesCache } from '../utils/appointmentCatalogs'
@@ -125,7 +125,6 @@ export default function ImportBonosModal({ onSuccess, onCancel }: ImportBonosMod
 
       <div>
         <button onClick={handleDownloadTemplate} className="btn btn-secondary w-full">
-          <Download className="w-5 h-5 mr-2" />
           Descargar Plantilla de Excel
         </button>
       </div>
@@ -197,12 +196,10 @@ export default function ImportBonosModal({ onSuccess, onCancel }: ImportBonosMod
 
       <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200 dark:border-gray-700">
         <button type="button" onClick={onCancel} className="btn btn-secondary" disabled={loading}>
-          <X className="w-4 h-4 mr-2" />
           {results ? 'Cerrar' : 'Cancelar'}
         </button>
         {!results && (
           <button onClick={handleImport} className="btn btn-primary" disabled={loading || !file}>
-            <Upload className="w-4 h-4 mr-2" />
             {loading ? 'Importando...' : 'Importar Bonos'}
           </button>
         )}
