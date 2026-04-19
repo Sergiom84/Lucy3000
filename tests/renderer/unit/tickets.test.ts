@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { salePaymentMethodLabel } from '../../../src/renderer/utils/tickets'
+import { buildSaleTicketPayload, salePaymentMethodLabel } from '../../../src/renderer/utils/tickets'
 
 describe('tickets salePaymentMethodLabel', () => {
   it('renders stored combined payment breakdown labels', () => {
@@ -28,5 +28,21 @@ describe('tickets salePaymentMethodLabel', () => {
         }
       })
     ).toBe('Efectivo + Pendiente')
+  })
+
+  it('omits private cash legs from the printed ticket payment method', () => {
+    expect(
+      buildSaleTicketPayload({
+        saleNumber: 'V-000100',
+        date: '2026-04-19T10:30:00.000Z',
+        subtotal: 200,
+        discount: 0,
+        total: 200,
+        paymentMethod: 'OTHER',
+        paymentBreakdown:
+          '[{"paymentMethod":"CASH","amount":80,"showInOfficialCash":false},{"paymentMethod":"CARD","amount":120}]',
+        items: []
+      }).paymentMethod
+    ).toBe('Tarjeta')
   })
 })

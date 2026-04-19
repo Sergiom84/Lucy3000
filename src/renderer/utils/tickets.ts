@@ -32,7 +32,11 @@ export const getSaleAccountBalanceMovement = (sale: any) => {
   )
 }
 
-const normalizePaymentBreakdownEntry = (paymentMethod?: string | null, amount?: unknown) => {
+const normalizePaymentBreakdownEntry = (
+  paymentMethod?: string | null,
+  amount?: unknown,
+  showInOfficialCash?: boolean
+) => {
   const normalizedMethod = String(paymentMethod || '').trim().toUpperCase()
   const numericAmount = Number(amount || 0)
 
@@ -46,58 +50,78 @@ const normalizePaymentBreakdownEntry = (paymentMethod?: string | null, amount?: 
 
   return {
     paymentMethod: normalizedMethod,
-    amount: numericAmount
+    amount: numericAmount,
+    showInOfficialCash: normalizedMethod === 'CASH' ? showInOfficialCash !== false : true
   }
 }
 
 const getStoredSalePaymentBreakdown = (sale: any) => {
   if (!sale?.paymentBreakdown) {
-    return [] as Array<{ paymentMethod: string; amount: number }>
+    return [] as Array<{ paymentMethod: string; amount: number; showInOfficialCash: boolean }>
   }
 
   try {
     const parsed = JSON.parse(String(sale.paymentBreakdown))
     if (!Array.isArray(parsed)) {
-      return [] as Array<{ paymentMethod: string; amount: number }>
+      return [] as Array<{ paymentMethod: string; amount: number; showInOfficialCash: boolean }>
     }
 
     return parsed
       .map((entry) =>
-        normalizePaymentBreakdownEntry((entry as any)?.paymentMethod, (entry as any)?.amount)
+        normalizePaymentBreakdownEntry(
+          (entry as any)?.paymentMethod,
+          (entry as any)?.amount,
+          (entry as any)?.showInOfficialCash
+        )
       )
-      .filter(Boolean) as Array<{ paymentMethod: string; amount: number }>
+      .filter(Boolean) as Array<{ paymentMethod: string; amount: number; showInOfficialCash: boolean }>
   } catch {
-    return [] as Array<{ paymentMethod: string; amount: number }>
+    return [] as Array<{ paymentMethod: string; amount: number; showInOfficialCash: boolean }>
   }
 }
 
 const getPendingCollectionBreakdown = (sale: any) => {
   const collections = sale?.pendingPayment?.collections
   if (!Array.isArray(collections)) {
-    return [] as Array<{ paymentMethod: string; amount: number }>
+    return [] as Array<{ paymentMethod: string; amount: number; showInOfficialCash: boolean }>
   }
 
   return collections
-    .map((entry) => normalizePaymentBreakdownEntry(entry?.paymentMethod, entry?.amount))
-    .filter(Boolean) as Array<{ paymentMethod: string; amount: number }>
+    .map((entry) => normalizePaymentBreakdownEntry(entry?.paymentMethod, entry?.amount, entry?.showInOfficialCash))
+    .filter(Boolean) as Array<{ paymentMethod: string; amount: number; showInOfficialCash: boolean }>
 }
 
-export const getSalePaymentBreakdownEntries = (sale: any) => {
+type SalePaymentBreakdownOptions = {
+  excludePrivateCash?: boolean
+}
+
+const filterVisiblePaymentEntries = (
+  entries: Array<{ paymentMethod: string; amount: number; showInOfficialCash?: boolean }>,
+  options: SalePaymentBreakdownOptions = {}
+) => {
+  if (!options.excludePrivateCash) {
+    return entries
+  }
+
+  return entries.filter((entry) => entry.paymentMethod !== 'CASH' || entry.showInOfficialCash !== false)
+}
+
+export const getSalePaymentBreakdownEntries = (sale: any, options: SalePaymentBreakdownOptions = {}) => {
   const storedBreakdown = getStoredSalePaymentBreakdown(sale)
   if (storedBreakdown.length > 0) {
-    return storedBreakdown
+    return filterVisiblePaymentEntries(storedBreakdown, options)
   }
 
   const pendingCollections = getPendingCollectionBreakdown(sale)
   if (pendingCollections.length > 0) {
-    return pendingCollections
+    return filterVisiblePaymentEntries(pendingCollections, options)
   }
 
   const balanceMovement = getSaleAccountBalanceMovement(sale)
   const rawPaymentMethod = String(sale?.paymentMethod || '').toUpperCase()
 
   if (!balanceMovement) {
-    const directMethod = normalizePaymentBreakdownEntry(rawPaymentMethod, sale?.total)
+    const directMethod = normalizePaymentBreakdownEntry(rawPaymentMethod, sale?.total, sale?.showInOfficialCash)
     return directMethod ? [directMethod] : []
   }
 
@@ -151,6 +175,16 @@ export const salePaymentMethodLabel = (sale: any) => {
   return paymentMethodLabel(sale?.paymentMethod)
 }
 
+const saleTicketPaymentMethodLabel = (sale: any) => {
+  const entries = getSalePaymentBreakdownEntries(sale, { excludePrivateCash: true })
+
+  if (entries.length > 0) {
+    return buildPaymentMethodListLabel(entries)
+  }
+
+  return paymentMethodLabel(sale?.paymentMethod)
+}
+
 const resolveCustomerName = (sale: any) => {
   return getSaleDisplayName(sale)
 }
@@ -180,7 +214,7 @@ export const buildSaleTicketPayload = (sale: any): TicketPayload => ({
   saleNumber: sale.saleNumber,
   customer: resolveCustomerName(sale),
   createdAt: formatDateTime(sale.date),
-  paymentMethod: salePaymentMethodLabel(sale),
+  paymentMethod: saleTicketPaymentMethodLabel(sale),
   items: (sale.items || []).map((item: any) => ({
     description: resolveItemLabel(item),
     quantity: Number(item.quantity),
