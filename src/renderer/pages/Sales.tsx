@@ -180,9 +180,17 @@ type SalesView = 'pos' | 'history' | 'account-balance'
 type SalePaymentMethod = 'CASH' | 'CARD' | 'BIZUM' | 'ABONO'
 type CombinedSecondaryPaymentMethod = SalePaymentMethod | 'PENDING'
 type SaleMode = 'NORMAL' | 'PENDING' | 'ON_HOLD' | 'QUOTE'
+type ResolvedCombinedPayment = {
+  primaryMethod: SalePaymentMethod
+  primaryAmount: number
+  secondaryMethod: CombinedSecondaryPaymentMethod
+  secondaryAmount: number
+  cashShowInOfficialCash?: boolean
+}
 type PendingSaleExecutionOptions = {
   paymentMethodOverride?: SalePaymentMethod
   accountBalanceUsageAmount?: number
+  combinedPayment?: ResolvedCombinedPayment
 }
 type CombinedPaymentDraft = {
   primaryMethod: SalePaymentMethod
@@ -544,12 +552,7 @@ export default function Sales() {
     showInOfficialCash: boolean
     paymentMethodOverride?: SalePaymentMethod
     accountBalanceUsageAmount?: number
-    combinedPayment?: {
-      primaryMethod: SalePaymentMethod
-      primaryAmount: number
-      secondaryMethod: CombinedSecondaryPaymentMethod
-      secondaryAmount: number
-    }
+    combinedPayment?: ResolvedCombinedPayment
   }) => {
     if (cart.length === 0) {
       toast.error('El carrito está vacío')
@@ -627,13 +630,14 @@ export default function Sales() {
         professional,
         status: saleStatus,
         accountBalanceUsage: accountBalanceUsagePayload,
-        combinedPayment: combinedPayment
-          ? {
-              primaryMethod: combinedPayment.primaryMethod,
-              primaryAmount: combinedPayment.primaryAmount,
-              secondaryMethod: combinedPayment.secondaryMethod
-            }
-          : undefined,
+          combinedPayment: combinedPayment
+            ? {
+                primaryMethod: combinedPayment.primaryMethod,
+                primaryAmount: combinedPayment.primaryAmount,
+                secondaryMethod: combinedPayment.secondaryMethod,
+                cashShowInOfficialCash: combinedPayment.cashShowInOfficialCash
+              }
+            : undefined,
         showInOfficialCash: options.showInOfficialCash,
         notes: saleMode === 'ON_HOLD' ? `[EN ESPERA] ${notes}`.trim() : notes
       })
@@ -723,6 +727,15 @@ export default function Sales() {
       const combinedPayment = resolveCombinedPayment()
       if (!combinedPayment) {
         setCombinedPaymentModalOpen(true)
+        return
+      }
+
+      const hasCashInCombinedPayment =
+        combinedPayment.primaryMethod === 'CASH' || combinedPayment.secondaryMethod === 'CASH'
+
+      if (hasCashInCombinedPayment) {
+        setPendingSaleExecution({ combinedPayment })
+        setCashTicketDecisionModalOpen(true)
         return
       }
 
@@ -1174,6 +1187,7 @@ export default function Sales() {
   const accountBalanceRemainingAfterSale = roundCurrency(Math.max(0, availableAccountBalance - accountBalanceUsableAmount))
   const accountBalanceRemainderToPay = roundCurrency(Math.max(0, accountBalanceSaleAmount - accountBalanceUsableAmount))
   const selectedSaleAccountBalanceMovement = getSaleAccountBalanceMovement(selectedSale)
+  const cashDecisionIsCombinedPayment = Boolean(pendingSaleExecution?.combinedPayment)
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -2092,15 +2106,25 @@ export default function Sales() {
           setCashTicketDecisionModalOpen(false)
           setPendingSaleExecution(null)
         }}
-        title="Venta en efectivo"
+        title={cashDecisionIsCombinedPayment ? 'Pago combinado con metálico' : 'Venta en efectivo'}
         maxWidth="md"
       >
         <div className="space-y-4">
           <p className="text-sm text-gray-700 dark:text-gray-300">
-            ¿Quieres imprimir ticket para esta venta en efectivo?
+            {cashDecisionIsCombinedPayment
+              ? '¿Quieres imprimir ticket para esta venta con pago combinado?'
+              : '¿Quieres imprimir ticket para esta venta en efectivo?'}
           </p>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            Si seleccionas <strong>No imprimir ticket</strong>, la operación se guardará en la sección privada de caja y no afectará a los movimientos oficiales.
+            {cashDecisionIsCombinedPayment ? (
+              <>
+                Si seleccionas <strong>No imprimir ticket</strong>, solo la parte en metálico se guardará en la sección privada de caja. La otra forma de pago seguirá registrándose de forma normal.
+              </>
+            ) : (
+              <>
+                Si seleccionas <strong>No imprimir ticket</strong>, la operación se guardará en la sección privada de caja y no afectará a los movimientos oficiales.
+              </>
+            )}
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <button
@@ -2110,7 +2134,13 @@ export default function Sales() {
                   printTicketAfterSale: true,
                   showInOfficialCash: true,
                   paymentMethodOverride: pendingSaleExecution?.paymentMethodOverride,
-                  accountBalanceUsageAmount: pendingSaleExecution?.accountBalanceUsageAmount
+                  accountBalanceUsageAmount: pendingSaleExecution?.accountBalanceUsageAmount,
+                  combinedPayment: pendingSaleExecution?.combinedPayment
+                    ? {
+                        ...pendingSaleExecution.combinedPayment,
+                        cashShowInOfficialCash: true
+                      }
+                    : undefined
                 })
               }}
               className="btn btn-primary"
@@ -2123,9 +2153,15 @@ export default function Sales() {
                 setCashTicketDecisionModalOpen(false)
                 void completeSaleRequest({
                   printTicketAfterSale: false,
-                  showInOfficialCash: false,
+                  showInOfficialCash: pendingSaleExecution?.combinedPayment ? true : false,
                   paymentMethodOverride: pendingSaleExecution?.paymentMethodOverride,
-                  accountBalanceUsageAmount: pendingSaleExecution?.accountBalanceUsageAmount
+                  accountBalanceUsageAmount: pendingSaleExecution?.accountBalanceUsageAmount,
+                  combinedPayment: pendingSaleExecution?.combinedPayment
+                    ? {
+                        ...pendingSaleExecution.combinedPayment,
+                        cashShowInOfficialCash: false
+                      }
+                    : undefined
                 })
               }}
               className="btn btn-secondary"

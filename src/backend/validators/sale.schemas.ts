@@ -59,7 +59,8 @@ const combinedPaymentSchema = z
   .object({
     primaryMethod: combinedPrimaryPaymentMethodSchema,
     primaryAmount: positiveMoneySchema,
-    secondaryMethod: combinedSecondaryPaymentMethodSchema
+    secondaryMethod: combinedSecondaryPaymentMethodSchema,
+    cashShowInOfficialCash: z.boolean().optional()
   })
   .strict()
 

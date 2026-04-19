@@ -36,11 +36,13 @@ type CombinedPaymentInput = {
   primaryMethod: string
   primaryAmount: number
   secondaryMethod: string
+  cashShowInOfficialCash?: boolean
 }
 
 type StoredPaymentBreakdownEntry = {
   paymentMethod: string
   amount: number
+  showInOfficialCash?: boolean
 }
 
 type CashMovementEntry = {
@@ -179,7 +181,8 @@ const serializePaymentBreakdown = (entries: StoredPaymentBreakdownEntry[]) => {
   return JSON.stringify(
     entries.map((entry) => ({
       paymentMethod: entry.paymentMethod,
-      amount: roundCurrency(entry.amount)
+      amount: roundCurrency(entry.amount),
+      ...(entry.showInOfficialCash === undefined ? {} : { showInOfficialCash: entry.showInOfficialCash })
     }))
   )
 }
@@ -193,6 +196,7 @@ const normalizeCombinedPayment = (combinedPayment: unknown, total: number) => {
   const primaryMethod = String(row.primaryMethod || '').trim().toUpperCase()
   const secondaryMethod = String(row.secondaryMethod || '').trim().toUpperCase()
   const primaryAmount = roundCurrency(Number(row.primaryAmount))
+  const cashShowInOfficialCash = row.cashShowInOfficialCash !== false
 
   if (!COMBINED_PAYMENT_METHODS.includes(primaryMethod)) {
     throw new BusinessError(400, 'Invalid combined primary payment method')
@@ -215,15 +219,34 @@ const normalizeCombinedPayment = (combinedPayment: unknown, total: number) => {
     throw new BusinessError(400, 'Combined secondary payment amount must be greater than zero')
   }
 
+  const buildStoredEntry = (paymentMethod: string, amount: number): StoredPaymentBreakdownEntry => ({
+    paymentMethod,
+    amount,
+    ...(paymentMethod === 'CASH' ? { showInOfficialCash: cashShowInOfficialCash } : {})
+  })
+
   const collectedEntries: StoredPaymentBreakdownEntry[] = [
-    { paymentMethod: primaryMethod, amount: primaryAmount },
-    ...(secondaryMethod === 'PENDING' ? [] : [{ paymentMethod: secondaryMethod, amount: secondaryAmount }])
+    buildStoredEntry(primaryMethod, primaryAmount),
+    ...(secondaryMethod === 'PENDING' ? [] : [buildStoredEntry(secondaryMethod, secondaryAmount)])
   ]
 
   const accountBalanceAmount = roundCurrency(
     collectedEntries.reduce((sum, entry) => sum + (entry.paymentMethod === 'ABONO' ? entry.amount : 0), 0)
   )
   const cashEntry = collectedEntries.find((entry) => entry.paymentMethod === 'CASH') || null
+  const officialCommercialAmount = roundCurrency(
+    collectedEntries.reduce((sum, entry) => {
+      if (entry.paymentMethod === 'ABONO') {
+        return sum
+      }
+
+      if (entry.paymentMethod === 'CASH' && entry.showInOfficialCash === false) {
+        return sum
+      }
+
+      return sum + entry.amount
+    }, 0)
+  )
   const commercialCollectedAmount = roundCurrency(
     collectedEntries.reduce((sum, entry) => sum + (entry.paymentMethod === 'ABONO' ? 0 : entry.amount), 0)
   )
@@ -235,6 +258,7 @@ const normalizeCombinedPayment = (combinedPayment: unknown, total: number) => {
     secondaryAmount,
     collectedEntries,
     accountBalanceAmount,
+    officialCommercialAmount,
     pendingAmount: secondaryMethod === 'PENDING' ? secondaryAmount : 0,
     cashMovement:
       cashEntry || commercialCollectedAmount <= 0
@@ -242,7 +266,7 @@ const normalizeCombinedPayment = (combinedPayment: unknown, total: number) => {
           ? {
               paymentMethod: 'CASH',
               amount: cashEntry.amount,
-              showInOfficialCash: true
+              showInOfficialCash: cashEntry.showInOfficialCash !== false
             }
           : null
         : {
@@ -530,6 +554,7 @@ const applySaleEffects = async (
     cashMovementTotal?: number
     paymentMethod: string
     cashMovementPaymentMethod?: string
+    cashMovementShowInOfficialCash?: boolean
     showInOfficialCash: boolean
     items: SaleItemInput[]
     skipAutomaticCashMovement?: boolean
@@ -601,7 +626,10 @@ const applySaleEffects = async (
       total: payload.total,
       cashAmount: payload.cashMovementTotal,
       paymentMethod: payload.cashMovementPaymentMethod || payload.paymentMethod,
-      showInOfficialCash: payload.showInOfficialCash
+      showInOfficialCash:
+        payload.cashMovementShowInOfficialCash === undefined
+          ? payload.showInOfficialCash
+          : payload.cashMovementShowInOfficialCash
     })
   }
 }
@@ -1268,15 +1296,15 @@ export const createSale = async (req: AuthRequest, res: Response) => {
       isAccountBalancePaymentMethod(paymentMethod as string) &&
       officialCashTotal > 0 &&
       !combinedPayment
-    ) {
-      throw new BusinessError(400, 'Payment method ABONO requires full account balance coverage')
-    }
+      ) {
+        throw new BusinessError(400, 'Payment method ABONO requires full account balance coverage')
+      }
 
-    let shouldShowInOfficialCash = combinedPayment
-      ? combinedPayment.cashMovement?.showInOfficialCash !== false
-      : paymentMethod === 'CASH'
-        ? showInOfficialCash !== false
-        : true
+      let shouldShowInOfficialCash = combinedPayment
+        ? combinedPayment.officialCommercialAmount > 0
+        : paymentMethod === 'CASH'
+          ? showInOfficialCash !== false
+          : true
     if (
       !combinedPayment &&
       parsedAccountBalanceUsage &&
@@ -1396,13 +1424,14 @@ export const createSale = async (req: AuthRequest, res: Response) => {
           clientName,
           userId: req.user!.id,
           appointmentId: createdSale.appointmentId,
-          total,
-          cashMovementTotal: officialCashTotal,
-          paymentMethod: salePaymentMethod,
-          cashMovementPaymentMethod: combinedPayment?.cashMovement?.paymentMethod,
-          showInOfficialCash: createdSale.showInOfficialCash,
-          items: normalizedItems
-        })
+            total,
+            cashMovementTotal: officialCashTotal,
+            paymentMethod: salePaymentMethod,
+            cashMovementPaymentMethod: combinedPayment?.cashMovement?.paymentMethod,
+            cashMovementShowInOfficialCash: combinedPayment?.cashMovement?.showInOfficialCash,
+            showInOfficialCash: createdSale.showInOfficialCash,
+            items: normalizedItems
+          })
 
         if (parsedAccountBalanceUsage && createdSale.clientId) {
           await applyAccountBalanceUsage(tx, {
@@ -1429,7 +1458,7 @@ export const createSale = async (req: AuthRequest, res: Response) => {
               amount: collectedEntry.amount,
               paymentMethod: collectedEntry.paymentMethod,
               operationDate: createdSale.date,
-              showInOfficialCash: true,
+              showInOfficialCash: collectedEntry.showInOfficialCash !== false,
               accountBalanceUsageAmount: parsedAccountBalanceUsage?.amount
             })
           }

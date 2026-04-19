@@ -9,6 +9,7 @@ export type TopUpPaymentMethod = (typeof TOP_UP_PAYMENT_METHODS)[number]
 type SaleLike = {
   paymentMethod?: string | null
   paymentBreakdown?: string | null
+  showInOfficialCash?: boolean | null
   total: number | string | Prisma.Decimal
   accountBalanceMovements?: Array<{
     type?: string | null
@@ -34,6 +35,13 @@ type PendingCollectionLike = {
 type StoredPaymentBreakdownLike = {
   paymentMethod?: string | null
   amount?: number | string | Prisma.Decimal | null
+  showInOfficialCash?: boolean | null
+}
+
+type StoredPaymentBreakdownEntry = {
+  method: CommercialPaymentMethod
+  amount: number
+  showInOfficialCash: boolean
 }
 
 const roundCurrency = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100
@@ -44,16 +52,16 @@ const fromCents = (value: number) => roundCurrency(value / 100)
 
 const parseStoredPaymentBreakdown = (paymentBreakdown?: string | null) => {
   if (!paymentBreakdown) {
-    return [] as Array<{ method: CommercialPaymentMethod; amount: number }>
+    return [] as StoredPaymentBreakdownEntry[]
   }
 
   try {
     const parsed = JSON.parse(paymentBreakdown)
     if (!Array.isArray(parsed)) {
-      return [] as Array<{ method: CommercialPaymentMethod; amount: number }>
+      return [] as StoredPaymentBreakdownEntry[]
     }
 
-    return parsed.reduce<Array<{ method: CommercialPaymentMethod; amount: number }>>((entries, item) => {
+    return parsed.reduce<StoredPaymentBreakdownEntry[]>((entries, item) => {
       const row = item as StoredPaymentBreakdownLike
       const method = normalizeCommercialSalePaymentMethod(row.paymentMethod)
       const amount = roundCurrency(toNumber(row.amount))
@@ -62,13 +70,20 @@ const parseStoredPaymentBreakdown = (paymentBreakdown?: string | null) => {
         return entries
       }
 
-      entries.push({ method, amount })
+      entries.push({
+        method,
+        amount,
+        showInOfficialCash: method === 'CASH' ? row.showInOfficialCash !== false : true
+      })
       return entries
     }, [])
   } catch {
-    return [] as Array<{ method: CommercialPaymentMethod; amount: number }>
+    return [] as StoredPaymentBreakdownEntry[]
   }
 }
+
+const isOfficialCommercialEntry = (entry: StoredPaymentBreakdownEntry) =>
+  !(entry.method === 'CASH' && entry.showInOfficialCash === false)
 
 export const createCommercialPaymentBuckets = () =>
   COMMERCIAL_PAYMENT_METHODS.reduce<Record<CommercialPaymentMethod, number>>((acc, method) => {
@@ -114,6 +129,13 @@ export const getSaleAccountBalanceAmount = (sale: SaleLike) =>
   )
 
 export const getSaleCollectedAmount = (sale: SaleLike) => {
+  const breakdown = getSalePaymentBreakdown(sale)
+  if (breakdown.length > 0) {
+    return roundCurrency(
+      breakdown.reduce((sum, entry) => sum + (entry.method === 'ABONO' ? 0 : entry.amount), 0)
+    )
+  }
+
   const total = roundCurrency(toNumber(sale.total))
   const abonoAmount = Math.min(total, Math.max(0, getSaleAccountBalanceAmount(sale)))
   return roundCurrency(Math.max(0, total - abonoAmount))
@@ -123,6 +145,8 @@ export const getSalePaymentBreakdown = (sale: SaleLike) => {
   const storedEntries = parseStoredPaymentBreakdown(sale.paymentBreakdown)
   if (storedEntries.length > 0) {
     return storedEntries
+      .filter((entry) => isOfficialCommercialEntry(entry))
+      .map(({ method, amount }) => ({ method, amount }))
   }
 
   const collectionEntries = Array.isArray(sale.pendingPayment?.collections)
@@ -157,6 +181,28 @@ export const getSalePaymentBreakdown = (sale: SaleLike) => {
   }
 
   return entries
+}
+
+export const getSalePrivateCashAmount = (sale: SaleLike) => {
+  const storedEntries = parseStoredPaymentBreakdown(sale.paymentBreakdown)
+  if (storedEntries.length > 0) {
+    return roundCurrency(
+      storedEntries.reduce((sum, entry) => {
+        if (entry.method !== 'CASH' || entry.showInOfficialCash !== false) {
+          return sum
+        }
+
+        return sum + entry.amount
+      }, 0)
+    )
+  }
+
+  const paymentMethod = normalizeCommercialSalePaymentMethod(sale.paymentMethod)
+  if (paymentMethod === 'CASH' && sale.showInOfficialCash === false) {
+    return roundCurrency(toNumber(sale.total))
+  }
+
+  return 0
 }
 
 export const getTopUpCollectedEntry = (movement: TopUpLike) => {

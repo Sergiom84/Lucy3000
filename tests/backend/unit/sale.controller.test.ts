@@ -406,7 +406,7 @@ describe('sale.controller', () => {
           total: 200,
           paymentMethod: 'OTHER',
           paymentBreakdown:
-            '[{"paymentMethod":"CASH","amount":80},{"paymentMethod":"CARD","amount":120}]',
+            '[{"paymentMethod":"CASH","amount":80,"showInOfficialCash":true},{"paymentMethod":"CARD","amount":120}]',
           client: { firstName: 'Ana', lastName: 'Lopez' },
           items: [],
           pendingPayment: null,
@@ -471,7 +471,7 @@ describe('sale.controller', () => {
         data: expect.objectContaining({
           paymentMethod: 'OTHER',
           paymentBreakdown:
-            '[{"paymentMethod":"CASH","amount":80},{"paymentMethod":"CARD","amount":120}]'
+            '[{"paymentMethod":"CASH","amount":80,"showInOfficialCash":true},{"paymentMethod":"CARD","amount":120}]'
         })
       })
     )
@@ -484,6 +484,102 @@ describe('sale.controller', () => {
         })
       })
     )
+  })
+
+  it('keeps only the cash leg in private cash when a combined sale with cash is saved without ticket', async () => {
+    const tx: any = {
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      sale: {
+        findFirst: vi.fn().mockResolvedValue({ saleNumber: 'V-000099' }),
+        create: vi.fn().mockResolvedValue({
+          id: 'sale-combined-private-1',
+          saleNumber: 'V-000100',
+          clientId: 'client-1',
+          appointmentId: null,
+          total: 200,
+          showInOfficialCash: true,
+          client: { firstName: 'Ana', lastName: 'Lopez' },
+          items: []
+        }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'sale-combined-private-1',
+          saleNumber: 'V-000100',
+          total: 200,
+          paymentMethod: 'OTHER',
+          paymentBreakdown:
+            '[{"paymentMethod":"CARD","amount":120},{"paymentMethod":"CASH","amount":80,"showInOfficialCash":false}]',
+          client: { firstName: 'Ana', lastName: 'Lopez' },
+          items: [],
+          pendingPayment: null,
+          accountBalanceMovements: [],
+          cashMovement: null
+        })
+      },
+      product: {
+        findUnique: vi.fn().mockResolvedValue(undefined),
+        update: vi.fn().mockResolvedValue(undefined)
+      },
+      stockMovement: {
+        create: vi.fn().mockResolvedValue(undefined)
+      },
+      client: {
+        update: vi.fn().mockResolvedValue(undefined)
+      },
+      cashRegister: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'cash-1' })
+      },
+      cashMovement: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue(undefined)
+      }
+    }
+
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx))
+
+    const req = createMockRequest<AuthRequest>({
+      user: { id: 'user-1', email: 'admin@lucy3000.com', role: 'ADMIN' },
+      body: {
+        clientId: 'client-1',
+        items: [
+          {
+            productId: null,
+            serviceId: null,
+            description: 'Limpieza facial',
+            quantity: 1,
+            price: 200
+          }
+        ],
+        discount: 0,
+        tax: 0,
+        paymentMethod: 'CARD',
+        status: 'COMPLETED',
+        showInOfficialCash: true,
+        combinedPayment: {
+          primaryMethod: 'CARD',
+          primaryAmount: 120,
+          secondaryMethod: 'CASH',
+          cashShowInOfficialCash: false
+        },
+        notes: 'pago combinado sin ticket'
+      }
+    })
+
+    const res = createMockResponse()
+
+    await createSale(req, res)
+
+    expect(res.status).toHaveBeenCalledWith(201)
+    expect(tx.sale.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          paymentMethod: 'OTHER',
+          showInOfficialCash: true,
+          paymentBreakdown:
+            '[{"paymentMethod":"CARD","amount":120},{"paymentMethod":"CASH","amount":80,"showInOfficialCash":false}]'
+        })
+      })
+    )
+    expect(tx.cashMovement.create).not.toHaveBeenCalled()
   })
 
   it('creates a pending sale with a combined payment and pending remainder', async () => {

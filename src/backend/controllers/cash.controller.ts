@@ -11,6 +11,7 @@ import {
   getPendingCollectionCollectedAmount,
   getPendingCollectionEntry,
   getSalePaymentBreakdown,
+  getSalePrivateCashAmount,
   getTopUpCollectedEntry
 } from '../utils/payment-breakdown'
 import {
@@ -383,17 +384,26 @@ export const getPrivateNoTicketCashSales = async (req: Request, res: Response) =
       return res.status(403).json({ error: 'PIN incorrecto' })
     }
 
-    const [sales, collections] = await prisma.$transaction([
-      prisma.sale.findMany({
-        where: {
-          status: 'COMPLETED',
-          paymentMethod: 'CASH',
-          showInOfficialCash: false,
-          pendingPayment: null
-        },
-        include: {
-          client: {
-            select: {
+      const [sales, collections] = await prisma.$transaction([
+        prisma.sale.findMany({
+          where: {
+            status: 'COMPLETED',
+            pendingPayment: null,
+            OR: [
+              {
+                paymentMethod: 'CASH',
+                showInOfficialCash: false
+              },
+              {
+                paymentBreakdown: {
+                  not: null
+                }
+              }
+            ]
+          },
+          include: {
+            client: {
+              select: {
               firstName: true,
               lastName: true
             }
@@ -440,28 +450,51 @@ export const getPrivateNoTicketCashSales = async (req: Request, res: Response) =
         },
         orderBy: [{ operationDate: 'desc' }, { createdAt: 'desc' }]
       })
-    ])
+      ])
 
-    const rows = [
-      ...sales.map((sale) => ({
-        id: sale.id,
-        saleNumber: sale.saleNumber,
-        date: sale.date,
-        amount: Number(sale.total),
-        description: sale.notes || null,
-        clientName: getSaleDisplayName(sale),
-        professionalName: formatProfessionalName(sale.professional, sale.user?.name)
-      })),
-      ...collections.map((collection) => ({
-        id: collection.id,
-        saleNumber: collection.sale.saleNumber,
-        date: collection.operationDate,
-        amount: Number(collection.amount),
-        description: 'Cobro pendiente sin ticket',
-        clientName: getSaleDisplayName(collection.sale),
-        professionalName: formatProfessionalName(collection.sale.professional, collection.sale.user?.name)
-      }))
-    ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      const saleRows = sales
+        .map((sale) => {
+          const privateCashAmount = getSalePrivateCashAmount(sale)
+          if (privateCashAmount <= 0) {
+            return null
+          }
+
+          return {
+            id: sale.id,
+            saleNumber: sale.saleNumber,
+            date: sale.date,
+            amount: privateCashAmount,
+            description: sale.notes || null,
+            clientName: getSaleDisplayName(sale),
+            professionalName: formatProfessionalName(sale.professional, sale.user?.name)
+          }
+        })
+        .filter(
+          (
+            row
+          ): row is {
+            id: string
+            saleNumber: string
+            date: Date
+            amount: number
+            description: string | null
+            clientName: string
+            professionalName: string
+          } => Boolean(row)
+        )
+
+      const rows = [
+        ...saleRows,
+        ...collections.map((collection) => ({
+          id: collection.id,
+          saleNumber: collection.sale.saleNumber,
+          date: collection.operationDate,
+          amount: Number(collection.amount),
+          description: 'Cobro pendiente sin ticket',
+          clientName: getSaleDisplayName(collection.sale),
+          professionalName: formatProfessionalName(collection.sale.professional, collection.sale.user?.name)
+        }))
+      ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
     res.json({
       rows,

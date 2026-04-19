@@ -179,6 +179,64 @@ describe('cash.controller', () => {
     )
   })
 
+  it('excludes the private cash leg of a combined sale from official summary totals', async () => {
+    const combinedSale = {
+      total: 200,
+      paymentMethod: 'OTHER',
+      paymentBreakdown:
+        '[{"paymentMethod":"CARD","amount":120},{"paymentMethod":"CASH","amount":80,"showInOfficialCash":false}]',
+      accountBalanceMovements: []
+    }
+
+    prismaMock.cashRegister.findFirst.mockResolvedValue({
+      id: 'cash-1',
+      openingBalance: 50,
+      status: 'OPEN',
+      movements: []
+    })
+    prismaMock.sale.findMany
+      .mockResolvedValueOnce([combinedSale])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([combinedSale])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+    prismaMock.pendingPaymentCollection.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+    prismaMock.accountBalanceMovement.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+
+    const req = createMockRequest()
+    const res = createMockResponse()
+
+    await getCashSummary(req as any, res)
+
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cards: expect.objectContaining({
+          openingBalance: 50,
+          currentBalance: 50,
+          paymentsByMethod: expect.objectContaining({
+            CASH: 0,
+            CARD: 120,
+            BIZUM: 0,
+            ABONO: 0
+          }),
+          income: expect.objectContaining({
+            day: 120
+          }),
+          workPerformed: expect.objectContaining({
+            day: 200
+          })
+        })
+      })
+    )
+  })
+
   it('returns analytics rows splitting mixed sales by payment method', async () => {
     prismaMock.sale.findMany.mockResolvedValue([
       {
@@ -258,6 +316,8 @@ describe('cash.controller', () => {
         saleNumber: 'V-000009',
         date: new Date('2026-03-31T13:57:00.000Z'),
         total: 70,
+        paymentMethod: 'CASH',
+        showInOfficialCash: false,
         notes: null,
         professional: 'CHEMA',
         client: { firstName: 'Sergio', lastName: 'Hernandez Lara' },
@@ -301,6 +361,49 @@ describe('cash.controller', () => {
           })
         ]),
         totalAmount: 100
+      })
+    )
+  })
+
+  it('returns the private cash leg of a combined sale in the private cash section', async () => {
+    prismaMock.sale.findMany.mockResolvedValue([
+      {
+        id: 'sale-combined-9',
+        saleNumber: 'V-000011',
+        date: new Date('2026-03-31T15:00:00.000Z'),
+        total: 140,
+        paymentMethod: 'OTHER',
+        paymentBreakdown:
+          '[{"paymentMethod":"BIZUM","amount":105},{"paymentMethod":"CASH","amount":35,"showInOfficialCash":false}]',
+        notes: 'pago mixto',
+        professional: 'LUCY',
+        client: { firstName: 'Ana', lastName: 'Lopez' },
+        appointment: null,
+        user: { name: 'Administrador' }
+      }
+    ])
+    prismaMock.pendingPaymentCollection.findMany.mockResolvedValue([])
+
+    const req = createMockRequest({
+      query: {
+        pin: '0852'
+      }
+    })
+    const res = createMockResponse()
+
+    await getPrivateNoTicketCashSales(req as any, res)
+
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rows: expect.arrayContaining([
+          expect.objectContaining({
+            saleNumber: 'V-000011',
+            clientName: 'Ana Lopez',
+            professionalName: 'Lucy',
+            amount: 35
+          })
+        ]),
+        totalAmount: 35
       })
     )
   })
