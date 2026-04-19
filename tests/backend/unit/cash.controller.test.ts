@@ -110,6 +110,29 @@ describe('cash.controller', () => {
       ])
       .mockResolvedValueOnce([{ total: 90, paymentMethod: 'CARD', accountBalanceMovements: [] }])
       .mockResolvedValueOnce([{ total: 300, paymentMethod: 'BIZUM', accountBalanceMovements: [] }])
+      .mockResolvedValueOnce([
+        { total: 50, paymentMethod: 'CASH', accountBalanceMovements: [] },
+        { total: 40, paymentMethod: 'CARD', accountBalanceMovements: [] },
+        {
+          total: 80,
+          paymentMethod: 'CARD',
+          accountBalanceMovements: [{ type: 'CONSUMPTION', amount: 30 }]
+        },
+        {
+          total: 48,
+          paymentMethod: 'OTHER',
+          accountBalanceMovements: [{ type: 'CONSUMPTION', amount: 48 }]
+        }
+      ])
+      .mockResolvedValueOnce([{ total: 90, paymentMethod: 'CARD', accountBalanceMovements: [] }])
+      .mockResolvedValueOnce([{ total: 300, paymentMethod: 'BIZUM', accountBalanceMovements: [] }])
+    prismaMock.pendingPaymentCollection.findMany
+      .mockResolvedValueOnce([
+        { amount: 25, paymentMethod: 'CARD', showInOfficialCash: true },
+        { amount: 10, paymentMethod: 'ABONO', showInOfficialCash: false }
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
     prismaMock.accountBalanceMovement.findMany
       .mockResolvedValueOnce([{ type: 'TOP_UP', amount: 20, paymentMethod: 'CASH' }])
       .mockResolvedValueOnce([{ type: 'TOP_UP', amount: 20, paymentMethod: 'CASH' }])
@@ -125,6 +148,7 @@ describe('cash.controller', () => {
       expect.objectContaining({
         where: expect.objectContaining({
           status: 'COMPLETED',
+          pendingPayment: null,
           NOT: {
             paymentMethod: 'CASH',
             showInOfficialCash: false
@@ -140,12 +164,12 @@ describe('cash.controller', () => {
           currentBalance: 175,
           paymentsByMethod: expect.objectContaining({
             CASH: 70,
-            CARD: 90,
+            CARD: 115,
             BIZUM: 0,
-            ABONO: 78
+            ABONO: 88
           }),
           income: expect.objectContaining({
-            day: 160
+            day: 185
           }),
           workPerformed: expect.objectContaining({
             day: 218
@@ -182,6 +206,7 @@ describe('cash.controller', () => {
         ]
       }
     ])
+    prismaMock.pendingPaymentCollection.findMany.mockResolvedValue([])
 
     const req = createMockRequest({
       query: {
@@ -197,6 +222,7 @@ describe('cash.controller', () => {
       expect.objectContaining({
         where: expect.objectContaining({
           status: 'COMPLETED',
+          pendingPayment: null,
           NOT: {
             paymentMethod: 'CASH',
             showInOfficialCash: false
@@ -238,6 +264,20 @@ describe('cash.controller', () => {
         user: { name: 'Administrador' }
       }
     ])
+    prismaMock.pendingPaymentCollection.findMany.mockResolvedValue([
+      {
+        id: 'collection-1',
+        amount: 30,
+        operationDate: new Date('2026-03-31T14:30:00.000Z'),
+        sale: {
+          saleNumber: 'V-000010',
+          professional: 'LUCY',
+          client: { firstName: 'Ana', lastName: 'Lopez' },
+          appointment: null,
+          user: { name: 'Administrador' }
+        }
+      }
+    ])
 
     const req = createMockRequest({
       query: {
@@ -248,14 +288,20 @@ describe('cash.controller', () => {
 
     await getPrivateNoTicketCashSales(req as any, res)
 
-    expect(res.json).toHaveBeenCalledWith({
-      rows: [
-        expect.objectContaining({
-          clientName: 'Sergio Hernandez Lara',
-          professionalName: 'Chema'
-        })
-      ],
-      totalAmount: 70
-    })
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rows: expect.arrayContaining([
+          expect.objectContaining({
+            clientName: 'Sergio Hernandez Lara',
+            professionalName: 'Chema'
+          }),
+          expect.objectContaining({
+            clientName: 'Ana Lopez',
+            professionalName: 'Lucy'
+          })
+        ]),
+        totalAmount: 100
+      })
+    )
   })
 })

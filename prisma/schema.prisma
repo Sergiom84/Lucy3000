@@ -29,6 +29,7 @@ model User {
   // Relaciones
   appointments  Appointment[]
   cashMovements CashMovement[]
+  pendingPaymentCollections PendingPaymentCollection[]
   sales         Sale[]
 
   @@map("users")
@@ -100,6 +101,7 @@ model Client {
   appointments    Appointment[]
   sales           Sale[]
   pendingPayments PendingPayment[]
+  pendingPaymentCollections PendingPaymentCollection[]
   clientHistory   ClientHistory[]
   bonoPacks       BonoPack[]
   accountBalanceMovements AccountBalanceMovement[]
@@ -320,6 +322,7 @@ model Sale {
   tax             Decimal  @default(0)
   total           Decimal
   paymentMethod   String
+  paymentBreakdown String?
   showInOfficialCash Boolean @default(true)
   status          String   @default("COMPLETED")
   notes           String?
@@ -331,6 +334,7 @@ model Sale {
   pendingPayment  PendingPayment?
   cashMovement    CashMovement?
   accountBalanceMovements AccountBalanceMovement[]
+  pendingPaymentCollections PendingPaymentCollection[]
 
   @@map("sales")
 }
@@ -348,9 +352,33 @@ model PendingPayment {
 
   sale   Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
   client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  collections PendingPaymentCollection[]
 
   @@index([clientId, status, createdAt])
   @@map("pending_payments")
+}
+
+model PendingPaymentCollection {
+  id                String   @id @default(uuid())
+  pendingPaymentId  String
+  saleId            String
+  clientId          String
+  userId            String
+  amount            Decimal
+  paymentMethod     String
+  showInOfficialCash Boolean @default(true)
+  operationDate     DateTime @default(now())
+  createdAt         DateTime @default(now())
+
+  pendingPayment PendingPayment @relation(fields: [pendingPaymentId], references: [id], onDelete: Cascade)
+  sale           Sale           @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  client         Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([pendingPaymentId, operationDate])
+  @@index([saleId, operationDate])
+  @@index([clientId, operationDate])
+  @@map("pending_payment_collections")
 }
 
 model SaleItem {

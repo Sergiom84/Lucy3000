@@ -32,6 +32,23 @@ type AccountBalanceUsageInput = {
   notes?: string | null
 }
 
+type CombinedPaymentInput = {
+  primaryMethod: string
+  primaryAmount: number
+  secondaryMethod: string
+}
+
+type StoredPaymentBreakdownEntry = {
+  paymentMethod: string
+  amount: number
+}
+
+type CashMovementEntry = {
+  paymentMethod: string
+  amount: number
+  showInOfficialCash: boolean
+}
+
 type TxClient = Prisma.TransactionClient
 
 type BonoTemplate = {
@@ -55,7 +72,8 @@ type SaleBonoMatch = {
 const SALE_STATUSES: string[] = ['PENDING', 'COMPLETED', 'CANCELLED', 'REFUNDED']
 const PAYMENT_METHODS: string[] = ['CASH', 'CARD', 'BIZUM', 'ABONO', 'OTHER']
 const PENDING_PAYMENT_STATUSES: string[] = ['OPEN', 'SETTLED', 'CANCELLED']
-const SETTLED_PENDING_PAYMENT_METHODS: string[] = ['CASH', 'CARD', 'BIZUM', 'OTHER']
+const SETTLED_PENDING_PAYMENT_METHODS: string[] = ['CASH', 'CARD', 'BIZUM', 'ABONO', 'OTHER']
+const COMBINED_PAYMENT_METHODS: string[] = ['CASH', 'CARD', 'BIZUM', 'ABONO']
 const BONO_TEMPLATES_SETTING_KEY = 'bono_templates_catalog'
 const isAccountBalancePaymentMethod = (paymentMethod: string) =>
   ['ABONO', 'OTHER'].includes(String(paymentMethod || '').toUpperCase())
@@ -77,7 +95,13 @@ const saleInclude = {
       service: true
     }
   },
-  pendingPayment: true,
+  pendingPayment: {
+    include: {
+      collections: {
+        orderBy: [{ operationDate: 'desc' as const }, { createdAt: 'desc' as const }]
+      }
+    }
+  },
   accountBalanceMovements: {
     orderBy: [{ operationDate: 'desc' as const }, { createdAt: 'desc' as const }],
     select: {
@@ -145,6 +169,88 @@ const parseOptionalDate = (value: unknown): Date | null => {
 
   const parsed = new Date(String(value))
   return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+const serializePaymentBreakdown = (entries: StoredPaymentBreakdownEntry[]) => {
+  if (entries.length === 0) {
+    return null
+  }
+
+  return JSON.stringify(
+    entries.map((entry) => ({
+      paymentMethod: entry.paymentMethod,
+      amount: roundCurrency(entry.amount)
+    }))
+  )
+}
+
+const normalizeCombinedPayment = (combinedPayment: unknown, total: number) => {
+  if (!combinedPayment || typeof combinedPayment !== 'object') {
+    return null
+  }
+
+  const row = combinedPayment as CombinedPaymentInput
+  const primaryMethod = String(row.primaryMethod || '').trim().toUpperCase()
+  const secondaryMethod = String(row.secondaryMethod || '').trim().toUpperCase()
+  const primaryAmount = roundCurrency(Number(row.primaryAmount))
+
+  if (!COMBINED_PAYMENT_METHODS.includes(primaryMethod)) {
+    throw new BusinessError(400, 'Invalid combined primary payment method')
+  }
+
+  if (![...COMBINED_PAYMENT_METHODS, 'PENDING'].includes(secondaryMethod)) {
+    throw new BusinessError(400, 'Invalid combined secondary payment method')
+  }
+
+  if (!Number.isFinite(primaryAmount) || primaryAmount <= 0 || primaryAmount >= total) {
+    throw new BusinessError(400, 'Combined primary payment amount must be greater than zero and lower than total')
+  }
+
+  if (secondaryMethod !== 'PENDING' && secondaryMethod === primaryMethod) {
+    throw new BusinessError(400, 'Combined payment methods must be different')
+  }
+
+  const secondaryAmount = roundCurrency(total - primaryAmount)
+  if (secondaryAmount <= 0) {
+    throw new BusinessError(400, 'Combined secondary payment amount must be greater than zero')
+  }
+
+  const collectedEntries: StoredPaymentBreakdownEntry[] = [
+    { paymentMethod: primaryMethod, amount: primaryAmount },
+    ...(secondaryMethod === 'PENDING' ? [] : [{ paymentMethod: secondaryMethod, amount: secondaryAmount }])
+  ]
+
+  const accountBalanceAmount = roundCurrency(
+    collectedEntries.reduce((sum, entry) => sum + (entry.paymentMethod === 'ABONO' ? entry.amount : 0), 0)
+  )
+  const cashEntry = collectedEntries.find((entry) => entry.paymentMethod === 'CASH') || null
+  const commercialCollectedAmount = roundCurrency(
+    collectedEntries.reduce((sum, entry) => sum + (entry.paymentMethod === 'ABONO' ? 0 : entry.amount), 0)
+  )
+
+  return {
+    primaryMethod,
+    secondaryMethod,
+    primaryAmount,
+    secondaryAmount,
+    collectedEntries,
+    accountBalanceAmount,
+    pendingAmount: secondaryMethod === 'PENDING' ? secondaryAmount : 0,
+    cashMovement:
+      cashEntry || commercialCollectedAmount <= 0
+        ? cashEntry
+          ? {
+              paymentMethod: 'CASH',
+              amount: cashEntry.amount,
+              showInOfficialCash: true
+            }
+          : null
+        : {
+            paymentMethod: 'OTHER',
+            amount: commercialCollectedAmount,
+            showInOfficialCash: true
+          }
+  }
 }
 
 const normalizeSearchText = (value: unknown) =>
@@ -317,6 +423,14 @@ const getOpenCashRegister = async (tx: TxClient) =>
     select: { id: true }
   })
 
+const shouldRecordOfficialCashFlow = (paymentMethod: string, showInOfficialCash = true) => {
+  if (String(paymentMethod || '').toUpperCase() !== 'CASH') {
+    return true
+  }
+
+  return showInOfficialCash !== false
+}
+
 const syncAutomaticCashMovement = async (
   tx: TxClient,
   payload: {
@@ -415,8 +529,10 @@ const applySaleEffects = async (
     total: number
     cashMovementTotal?: number
     paymentMethod: string
+    cashMovementPaymentMethod?: string
     showInOfficialCash: boolean
     items: SaleItemInput[]
+    skipAutomaticCashMovement?: boolean
   }
 ) => {
   for (const item of payload.items) {
@@ -476,16 +592,18 @@ const applySaleEffects = async (
     })
   }
 
-  await syncAutomaticCashMovement(tx, {
-    saleId: payload.saleId,
-    saleNumber: payload.saleNumber,
-    clientName: payload.clientName,
-    userId: payload.userId,
-    total: payload.total,
-    cashAmount: payload.cashMovementTotal,
-    paymentMethod: payload.paymentMethod,
-    showInOfficialCash: payload.showInOfficialCash
-  })
+  if (!payload.skipAutomaticCashMovement) {
+    await syncAutomaticCashMovement(tx, {
+      saleId: payload.saleId,
+      saleNumber: payload.saleNumber,
+      clientName: payload.clientName,
+      userId: payload.userId,
+      total: payload.total,
+      cashAmount: payload.cashMovementTotal,
+      paymentMethod: payload.cashMovementPaymentMethod || payload.paymentMethod,
+      showInOfficialCash: payload.showInOfficialCash
+    })
+  }
 }
 
 const applyAccountBalanceUsage = async (
@@ -534,6 +652,48 @@ const applyAccountBalanceUsage = async (
       amount: payload.usage.amount,
       balanceAfter: nextBalance,
       notes: payload.usage.notes || null
+    }
+  })
+}
+
+const createStandaloneCashMovement = async (
+  tx: TxClient,
+  payload: {
+    saleNumber: string
+    clientName: string
+    userId: string
+    amount: number
+    paymentMethod: string
+    showInOfficialCash?: boolean
+    date: Date
+  }
+) => {
+  if (!shouldRecordOfficialCashFlow(payload.paymentMethod, payload.showInOfficialCash)) {
+    return
+  }
+
+  const movementAmount = roundCurrency(Number(payload.amount) || 0)
+  if (movementAmount <= 0) return
+
+  const openCashRegister = await getOpenCashRegister(tx)
+  if (!openCashRegister) return
+
+  const description = payload.clientName
+    ? `Cobro pendiente ${payload.saleNumber} · ${payload.clientName}`
+    : `Cobro pendiente ${payload.saleNumber}`
+
+  await tx.cashMovement.create({
+    data: {
+      cashRegisterId: openCashRegister.id,
+      userId: payload.userId,
+      saleId: null,
+      type: 'INCOME',
+      paymentMethod: payload.paymentMethod,
+      amount: movementAmount,
+      category: 'Ventas',
+      description,
+      reference: payload.saleNumber,
+      date: payload.date
     }
   })
 }
@@ -590,6 +750,7 @@ const resolvePendingPayment = async (
   await tx.pendingPayment.update({
     where: { saleId: payload.saleId },
     data: {
+      amount: payload.resolutionStatus === 'SETTLED' ? 0 : pendingPayment.amount,
       status: payload.resolutionStatus,
       settledAt: payload.resolutionStatus === 'SETTLED' ? payload.settledAt || new Date() : null,
       settledPaymentMethod:
@@ -647,6 +808,216 @@ const reopenPendingPayment = async (
   await adjustClientPendingAmount(tx, {
     clientId: payload.clientId,
     delta: payload.amount
+  })
+}
+
+const collectPendingPayment = async (
+  tx: TxClient,
+  payload: {
+    saleId: string
+    userId: string
+    amount: number
+    paymentMethod: string
+    operationDate: Date
+    showInOfficialCash?: boolean
+    accountBalanceUsageAmount?: number
+  }
+) => {
+  const sale = await tx.sale.findUnique({
+    where: { id: payload.saleId },
+    include: {
+      client: true,
+      appointment: {
+        select: {
+          guestName: true
+        }
+      },
+      items: true,
+      pendingPayment: {
+        include: {
+          collections: {
+            select: { id: true }
+          }
+        }
+      }
+    }
+  })
+
+  if (!sale) {
+    throw new BusinessError(404, 'Sale not found')
+  }
+
+  if (sale.status !== 'PENDING') {
+    throw new BusinessError(400, 'Only pending sales can register pending collections')
+  }
+
+  if (!sale.pendingPayment || sale.pendingPayment.status !== 'OPEN') {
+    throw new BusinessError(400, 'This sale has no open pending payment')
+  }
+
+  const pendingOpenAmount = roundCurrency(Number(sale.pendingPayment.amount || 0))
+  const collectionAmount = roundCurrency(Number(payload.amount || 0))
+  const accountBalanceAmount = roundCurrency(Number(payload.accountBalanceUsageAmount || 0))
+  const normalizedPaymentMethod = String(payload.paymentMethod || '').trim().toUpperCase()
+
+  if (!Number.isFinite(collectionAmount) || collectionAmount <= 0) {
+    throw new BusinessError(400, 'Pending collection amount must be greater than zero')
+  }
+
+  if (collectionAmount > pendingOpenAmount) {
+    throw new BusinessError(400, 'Pending collection amount cannot be greater than the open pending amount')
+  }
+
+  if (!Number.isFinite(accountBalanceAmount) || accountBalanceAmount < 0) {
+    throw new BusinessError(400, 'Account balance usage amount is invalid')
+  }
+
+  if (accountBalanceAmount > collectionAmount) {
+    throw new BusinessError(400, 'Account balance usage amount cannot be greater than the pending collection amount')
+  }
+
+  const commercialAmount = roundCurrency(collectionAmount - accountBalanceAmount)
+
+  if (normalizedPaymentMethod === 'ABONO' && commercialAmount > 0) {
+    throw new BusinessError(400, 'Payment method ABONO requires full account balance coverage')
+  }
+
+  if (accountBalanceAmount > 0 && !sale.clientId) {
+    throw new BusinessError(400, 'Account balance usage requires a client')
+  }
+
+  const normalizedItems = normalizeItemsFromSale(sale.items)
+  const shouldShowInOfficialCash =
+    normalizedPaymentMethod === 'CASH' ? payload.showInOfficialCash !== false : true
+
+  if (accountBalanceAmount > 0 && sale.clientId) {
+    await applyAccountBalanceUsage(tx, {
+      clientId: sale.clientId,
+      saleId: sale.id,
+      saleNumber: sale.saleNumber,
+      usage: {
+        operationDate: payload.operationDate,
+        referenceItem: buildAccountBalanceReference(normalizedItems),
+        amount: accountBalanceAmount,
+        notes: null
+      }
+    })
+
+    await tx.pendingPaymentCollection.create({
+      data: {
+        pendingPaymentId: sale.pendingPayment.id,
+        saleId: sale.id,
+        clientId: sale.pendingPayment.clientId,
+        userId: payload.userId,
+        amount: accountBalanceAmount,
+        paymentMethod: 'ABONO',
+        showInOfficialCash: false,
+        operationDate: payload.operationDate
+      }
+    })
+  }
+
+  if (commercialAmount > 0) {
+    await tx.pendingPaymentCollection.create({
+      data: {
+        pendingPaymentId: sale.pendingPayment.id,
+        saleId: sale.id,
+        clientId: sale.pendingPayment.clientId,
+        userId: payload.userId,
+        amount: commercialAmount,
+        paymentMethod: normalizedPaymentMethod,
+        showInOfficialCash: shouldShowInOfficialCash,
+        operationDate: payload.operationDate
+      }
+    })
+
+    await createStandaloneCashMovement(tx, {
+      saleNumber: sale.saleNumber,
+      clientName: getSaleDisplayName(sale, ''),
+      userId: payload.userId,
+      amount: commercialAmount,
+      paymentMethod: normalizedPaymentMethod,
+      showInOfficialCash: shouldShowInOfficialCash,
+      date: payload.operationDate
+    })
+  }
+
+  const remainingAmount = roundCurrency(Math.max(0, pendingOpenAmount - collectionAmount))
+
+  await adjustClientPendingAmount(tx, {
+    clientId: sale.pendingPayment.clientId,
+    delta: -collectionAmount,
+    enableAlertOnPositive: false
+  })
+
+  if (remainingAmount <= 0) {
+    const settledPaymentMethod = commercialAmount > 0 ? normalizedPaymentMethod : 'ABONO'
+    const finalPaymentMethod = commercialAmount > 0 ? normalizedPaymentMethod : 'ABONO'
+    const finalShowInOfficialCash =
+      finalPaymentMethod === 'CASH' ? shouldShowInOfficialCash : finalPaymentMethod !== 'ABONO'
+    const bonoTemplates = await readBonoTemplates()
+    const bonoMatches = getBonoMatchesForSale(normalizedItems, bonoTemplates)
+
+    await tx.pendingPayment.update({
+      where: { id: sale.pendingPayment.id },
+      data: {
+        amount: 0,
+        status: 'SETTLED',
+        settledAt: payload.operationDate,
+        settledPaymentMethod
+      }
+    })
+
+    const persistedSale = await tx.sale.update({
+      where: { id: sale.id },
+      data: {
+        status: 'COMPLETED',
+        paymentMethod: finalPaymentMethod,
+        showInOfficialCash: finalShowInOfficialCash
+      },
+      include: {
+        client: true,
+        appointment: {
+          select: {
+            guestName: true
+          }
+        }
+      }
+    })
+
+    await createBonoPacksForSale(tx, {
+      saleId: sale.id,
+      saleNumber: sale.saleNumber,
+      clientId: sale.clientId,
+      notes: sale.notes,
+      matches: bonoMatches
+    })
+
+    await applySaleEffects(tx, {
+      saleId: sale.id,
+      saleNumber: sale.saleNumber,
+      clientId: sale.clientId,
+      clientName: getSaleDisplayName(persistedSale, ''),
+      userId: sale.userId,
+      appointmentId: sale.appointmentId,
+      total: Number(sale.total),
+      paymentMethod: finalPaymentMethod,
+      showInOfficialCash: finalShowInOfficialCash,
+      items: normalizedItems,
+      skipAutomaticCashMovement: true
+    })
+  } else {
+    await tx.pendingPayment.update({
+      where: { id: sale.pendingPayment.id },
+      data: {
+        amount: remainingAmount
+      }
+    })
+  }
+
+  return tx.sale.findUnique({
+    where: { id: sale.id },
+    include: saleInclude
   })
 }
 
@@ -777,19 +1148,20 @@ export const getSaleById = async (req: Request, res: Response) => {
 
 export const createSale = async (req: AuthRequest, res: Response) => {
   try {
-      const {
-        clientId,
-        appointmentId,
-        items,
-        discount,
-        tax,
-        paymentMethod,
-        status,
-        professional,
-        notes,
-        showInOfficialCash,
-        accountBalanceUsage
-      } = req.body
+    const {
+      clientId,
+      appointmentId,
+      items,
+      discount,
+      tax,
+      paymentMethod,
+      status,
+      professional,
+      notes,
+      showInOfficialCash,
+      accountBalanceUsage,
+      combinedPayment: rawCombinedPayment
+    } = req.body
 
     if (!req.user?.id) {
       throw new BusinessError(401, 'Unauthorized')
@@ -799,17 +1171,23 @@ export const createSale = async (req: AuthRequest, res: Response) => {
       throw new BusinessError(400, 'Invalid payment method')
     }
 
-      const normalizedItems = ensureValidSaleItems(items)
-      const discountValue = Number(discount) || 0
-      const taxValue = Number(tax) || 0
-      const { subtotal, total } = calculateTotals(normalizedItems, discountValue, taxValue)
-      const bonoTemplates = await readBonoTemplates()
-      const bonoMatches = getBonoMatchesForSale(normalizedItems, bonoTemplates)
-      let parsedAccountBalanceUsage: AccountBalanceUsageInput | null = accountBalanceUsage
-        ? {
-            operationDate: new Date(accountBalanceUsage.operationDate),
-            referenceItem:
-              typeof accountBalanceUsage.referenceItem === 'string'
+    const normalizedItems = ensureValidSaleItems(items)
+    const discountValue = Number(discount) || 0
+    const taxValue = Number(tax) || 0
+    const { subtotal, total } = calculateTotals(normalizedItems, discountValue, taxValue)
+    const bonoTemplates = await readBonoTemplates()
+    const bonoMatches = getBonoMatchesForSale(normalizedItems, bonoTemplates)
+    const combinedPayment = normalizeCombinedPayment(rawCombinedPayment, total)
+
+    if (combinedPayment && accountBalanceUsage) {
+      throw new BusinessError(400, 'Account balance usage cannot be combined with combined payment payload')
+    }
+
+    let parsedAccountBalanceUsage: AccountBalanceUsageInput | null = accountBalanceUsage
+      ? {
+          operationDate: new Date(accountBalanceUsage.operationDate),
+          referenceItem:
+            typeof accountBalanceUsage.referenceItem === 'string'
               ? accountBalanceUsage.referenceItem.trim()
               : '',
           amount: roundCurrency(Number(accountBalanceUsage.amount)),
@@ -817,7 +1195,16 @@ export const createSale = async (req: AuthRequest, res: Response) => {
         }
       : null
 
-    if (isAccountBalancePaymentMethod(paymentMethod as string) && !parsedAccountBalanceUsage) {
+    if (combinedPayment && combinedPayment.accountBalanceAmount > 0) {
+      parsedAccountBalanceUsage = {
+        operationDate: new Date(),
+        referenceItem: buildAccountBalanceReference(normalizedItems),
+        amount: combinedPayment.accountBalanceAmount,
+        notes: null
+      }
+    }
+
+    if (isAccountBalancePaymentMethod(paymentMethod as string) && !parsedAccountBalanceUsage && !combinedPayment) {
       parsedAccountBalanceUsage = {
         operationDate: new Date(),
         referenceItem: buildAccountBalanceReference(normalizedItems),
@@ -844,171 +1231,216 @@ export const createSale = async (req: AuthRequest, res: Response) => {
       throw new BusinessError(400, 'Account balance usage amount must be greater than zero')
     }
 
-      if (parsedAccountBalanceUsage && parsedAccountBalanceUsage.amount > total) {
-        throw new BusinessError(400, 'Account balance usage amount cannot be greater than sale total')
-      }
+    if (parsedAccountBalanceUsage && parsedAccountBalanceUsage.amount > total) {
+      throw new BusinessError(400, 'Account balance usage amount cannot be greater than sale total')
+    }
 
-      const nextStatus = status || 'COMPLETED'
-      if (!['PENDING', 'COMPLETED'].includes(nextStatus)) {
-        throw new BusinessError(400, 'Invalid sale status')
-      }
+    let nextStatus = status || 'COMPLETED'
+    if (combinedPayment) {
+      nextStatus = combinedPayment.pendingAmount > 0 ? 'PENDING' : 'COMPLETED'
+    }
 
-      if (nextStatus !== 'COMPLETED' && parsedAccountBalanceUsage) {
-        throw new BusinessError(400, 'Account balance usage requires a completed sale')
-      }
+    if (!['PENDING', 'COMPLETED'].includes(nextStatus)) {
+      throw new BusinessError(400, 'Invalid sale status')
+    }
 
-      const officialCashTotal = parsedAccountBalanceUsage
+    if (nextStatus !== 'COMPLETED' && parsedAccountBalanceUsage && !combinedPayment) {
+      throw new BusinessError(400, 'Account balance usage requires a completed sale')
+    }
+
+    const salePaymentMethod = combinedPayment
+      ? combinedPayment.pendingAmount > 0
+        ? combinedPayment.primaryMethod
+        : 'OTHER'
+      : String(paymentMethod || '').toUpperCase()
+
+    const paymentBreakdown = combinedPayment && combinedPayment.pendingAmount <= 0
+      ? serializePaymentBreakdown(combinedPayment.collectedEntries)
+      : null
+    const officialCashTotal = combinedPayment
+      ? roundCurrency(combinedPayment.cashMovement?.amount || 0)
+      : parsedAccountBalanceUsage
         ? roundCurrency(total - parsedAccountBalanceUsage.amount)
         : roundCurrency(total)
 
-    if (parsedAccountBalanceUsage && isAccountBalancePaymentMethod(paymentMethod as string) && officialCashTotal > 0) {
+    if (
+      parsedAccountBalanceUsage &&
+      isAccountBalancePaymentMethod(paymentMethod as string) &&
+      officialCashTotal > 0 &&
+      !combinedPayment
+    ) {
       throw new BusinessError(400, 'Payment method ABONO requires full account balance coverage')
     }
 
-    let shouldShowInOfficialCash = paymentMethod === 'CASH' ? showInOfficialCash !== false : true
-    if (parsedAccountBalanceUsage && (isAccountBalancePaymentMethod(paymentMethod as string) || officialCashTotal <= 0)) {
+    let shouldShowInOfficialCash = combinedPayment
+      ? combinedPayment.cashMovement?.showInOfficialCash !== false
+      : paymentMethod === 'CASH'
+        ? showInOfficialCash !== false
+        : true
+    if (
+      !combinedPayment &&
+      parsedAccountBalanceUsage &&
+      (isAccountBalancePaymentMethod(paymentMethod as string) || officialCashTotal <= 0)
+    ) {
       shouldShowInOfficialCash = false
     }
 
-      const sale = await prisma.$transaction(async (tx) => {
-        let resolvedClientId = clientId || null
-        let appointmentClientName = ''
+    const sale = await prisma.$transaction(async (tx) => {
+      let resolvedClientId = clientId || null
+      let appointmentClientName = ''
 
-        if (appointmentId) {
-          const appointment = await tx.appointment.findUnique({
-            where: { id: appointmentId },
-            select: {
-              id: true,
-              clientId: true,
-              guestName: true,
-              client: {
-                select: {
-                  firstName: true,
-                  lastName: true
-                }
-              },
-              sale: {
-                select: {
-                  id: true,
-                  status: true
-                }
+      if (appointmentId) {
+        const appointment = await tx.appointment.findUnique({
+          where: { id: appointmentId },
+          select: {
+            id: true,
+            clientId: true,
+            guestName: true,
+            client: {
+              select: {
+                firstName: true,
+                lastName: true
+              }
+            },
+            sale: {
+              select: {
+                id: true,
+                status: true
               }
             }
-          })
-
-          if (!appointment) {
-            throw new BusinessError(404, 'Appointment not found')
-          }
-
-          if (appointment.sale?.status === 'COMPLETED') {
-            throw new BusinessError(400, 'This appointment already has a completed sale')
-          }
-
-          if (resolvedClientId && resolvedClientId !== appointment.clientId) {
-            throw new BusinessError(400, 'Appointment and sale client must match')
-          }
-
-          resolvedClientId = appointment.clientId
-          appointmentClientName = getAppointmentDisplayName(appointment, 'Cliente general')
-        }
-
-        if (parsedAccountBalanceUsage && !resolvedClientId) {
-          throw new BusinessError(400, 'Account balance usage requires a client')
-        }
-
-        if (bonoMatches.length > 0 && !resolvedClientId) {
-          throw new BusinessError(400, 'Sales with bonos require a client')
-        }
-
-        if (nextStatus === 'PENDING' && !resolvedClientId) {
-          throw new BusinessError(400, 'Pending sales require a client')
-        }
-
-        const saleNumber = await buildSaleNumber(tx)
-
-        const createdSale = await tx.sale.create({
-          data: {
-            clientId: resolvedClientId,
-            appointmentId: appointmentId || null,
-            userId: req.user!.id,
-            professional: professional || 'LUCY',
-            saleNumber,
-            subtotal,
-            discount: discountValue,
-            tax: taxValue,
-            total,
-            paymentMethod,
-            showInOfficialCash: shouldShowInOfficialCash,
-            status: nextStatus,
-            notes: notes || null,
-            items: {
-              create: normalizedItems.map((item) => ({
-                productId: item.productId || null,
-                serviceId: item.serviceId || null,
-                description: item.description,
-                quantity: item.quantity,
-                price: item.price,
-                subtotal: item.quantity * item.price
-              }))
-            }
-          },
-          include: {
-            client: true,
-            items: true
           }
         })
 
-        if (nextStatus === 'COMPLETED') {
-          await createBonoPacksForSale(tx, {
-            saleId: createdSale.id,
-            saleNumber,
-            clientId: createdSale.clientId,
-            notes: notes || null,
-            matches: bonoMatches
-          })
+        if (!appointment) {
+          throw new BusinessError(404, 'Appointment not found')
         }
 
-        const clientName = createdSale.client
-          ? `${createdSale.client.firstName} ${createdSale.client.lastName}`.trim()
-          : appointmentClientName
+        if (appointment.sale?.status === 'COMPLETED') {
+          throw new BusinessError(400, 'This appointment already has a completed sale')
+        }
 
-        if (nextStatus === 'COMPLETED') {
-          await applySaleEffects(tx, {
+        if (resolvedClientId && resolvedClientId !== appointment.clientId) {
+          throw new BusinessError(400, 'Appointment and sale client must match')
+        }
+
+        resolvedClientId = appointment.clientId
+        appointmentClientName = getAppointmentDisplayName(appointment, 'Cliente general')
+      }
+
+      if (parsedAccountBalanceUsage && !resolvedClientId) {
+        throw new BusinessError(400, 'Account balance usage requires a client')
+      }
+
+      if (bonoMatches.length > 0 && !resolvedClientId) {
+        throw new BusinessError(400, 'Sales with bonos require a client')
+      }
+
+      if (nextStatus === 'PENDING' && !resolvedClientId) {
+        throw new BusinessError(400, 'Pending sales require a client')
+      }
+
+      const saleNumber = await buildSaleNumber(tx)
+
+      const createdSale = await tx.sale.create({
+        data: {
+          clientId: resolvedClientId,
+          appointmentId: appointmentId || null,
+          userId: req.user!.id,
+          professional: professional || 'LUCY',
+          saleNumber,
+          subtotal,
+          discount: discountValue,
+          tax: taxValue,
+          total,
+          paymentMethod: salePaymentMethod,
+          paymentBreakdown,
+          showInOfficialCash: shouldShowInOfficialCash,
+          status: nextStatus,
+          notes: notes || null,
+          items: {
+            create: normalizedItems.map((item) => ({
+              productId: item.productId || null,
+              serviceId: item.serviceId || null,
+              description: item.description,
+              quantity: item.quantity,
+              price: item.price,
+              subtotal: item.quantity * item.price
+            }))
+          }
+        },
+        include: {
+          client: true,
+          items: true
+        }
+      })
+
+      if (nextStatus === 'COMPLETED') {
+        await createBonoPacksForSale(tx, {
+          saleId: createdSale.id,
+          saleNumber,
+          clientId: createdSale.clientId,
+          notes: notes || null,
+          matches: bonoMatches
+        })
+      }
+
+      const clientName = createdSale.client
+        ? `${createdSale.client.firstName} ${createdSale.client.lastName}`.trim()
+        : appointmentClientName
+
+      if (nextStatus === 'COMPLETED') {
+        await applySaleEffects(tx, {
+          saleId: createdSale.id,
+          saleNumber,
+          clientId: createdSale.clientId,
+          clientName,
+          userId: req.user!.id,
+          appointmentId: createdSale.appointmentId,
+          total,
+          cashMovementTotal: officialCashTotal,
+          paymentMethod: salePaymentMethod,
+          cashMovementPaymentMethod: combinedPayment?.cashMovement?.paymentMethod,
+          showInOfficialCash: createdSale.showInOfficialCash,
+          items: normalizedItems
+        })
+
+        if (parsedAccountBalanceUsage && createdSale.clientId) {
+          await applyAccountBalanceUsage(tx, {
+            clientId: createdSale.clientId,
             saleId: createdSale.id,
             saleNumber,
-            clientId: createdSale.clientId,
-            clientName,
-            userId: req.user!.id,
-            appointmentId: createdSale.appointmentId,
-            total,
-            cashMovementTotal: officialCashTotal,
-            paymentMethod,
-            showInOfficialCash: createdSale.showInOfficialCash,
-            items: normalizedItems
+            usage: parsedAccountBalanceUsage
           })
+        }
+      } else if (nextStatus === 'PENDING') {
+        await createPendingPayment(tx, {
+          saleId: createdSale.id,
+          clientId: createdSale.clientId,
+          amount: total,
+          createdAt: createdSale.date
+        })
 
-          if (parsedAccountBalanceUsage && createdSale.clientId) {
-            await applyAccountBalanceUsage(tx, {
-              clientId: createdSale.clientId,
+        if (combinedPayment) {
+          const collectedEntry = combinedPayment.collectedEntries[0]
+          if (collectedEntry) {
+            await collectPendingPayment(tx, {
               saleId: createdSale.id,
-              saleNumber,
-              usage: parsedAccountBalanceUsage
+              userId: req.user!.id,
+              amount: collectedEntry.amount,
+              paymentMethod: collectedEntry.paymentMethod,
+              operationDate: createdSale.date,
+              showInOfficialCash: true,
+              accountBalanceUsageAmount: parsedAccountBalanceUsage?.amount
             })
           }
-        } else if (nextStatus === 'PENDING') {
-          await createPendingPayment(tx, {
-            saleId: createdSale.id,
-            clientId: createdSale.clientId,
-            amount: total,
-            createdAt: createdSale.date
-          })
         }
+      }
 
-        return tx.sale.findUnique({
-          where: { id: createdSale.id },
-          include: saleInclude
-        })
+      return tx.sale.findUnique({
+        where: { id: createdSale.id },
+        include: saleInclude
       })
+    })
 
     res.status(201).json(sale)
   } catch (error) {
@@ -1064,7 +1496,13 @@ export const updateSale = async (req: Request, res: Response) => {
               guestName: true
             }
           },
-          items: true
+          items: true,
+          pendingPayment: {
+            select: {
+              amount: true,
+              status: true
+            }
+          }
         }
       })
 
@@ -1087,6 +1525,17 @@ export const updateSale = async (req: Request, res: Response) => {
       )
 
       if (sale.status === 'PENDING' && nextStatus === 'COMPLETED') {
+        if (
+          sale.pendingPayment &&
+          sale.pendingPayment.status === 'OPEN' &&
+          Number(sale.pendingPayment.amount || 0) < Number(sale.total || 0)
+        ) {
+          throw new BusinessError(
+            400,
+            'Use the pending collection flow to complete sales with partial pending collections'
+          )
+        }
+
         const requestedPaymentMethod = String(paymentMethod || sale.paymentMethod || '').toUpperCase()
         nextPaymentMethod = SETTLED_PENDING_PAYMENT_METHODS.includes(requestedPaymentMethod)
           ? requestedPaymentMethod
@@ -1211,6 +1660,45 @@ export const updateSale = async (req: Request, res: Response) => {
   } catch (error) {
     const { statusCode, message } = toHttpError(error)
     console.error('Update sale error:', error)
+    res.status(statusCode).json({ error: message })
+  }
+}
+
+export const collectPendingSale = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params
+    const { amount, paymentMethod, operationDate, showInOfficialCash, accountBalanceUsageAmount } = req.body
+
+    if (!req.user?.id) {
+      throw new BusinessError(401, 'Unauthorized')
+    }
+
+    if (!PAYMENT_METHODS.includes(String(paymentMethod || '').toUpperCase())) {
+      throw new BusinessError(400, 'Invalid payment method')
+    }
+
+    const parsedOperationDate = parseOptionalDate(operationDate)
+    if (!parsedOperationDate) {
+      throw new BusinessError(400, 'Invalid pending collection date')
+    }
+
+    const updatedSale = await prisma.$transaction((tx) =>
+      collectPendingPayment(tx, {
+        saleId: id,
+        userId: req.user!.id,
+        amount: roundCurrency(Number(amount)),
+        paymentMethod: String(paymentMethod || '').toUpperCase(),
+        operationDate: parsedOperationDate,
+        showInOfficialCash: showInOfficialCash !== false,
+        accountBalanceUsageAmount:
+          accountBalanceUsageAmount === undefined ? undefined : roundCurrency(Number(accountBalanceUsageAmount))
+      })
+    )
+
+    res.json(updatedSale)
+  } catch (error) {
+    const { statusCode, message } = toHttpError(error)
+    console.error('Collect pending sale error:', error)
     res.status(statusCode).json({ error: message })
   }
 }

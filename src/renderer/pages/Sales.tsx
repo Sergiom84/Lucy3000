@@ -109,6 +109,7 @@ interface Sale {
   tax: number
   total: number
   paymentMethod: string
+  paymentBreakdown?: string | null
   status: string
   items: any[]
   pendingPayment?: {
@@ -118,6 +119,14 @@ interface Sale {
     createdAt: string
     settledAt?: string | null
     settledPaymentMethod?: string | null
+    collections?: Array<{
+      id: string
+      amount: number | string
+      paymentMethod: string
+      showInOfficialCash?: boolean
+      operationDate: string
+      createdAt: string
+    }>
   } | null
   accountBalanceMovements?: Array<{
     id: string
@@ -148,6 +157,17 @@ interface AccountBalanceHistoryRow {
     id: string
     saleNumber: string
     paymentMethod: string
+    paymentBreakdown?: string | null
+    status?: string
+    pendingPayment?: {
+      collections?: Array<{
+        amount: number | string
+        paymentMethod: string
+        showInOfficialCash?: boolean
+        operationDate?: string
+        createdAt?: string
+      }>
+    } | null
   } | null
 }
 
@@ -158,10 +178,16 @@ type CatalogItem =
 type CatalogType = 'all' | 'products' | 'services' | 'bonos'
 type SalesView = 'pos' | 'history' | 'account-balance'
 type SalePaymentMethod = 'CASH' | 'CARD' | 'BIZUM' | 'ABONO'
+type CombinedSecondaryPaymentMethod = SalePaymentMethod | 'PENDING'
 type SaleMode = 'NORMAL' | 'PENDING' | 'ON_HOLD' | 'QUOTE'
 type PendingSaleExecutionOptions = {
   paymentMethodOverride?: SalePaymentMethod
   accountBalanceUsageAmount?: number
+}
+type CombinedPaymentDraft = {
+  primaryMethod: SalePaymentMethod
+  primaryAmount: string
+  secondaryMethod: CombinedSecondaryPaymentMethod
 }
 
 const formatFamilyLabel = (value: string): string =>
@@ -194,6 +220,7 @@ export default function Sales() {
   const [selectedClient, setSelectedClient] = useState<Client | null>(null)
   const [discount, setDiscount] = useState(0)
   const [paymentMethod, setPaymentMethod] = useState<SalePaymentMethod>('CASH')
+  const [paymentMode, setPaymentMode] = useState<'SINGLE' | 'COMBINED'>('SINGLE')
   const [professional, setProfessional] = useState('')
   const [professionals, setProfessionals] = useState<string[]>([])
   const [saleMode, setSaleMode] = useState<SaleMode>('NORMAL')
@@ -228,10 +255,16 @@ export default function Sales() {
   const [dateFilter, setDateFilter] = useState({ startDate: '', endDate: '' })
   const [accountBalanceConfirmModalOpen, setAccountBalanceConfirmModalOpen] = useState(false)
   const [cashTicketDecisionModalOpen, setCashTicketDecisionModalOpen] = useState(false)
+  const [combinedPaymentModalOpen, setCombinedPaymentModalOpen] = useState(false)
   const [accountBalanceRemainderModalOpen, setAccountBalanceRemainderModalOpen] = useState(false)
   const [pendingSaleExecution, setPendingSaleExecution] = useState<PendingSaleExecutionOptions | null>(null)
   const [pendingAccountBalanceUsage, setPendingAccountBalanceUsage] = useState(0)
   const [pendingRemainderAmount, setPendingRemainderAmount] = useState(0)
+  const [combinedPaymentDraft, setCombinedPaymentDraft] = useState<CombinedPaymentDraft>({
+    primaryMethod: 'CASH',
+    primaryAmount: '',
+    secondaryMethod: 'CARD'
+  })
 
   const [loading, setLoading] = useState(false)
   const prefillApplied = useRef({ client: false, service: false, sale: false })
@@ -438,11 +471,85 @@ export default function Sales() {
     }
   }
 
+  const parseCombinedPrimaryAmount = () => {
+    const parsed = Number.parseFloat(combinedPaymentDraft.primaryAmount.replace(',', '.'))
+    return Number.isFinite(parsed) ? roundCurrency(parsed) : 0
+  }
+
+  const getCombinedSecondaryAmount = () => {
+    const { total } = calculateTotals()
+    return roundCurrency(Math.max(0, total - parseCombinedPrimaryAmount()))
+  }
+
+  const resetCombinedPaymentDraft = () => {
+    setCombinedPaymentDraft({
+      primaryMethod: 'CASH',
+      primaryAmount: '',
+      secondaryMethod: 'CARD'
+    })
+  }
+
+  const resolveCombinedPayment = () => {
+    const { total } = calculateTotals()
+    const primaryAmount = parseCombinedPrimaryAmount()
+    const secondaryAmount = roundCurrency(total - primaryAmount)
+
+    if (total <= 0) {
+      toast.error('El importe de la venta debe ser mayor que cero')
+      return null
+    }
+
+    if (primaryAmount <= 0 || primaryAmount >= total) {
+      toast.error('La primera cuantía debe ser mayor que cero y menor que el total')
+      return null
+    }
+
+    if (secondaryAmount <= 0) {
+      toast.error('La segunda cuantía debe ser mayor que cero')
+      return null
+    }
+
+    if (
+      combinedPaymentDraft.secondaryMethod !== 'PENDING' &&
+      combinedPaymentDraft.primaryMethod === combinedPaymentDraft.secondaryMethod
+    ) {
+      toast.error('Selecciona dos formas distintas para el pago combinado')
+      return null
+    }
+
+    const accountBalanceAmount =
+      (combinedPaymentDraft.primaryMethod === 'ABONO' ? primaryAmount : 0) +
+      (combinedPaymentDraft.secondaryMethod === 'ABONO' ? secondaryAmount : 0)
+
+    if (accountBalanceAmount > 0 && !selectedClient?.id) {
+      toast.error('Selecciona un cliente para usar abono')
+      return null
+    }
+
+    if (accountBalanceAmount > availableAccountBalance) {
+      toast.error('El cliente no tiene saldo suficiente en su abono')
+      return null
+    }
+
+    return {
+      primaryMethod: combinedPaymentDraft.primaryMethod,
+      primaryAmount,
+      secondaryMethod: combinedPaymentDraft.secondaryMethod as CombinedSecondaryPaymentMethod,
+      secondaryAmount
+    }
+  }
+
   const completeSaleRequest = async (options: {
     printTicketAfterSale: boolean
     showInOfficialCash: boolean
     paymentMethodOverride?: SalePaymentMethod
     accountBalanceUsageAmount?: number
+    combinedPayment?: {
+      primaryMethod: SalePaymentMethod
+      primaryAmount: number
+      secondaryMethod: CombinedSecondaryPaymentMethod
+      secondaryAmount: number
+    }
   }) => {
     if (cart.length === 0) {
       toast.error('El carrito está vacío')
@@ -456,11 +563,16 @@ export default function Sales() {
       notes?: string | null
     } | undefined
 
+    const combinedPayment = options.combinedPayment
     const effectivePaymentMethod =
-      saleMode === 'PENDING' ? 'CASH' : options.paymentMethodOverride || paymentMethod
+      combinedPayment
+        ? combinedPayment.primaryMethod
+        : saleMode === 'PENDING'
+          ? 'CASH'
+          : options.paymentMethodOverride || paymentMethod
 
     const shouldUseAccountBalance =
-      options.accountBalanceUsageAmount !== undefined || effectivePaymentMethod === 'ABONO'
+      !combinedPayment && (options.accountBalanceUsageAmount !== undefined || effectivePaymentMethod === 'ABONO')
 
     if (shouldUseAccountBalance) {
       if (!selectedClient?.id) {
@@ -490,7 +602,13 @@ export default function Sales() {
     try {
       setLoading(true)
       const { subtotal, discountAmount } = calculateTotals()
-      const saleStatus = saleMode === 'PENDING' ? 'PENDING' : 'COMPLETED'
+      const saleStatus = combinedPayment
+        ? combinedPayment.secondaryMethod === 'PENDING'
+          ? 'PENDING'
+          : 'COMPLETED'
+        : saleMode === 'PENDING'
+          ? 'PENDING'
+          : 'COMPLETED'
       const response = await api.post('/sales', {
         clientId: selectedClient?.id || null,
         appointmentId: linkedAppointmentId,
@@ -509,6 +627,13 @@ export default function Sales() {
         professional,
         status: saleStatus,
         accountBalanceUsage: accountBalanceUsagePayload,
+        combinedPayment: combinedPayment
+          ? {
+              primaryMethod: combinedPayment.primaryMethod,
+              primaryAmount: combinedPayment.primaryAmount,
+              secondaryMethod: combinedPayment.secondaryMethod
+            }
+          : undefined,
         showInOfficialCash: options.showInOfficialCash,
         notes: saleMode === 'ON_HOLD' ? `[EN ESPERA] ${notes}`.trim() : notes
       })
@@ -528,6 +653,8 @@ export default function Sales() {
       setDiscount(0)
       setNotes('')
       setPaymentMethod('CASH')
+      setPaymentMode('SINGLE')
+      resetCombinedPaymentDraft()
       setProfessional(professionals[0] || '')
       setSaleMode('NORMAL')
       setLastCompletedQuote(null)
@@ -588,6 +715,23 @@ export default function Sales() {
       await completeSaleRequest({
         printTicketAfterSale: false,
         showInOfficialCash: false
+      })
+      return
+    }
+
+    if (paymentMode === 'COMBINED') {
+      const combinedPayment = resolveCombinedPayment()
+      if (!combinedPayment) {
+        setCombinedPaymentModalOpen(true)
+        return
+      }
+
+      await completeSaleRequest({
+        printTicketAfterSale:
+          combinedPayment.secondaryMethod !== 'PENDING' &&
+          [combinedPayment.primaryMethod, combinedPayment.secondaryMethod].includes('CARD'),
+        showInOfficialCash: true,
+        combinedPayment
       })
       return
     }
@@ -1363,13 +1507,26 @@ export default function Sales() {
                       ].map((option) => (
                         <button
                           key={option.value}
-                          onClick={() => setPaymentMethod(option.value as typeof paymentMethod)}
-                          className={`btn ${paymentMethod === option.value ? 'btn-primary' : 'btn-secondary'}`}
+                          type="button"
+                          onClick={() => {
+                            setPaymentMode('SINGLE')
+                            setPaymentMethod(option.value as typeof paymentMethod)
+                          }}
+                          className={`btn ${
+                            paymentMode === 'SINGLE' && paymentMethod === option.value ? 'btn-primary' : 'btn-secondary'
+                          }`}
                         >
                           {option.label}
                         </button>
                       ))}
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => setCombinedPaymentModalOpen(true)}
+                      className={`btn mt-2 w-full ${paymentMode === 'COMBINED' ? 'btn-primary' : 'btn-secondary'}`}
+                    >
+                      Combinado
+                    </button>
                   </div>
                 ) : (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
@@ -1402,7 +1559,13 @@ export default function Sales() {
                   <label className="label">Estado</label>
                   <select
                     value={saleMode}
-                    onChange={(event) => setSaleMode(event.target.value as SaleMode)}
+                    onChange={(event) => {
+                      const nextSaleMode = event.target.value as SaleMode
+                      setSaleMode(nextSaleMode)
+                      if (nextSaleMode === 'PENDING') {
+                        setPaymentMode('SINGLE')
+                      }
+                    }}
                     className="input"
                   >
                     <option value="NORMAL">Normal</option>
@@ -1795,6 +1958,128 @@ export default function Sales() {
               disabled={loading}
             >
               Bizum
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={combinedPaymentModalOpen}
+        onClose={() => {
+          if (loading) return
+          setCombinedPaymentModalOpen(false)
+        }}
+        title="Pago combinado"
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3">
+            <p className="text-sm text-gray-500 dark:text-gray-400">Total de la venta</p>
+            <p className="text-lg font-semibold text-gray-900 dark:text-white">{formatCurrency(total)}</p>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-[1.2fr_0.8fr]">
+            <div>
+              <label className="label">Método de pago</label>
+              <select
+                value={combinedPaymentDraft.primaryMethod}
+                onChange={(event) =>
+                  setCombinedPaymentDraft((current) => ({
+                    ...current,
+                    primaryMethod: event.target.value as SalePaymentMethod
+                  }))
+                }
+                className="input"
+              >
+                <option value="CASH">Metálico</option>
+                <option value="CARD">Tarjeta</option>
+                <option value="BIZUM">Bizum</option>
+                <option value="ABONO">Abono</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Cuantía</label>
+              <input
+                type="number"
+                min="0.01"
+                step="0.01"
+                max={Math.max(0, total - 0.01)}
+                value={combinedPaymentDraft.primaryAmount}
+                onChange={(event) =>
+                  setCombinedPaymentDraft((current) => ({
+                    ...current,
+                    primaryAmount: event.target.value
+                  }))
+                }
+                className="input"
+                placeholder="0,00"
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-[1.2fr_0.8fr]">
+            <div>
+              <label className="label">Segunda forma</label>
+              <select
+                value={combinedPaymentDraft.secondaryMethod}
+                onChange={(event) =>
+                  setCombinedPaymentDraft((current) => ({
+                    ...current,
+                    secondaryMethod: event.target.value as CombinedSecondaryPaymentMethod
+                  }))
+                }
+                className="input"
+              >
+                <option value="CASH">Metálico</option>
+                <option value="CARD">Tarjeta</option>
+                <option value="BIZUM">Bizum</option>
+                <option value="ABONO">Abono</option>
+                <option value="PENDING">Pendiente</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Cuantía calculada</label>
+              <input
+                type="text"
+                value={formatCurrency(getCombinedSecondaryAmount())}
+                className="input"
+                readOnly
+              />
+            </div>
+          </div>
+
+          {combinedPaymentDraft.secondaryMethod === 'PENDING' ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+              El importe restante se registrará como pendiente y aparecerá en la ficha del cliente, pestaña Pendiente - caja.
+            </div>
+          ) : null}
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setCombinedPaymentModalOpen(false)
+                if (paymentMode !== 'COMBINED') {
+                  resetCombinedPaymentDraft()
+                }
+              }}
+              className="btn btn-secondary"
+              disabled={loading}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const resolvedPayment = resolveCombinedPayment()
+                if (!resolvedPayment) return
+                setPaymentMode('COMBINED')
+                setCombinedPaymentModalOpen(false)
+              }}
+              className="btn btn-primary"
+              disabled={loading}
+            >
+              Aplicar
             </button>
           </div>
         </div>

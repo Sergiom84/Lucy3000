@@ -528,13 +528,38 @@ export const getClientById = async (req: Request, res: Response) => {
         sales: {
           include: {
             items: true,
-            pendingPayment: true
+            pendingPayment: {
+              include: {
+                collections: {
+                  orderBy: [{ operationDate: 'desc' }, { createdAt: 'desc' }],
+                  select: {
+                    id: true,
+                    amount: true,
+                    paymentMethod: true,
+                    showInOfficialCash: true,
+                    operationDate: true,
+                    createdAt: true
+                  }
+                }
+              }
+            }
           },
           orderBy: { date: 'desc' },
           take: 10
         },
         pendingPayments: {
           include: {
+            collections: {
+              orderBy: [{ operationDate: 'desc' }, { createdAt: 'desc' }],
+              select: {
+                id: true,
+                amount: true,
+                paymentMethod: true,
+                showInOfficialCash: true,
+                operationDate: true,
+                createdAt: true
+              }
+            },
             sale: {
               select: {
                 id: true,
@@ -543,7 +568,23 @@ export const getClientById = async (req: Request, res: Response) => {
                 total: true,
                 status: true,
                 paymentMethod: true,
-                notes: true
+                notes: true,
+                items: {
+                  select: {
+                    description: true,
+                    quantity: true,
+                    product: {
+                      select: {
+                        name: true
+                      }
+                    },
+                    service: {
+                      select: {
+                        name: true
+                      }
+                    }
+                  }
+                }
               }
             }
           },

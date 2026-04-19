@@ -1,10 +1,19 @@
 export type PendingPaymentRow = {
   id: string
   amount: number
+  remainingAmount: number
   status: 'OPEN' | 'SETTLED' | 'CANCELLED'
   createdAt: string
   settledAt?: string | null
   settledPaymentMethod?: string | null
+  collections: Array<{
+    id: string
+    amount: number
+    paymentMethod: string
+    showInOfficialCash: boolean
+    operationDate: string
+    createdAt: string
+  }>
   sale?: {
     id: string
     saleNumber: string
@@ -13,6 +22,16 @@ export type PendingPaymentRow = {
     status: string
     paymentMethod: string
     notes?: string | null
+    items?: Array<{
+      description?: string | null
+      quantity?: number | null
+      product?: {
+        name?: string | null
+      } | null
+      service?: {
+        name?: string | null
+      } | null
+    }>
   } | null
   source: 'SALE' | 'MANUAL'
   label?: string
@@ -45,11 +64,25 @@ export const buildClientPendingSummary = (client: ClientPendingShape | null | un
   const saleRows: PendingPaymentRow[] = Array.isArray(client?.pendingPayments)
     ? client.pendingPayments.map((pendingPayment: any) => ({
         id: pendingPayment.id,
-        amount: parseAmount(pendingPayment.amount || pendingPayment.sale?.total),
+        amount:
+          String(pendingPayment.status || 'OPEN').toUpperCase() === 'OPEN'
+            ? parseAmount(pendingPayment.amount || pendingPayment.sale?.total)
+            : parseAmount(pendingPayment.sale?.total || pendingPayment.amount),
+        remainingAmount: parseAmount(pendingPayment.amount || pendingPayment.sale?.total),
         status: String(pendingPayment.status || 'OPEN').toUpperCase() as PendingPaymentRow['status'],
         createdAt: String(pendingPayment.createdAt || client?.updatedAt || client?.createdAt || ''),
         settledAt: pendingPayment.settledAt || null,
         settledPaymentMethod: pendingPayment.settledPaymentMethod || null,
+        collections: Array.isArray(pendingPayment.collections)
+          ? pendingPayment.collections.map((collection: any) => ({
+              id: collection.id,
+              amount: parseAmount(collection.amount),
+              paymentMethod: String(collection.paymentMethod || ''),
+              showInOfficialCash: collection.showInOfficialCash !== false,
+              operationDate: String(collection.operationDate || collection.createdAt || ''),
+              createdAt: String(collection.createdAt || collection.operationDate || '')
+            }))
+          : [],
         sale: pendingPayment.sale
           ? {
               id: pendingPayment.sale.id,
@@ -58,7 +91,23 @@ export const buildClientPendingSummary = (client: ClientPendingShape | null | un
               total: parseAmount(pendingPayment.sale.total),
               status: pendingPayment.sale.status,
               paymentMethod: pendingPayment.sale.paymentMethod,
-              notes: pendingPayment.sale.notes || null
+              notes: pendingPayment.sale.notes || null,
+              items: Array.isArray(pendingPayment.sale.items)
+                ? pendingPayment.sale.items.map((item: any) => ({
+                    description: item?.description || null,
+                    quantity: Number.isFinite(Number(item?.quantity)) ? Number(item.quantity) : null,
+                    product: item?.product
+                      ? {
+                          name: item.product.name || null
+                        }
+                      : null,
+                    service: item?.service
+                      ? {
+                          name: item.service.name || null
+                        }
+                      : null
+                  }))
+                : []
             }
           : null,
         source: 'SALE'
@@ -66,7 +115,7 @@ export const buildClientPendingSummary = (client: ClientPendingShape | null | un
     : []
 
   const openSaleAmount = roundCurrency(
-    saleRows.reduce((sum, row) => sum + (row.status === 'OPEN' ? row.amount : 0), 0)
+    saleRows.reduce((sum, row) => sum + (row.status === 'OPEN' ? row.remainingAmount : 0), 0)
   )
   const currentPendingAmount = roundCurrency(Math.max(0, parseAmount(client?.pendingAmount)))
   const manualAmount = roundCurrency(Math.max(0, currentPendingAmount - openSaleAmount))
@@ -77,10 +126,12 @@ export const buildClientPendingSummary = (client: ClientPendingShape | null | un
           {
             id: `manual-pending-${client?.id || 'unknown'}`,
             amount: manualAmount,
+            remainingAmount: manualAmount,
             status: 'OPEN' as const,
             createdAt: String(client?.updatedAt || client?.createdAt || ''),
             settledAt: null,
             settledPaymentMethod: null,
+            collections: [],
             sale: null,
             source: 'MANUAL' as const,
             label: 'Pendiente manual',

@@ -32,23 +32,123 @@ export const getSaleAccountBalanceMovement = (sale: any) => {
   )
 }
 
-export const salePaymentMethodLabel = (sale: any) => {
-  if (String(sale?.status || '').toUpperCase() === 'PENDING') {
-    return 'Pendiente de cobro'
+const normalizePaymentBreakdownEntry = (paymentMethod?: string | null, amount?: unknown) => {
+  const normalizedMethod = String(paymentMethod || '').trim().toUpperCase()
+  const numericAmount = Number(amount || 0)
+
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    return null
+  }
+
+  if (!['CASH', 'CARD', 'BIZUM', 'ABONO'].includes(normalizedMethod)) {
+    return null
+  }
+
+  return {
+    paymentMethod: normalizedMethod,
+    amount: numericAmount
+  }
+}
+
+const getStoredSalePaymentBreakdown = (sale: any) => {
+  if (!sale?.paymentBreakdown) {
+    return [] as Array<{ paymentMethod: string; amount: number }>
+  }
+
+  try {
+    const parsed = JSON.parse(String(sale.paymentBreakdown))
+    if (!Array.isArray(parsed)) {
+      return [] as Array<{ paymentMethod: string; amount: number }>
+    }
+
+    return parsed
+      .map((entry) =>
+        normalizePaymentBreakdownEntry((entry as any)?.paymentMethod, (entry as any)?.amount)
+      )
+      .filter(Boolean) as Array<{ paymentMethod: string; amount: number }>
+  } catch {
+    return [] as Array<{ paymentMethod: string; amount: number }>
+  }
+}
+
+const getPendingCollectionBreakdown = (sale: any) => {
+  const collections = sale?.pendingPayment?.collections
+  if (!Array.isArray(collections)) {
+    return [] as Array<{ paymentMethod: string; amount: number }>
+  }
+
+  return collections
+    .map((entry) => normalizePaymentBreakdownEntry(entry?.paymentMethod, entry?.amount))
+    .filter(Boolean) as Array<{ paymentMethod: string; amount: number }>
+}
+
+export const getSalePaymentBreakdownEntries = (sale: any) => {
+  const storedBreakdown = getStoredSalePaymentBreakdown(sale)
+  if (storedBreakdown.length > 0) {
+    return storedBreakdown
+  }
+
+  const pendingCollections = getPendingCollectionBreakdown(sale)
+  if (pendingCollections.length > 0) {
+    return pendingCollections
   }
 
   const balanceMovement = getSaleAccountBalanceMovement(sale)
   const rawPaymentMethod = String(sale?.paymentMethod || '').toUpperCase()
 
   if (!balanceMovement) {
-    return paymentMethodLabel(sale?.paymentMethod)
+    const directMethod = normalizePaymentBreakdownEntry(rawPaymentMethod, sale?.total)
+    return directMethod ? [directMethod] : []
   }
 
-  if (rawPaymentMethod === 'ABONO' || rawPaymentMethod === 'OTHER' || !rawPaymentMethod) {
-    return 'Abono'
+  const total = Number(sale?.total || 0)
+  const accountBalanceAmount = Math.max(0, Number(balanceMovement?.amount || 0))
+  const entries: Array<{ paymentMethod: string; amount: number }> = []
+
+  if (accountBalanceAmount > 0) {
+    entries.push({ paymentMethod: 'ABONO', amount: accountBalanceAmount })
   }
 
-  return `Abono + ${paymentMethodLabel(sale?.paymentMethod)}`
+  const collectedAmount = Math.max(0, total - accountBalanceAmount)
+  if (collectedAmount > 0 && rawPaymentMethod && rawPaymentMethod !== 'ABONO' && rawPaymentMethod !== 'OTHER') {
+    entries.push({ paymentMethod: rawPaymentMethod, amount: collectedAmount })
+  }
+
+  return entries
+}
+
+const buildPaymentMethodListLabel = (entries: Array<{ paymentMethod: string; amount: number }>) => {
+  const uniqueMethods = entries.reduce<string[]>((methods, entry) => {
+    if (!methods.includes(entry.paymentMethod)) {
+      methods.push(entry.paymentMethod)
+    }
+
+    return methods
+  }, [])
+
+  if (uniqueMethods.length === 0) {
+    return 'Sin definir'
+  }
+
+  return uniqueMethods.map((method) => paymentMethodLabel(method)).join(' + ')
+}
+
+export const salePaymentMethodLabel = (sale: any) => {
+  const entries = getSalePaymentBreakdownEntries(sale)
+
+  if (String(sale?.status || '').toUpperCase() === 'PENDING') {
+    if (entries.length === 0) {
+      return 'Pendiente de cobro'
+    }
+
+    return `${buildPaymentMethodListLabel(entries)} + Pendiente`
+  }
+
+  if (entries.length > 0) {
+    return buildPaymentMethodListLabel(entries)
+  }
+
+  return paymentMethodLabel(sale?.paymentMethod)
 }
 
 const resolveCustomerName = (sale: any) => {
@@ -57,6 +157,22 @@ const resolveCustomerName = (sale: any) => {
 
 const resolveItemLabel = (item: any) =>
   String(item?.service?.name || item?.product?.name || item?.description || 'Item').trim()
+
+const resolvePendingCollectionPaymentLabel = (
+  paymentMethod?: string | null,
+  accountBalanceAmount = 0
+) => {
+  if (accountBalanceAmount > 0) {
+    const normalizedMethod = String(paymentMethod || '').toUpperCase()
+    if (!normalizedMethod || normalizedMethod === 'ABONO') {
+      return 'Abono'
+    }
+
+    return `Abono + ${paymentMethodLabel(paymentMethod)}`
+  }
+
+  return paymentMethodLabel(paymentMethod)
+}
 
 export const buildSaleTicketPayload = (sale: any): TicketPayload => ({
   title: TICKET_BUSINESS_NAME,
@@ -97,6 +213,52 @@ export const buildSaleTicketPayload = (sale: any): TicketPayload => ({
   ],
   footer: TICKET_DEFAULT_FOOTER
 })
+
+export const buildPendingCollectionTicketPayload = (payload: {
+  sale: any
+  operationDate: string
+  collectedAmount: number
+  paymentMethod?: string | null
+  accountBalanceAmount?: number
+  remainingAmount: number
+}): TicketPayload => {
+  const accountBalanceAmount = Number(payload.accountBalanceAmount || 0)
+  const collectedAmount = Number(payload.collectedAmount || 0)
+  const remainingAmount = Number(payload.remainingAmount || 0)
+  const previousPendingAmount = Math.max(0, collectedAmount + remainingAmount)
+  const treatmentLabel = (payload.sale?.items || [])
+    .map((item: any) => resolveItemLabel(item))
+    .filter(Boolean)
+    .join(', ')
+
+  return {
+    title: TICKET_BUSINESS_NAME,
+    subtitle: 'Cobro pendiente',
+    saleNumber: payload.sale?.saleNumber,
+    customer: resolveCustomerName(payload.sale),
+    createdAt: formatDateTime(payload.operationDate),
+    paymentMethod: resolvePendingCollectionPaymentLabel(payload.paymentMethod, accountBalanceAmount),
+    items: [
+      {
+        description: treatmentLabel
+          ? `Cobro pendiente · ${treatmentLabel}`
+          : `Cobro pendiente ${payload.sale?.saleNumber || ''}`.trim(),
+        quantity: 1,
+        unitPrice: collectedAmount,
+        total: collectedAmount
+      }
+    ],
+    totals: [
+      { label: 'Pendiente anterior', value: formatCurrency(previousPendingAmount) },
+      ...(accountBalanceAmount > 0
+        ? [{ label: 'Abono usado', value: formatCurrency(accountBalanceAmount) }]
+        : []),
+      { label: 'Cobrado', value: formatCurrency(collectedAmount) },
+      { label: 'Pendiente restante', value: formatCurrency(remainingAmount) }
+    ],
+    footer: TICKET_DEFAULT_FOOTER
+  }
+}
 
 export const buildQuoteHtml = (quote: any): string => {
   const clientName = quote.client

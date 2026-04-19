@@ -482,6 +482,60 @@ const ensurePendingPaymentsTable = async () => {
   }
 }
 
+const ensureSalesPaymentBreakdownColumn = async () => {
+  if (!(await tableExists('sales'))) {
+    return
+  }
+
+  const saleColumns = await getTableColumns('sales')
+  const hasPaymentBreakdown = saleColumns.some((column) => column.name === 'paymentBreakdown')
+
+  if (!hasPaymentBreakdown) {
+    await prisma.$executeRawUnsafe('ALTER TABLE "sales" ADD COLUMN "paymentBreakdown" TEXT')
+  }
+}
+
+const ensurePendingPaymentCollectionsTable = async () => {
+  if (!(await tableExists('pending_payment_collections'))) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE "pending_payment_collections" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "pendingPaymentId" TEXT NOT NULL,
+        "saleId" TEXT NOT NULL,
+        "clientId" TEXT NOT NULL,
+        "userId" TEXT NOT NULL,
+        "amount" DECIMAL NOT NULL,
+        "paymentMethod" TEXT NOT NULL,
+        "showInOfficialCash" BOOLEAN NOT NULL DEFAULT true,
+        "operationDate" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "pending_payment_collections_pendingPaymentId_fkey" FOREIGN KEY ("pendingPaymentId") REFERENCES "pending_payments" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "pending_payment_collections_saleId_fkey" FOREIGN KEY ("saleId") REFERENCES "sales" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "pending_payment_collections_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "clients" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "pending_payment_collections_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+      )
+    `)
+  }
+
+  if (!(await indexExists('pending_payment_collections_pendingPaymentId_operationDate_idx'))) {
+    await prisma.$executeRawUnsafe(
+      'CREATE INDEX "pending_payment_collections_pendingPaymentId_operationDate_idx" ON "pending_payment_collections"("pendingPaymentId", "operationDate")'
+    )
+  }
+
+  if (!(await indexExists('pending_payment_collections_saleId_operationDate_idx'))) {
+    await prisma.$executeRawUnsafe(
+      'CREATE INDEX "pending_payment_collections_saleId_operationDate_idx" ON "pending_payment_collections"("saleId", "operationDate")'
+    )
+  }
+
+  if (!(await indexExists('pending_payment_collections_clientId_operationDate_idx'))) {
+    await prisma.$executeRawUnsafe(
+      'CREATE INDEX "pending_payment_collections_clientId_operationDate_idx" ON "pending_payment_collections"("clientId", "operationDate")'
+    )
+  }
+}
+
 const ensureDefaultAppointmentLegends = async () => {
   if (!(await tableExists('appointment_legends'))) {
     return
@@ -508,6 +562,7 @@ export const ensureSqliteCompatibilityMigrations = async () => {
 
   await ensureUsersUsernameColumn()
   await ensureAccountBalancePaymentMethodColumn()
+  await ensureSalesPaymentBreakdownColumn()
   await ensureLegacyAccountBalanceImportColumns()
   await ensureLegacyBonoImportColumns()
   await ensureAppointmentGuestSupport()
@@ -517,5 +572,6 @@ export const ensureSqliteCompatibilityMigrations = async () => {
   await ensureAgendaDayNotesTable()
   await ensureDashboardRemindersTable()
   await ensurePendingPaymentsTable()
+  await ensurePendingPaymentCollectionsTable()
   await ensureDefaultAppointmentLegends()
 }

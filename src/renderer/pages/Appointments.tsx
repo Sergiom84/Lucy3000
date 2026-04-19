@@ -19,7 +19,7 @@ import {
 } from '../utils/appointmentTime'
 import { exportAppointmentsWorkbook } from '../utils/exports'
 import { useAuthStore } from '../stores/authStore'
-import { paymentMethodLabel } from '../utils/tickets'
+import { salePaymentMethodLabel } from '../utils/tickets'
 import toast from 'react-hot-toast'
 import AgendaDayNotesPanel from '../components/AgendaDayNotesPanel'
 import ReminderModal from '../components/ReminderModal'
@@ -736,7 +736,7 @@ export default function Appointments() {
 
               {editingAppointment.sale?.status === 'COMPLETED' ? (
                 <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-900 dark:bg-green-950/20 dark:text-green-200">
-                  Cita cobrada en {editingAppointment.sale.saleNumber} por {paymentMethodLabel(editingAppointment.sale.paymentMethod)}.
+                  Cita cobrada en {editingAppointment.sale.saleNumber} por {salePaymentMethodLabel(editingAppointment.sale)}.
                 </div>
               ) : (
                 <button onClick={() => goToCharge(editingAppointment)} className="btn btn-primary">

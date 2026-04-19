@@ -2179,7 +2179,22 @@ export const getGlobalAccountBalanceHistory = async (req: Request, res: Response
           select: {
             id: true,
             saleNumber: true,
-            paymentMethod: true
+            paymentMethod: true,
+            paymentBreakdown: true,
+            status: true,
+            pendingPayment: {
+              select: {
+                collections: {
+                  select: {
+                    amount: true,
+                    paymentMethod: true,
+                    showInOfficialCash: true,
+                    operationDate: true,
+                    createdAt: true
+                  }
+                }
+              }
+            }
           }
         }
       },

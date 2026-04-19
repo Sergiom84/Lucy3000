@@ -30,6 +30,11 @@ export const prismaMock: any = {
     update: vi.fn()
   },
 
+  pendingPaymentCollection: {
+    findMany: vi.fn(),
+    create: vi.fn()
+  },
+
   client: {
     findUnique: vi.fn(),
     findMany: vi.fn(),
