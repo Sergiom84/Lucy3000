@@ -5,7 +5,6 @@ import {
   CreditCard,
   FileText,
   Plus,
-  Receipt,
   Search,
   ShoppingCart,
   Trash2
@@ -1618,7 +1617,6 @@ export default function Sales() {
                 </div>
 
                 <button onClick={handleCompleteSale} disabled={cart.length === 0 || loading} className={`btn w-full ${saleMode === 'QUOTE' ? 'btn-secondary' : 'btn-primary'}`}>
-                  {saleMode === 'QUOTE' ? <FileText className="w-5 h-5 mr-2" /> : <Receipt className="w-5 h-5 mr-2" />}
                   {loading
                     ? 'Procesando...'
                     : saleMode === 'QUOTE'
@@ -2292,7 +2290,6 @@ export default function Sales() {
             {selectedSale.status !== 'PENDING' ? (
               <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
                 <button onClick={() => void handlePrintSale(selectedSale)} className="btn btn-primary flex-1">
-                  <Receipt className="w-4 h-4 mr-2" />
                   Imprimir Ticket
                 </button>
               </div>
