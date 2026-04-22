@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { getTomorrowUtcRange } from '../../../src/backend/services/appointmentReminder.service'
+import {
+  getReminderUtcRange,
+  getTomorrowUtcRange
+} from '../../../src/backend/services/appointmentReminder.service'
 import { normalizePhoneForWhatsApp } from '../../../src/backend/services/whatsapp.service'
 
 describe('whatsapp reminder helpers', () => {
@@ -20,5 +23,12 @@ describe('whatsapp reminder helpers', () => {
 
     expect(start.toISOString()).toBe('2026-03-16T00:00:00.000Z')
     expect(end.toISOString()).toBe('2026-03-17T00:00:00.000Z')
+  })
+
+  it('calculates UTC range for reminders sent four days before', () => {
+    const { start, end } = getReminderUtcRange(new Date('2026-03-15T12:00:00.000Z'), 4)
+
+    expect(start.toISOString()).toBe('2026-03-19T00:00:00.000Z')
+    expect(end.toISOString()).toBe('2026-03-20T00:00:00.000Z')
   })
 })

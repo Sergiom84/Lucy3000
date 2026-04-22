@@ -160,7 +160,6 @@ export default function ImportAppointmentsModal({
       const conflictCount = Number(nextResults.conflicts.count || 0)
       const skippedCount = Number(nextResults.skipped.count || 0)
       const errorCount = Number(nextResults.errors.count || 0)
-
       const summaryParts = [
         successCount > 0 ? `${successCount} citas importadas` : null,
         createdClientsCount > 0 ? `${createdClientsCount} fichas creadas` : null,

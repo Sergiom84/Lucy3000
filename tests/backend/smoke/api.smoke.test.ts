@@ -28,6 +28,313 @@ const createEmployeeAuthHeader = () => {
   return `Bearer ${token}`
 }
 
+const createSqlImportPayload = () => ({
+  sessionId: 'sql-session-smoke',
+  sourceName: '01dat.sql',
+  professionals: [
+    {
+      id: 'legacy-professional-1',
+      code: 'LUCY',
+      name: 'Lucía',
+      shortName: 'Lucy',
+      email: 'lucy@example.com',
+      isActive: true
+    }
+  ],
+  clients: [
+    {
+      id: 'legacy-client-1',
+      selected: true,
+      issues: [],
+      legacyId: '10',
+      legacyClientNumber: '143',
+      barcode: 'CB-143',
+      fullName: 'Clara Ruiz Calcerrada',
+      firstName: 'Clara',
+      lastName: 'Ruiz Calcerrada',
+      dni: '12345678A',
+      email: 'clara@example.com',
+      phone: '670312806',
+      mobilePhone: '670312806',
+      landlinePhone: '910000000',
+      address: 'Calle Mayor 1',
+      city: 'Madrid',
+      province: 'Madrid',
+      postalCode: '28001',
+      birthDate: '1988-05-01',
+      registrationDate: '2024-01-15',
+      gender: 'F',
+      legacyProfessionalCode: 'LUCY',
+      clientBrand: 'Premium',
+      appliedTariff: 'GENERAL',
+      text9A: 'A1',
+      text9B: 'B1',
+      text15: 'Texto15',
+      text25: 'Texto25',
+      text100: 'Texto100',
+      integer1: 7,
+      integer2: 9,
+      giftVoucher: 'Regalo',
+      photoRef: 'clara.jpg',
+      photoSkinType: 'III',
+      webKey: 'web-143',
+      discountProfile: 'VIP',
+      globalClientNumber: '999',
+      globalUpdated: true,
+      rejectPostal: true,
+      rejectSms: false,
+      rejectEmail: true,
+      excludeSurvey: false,
+      registeredSurvey: true,
+      legacySha1: 'sha1-demo',
+      notes: 'Cliente fiel',
+      isActive: true
+    }
+  ],
+  services: [
+    {
+      id: 'legacy-service-1',
+      selected: true,
+      issues: [],
+      legacyId: '20',
+      code: 'HIDRA',
+      name: 'Hidratación facial',
+      description: 'Hidratación facial',
+      category: 'Faciales',
+      screenCategory: 'Faciales',
+      price: 55,
+      durationMinutes: 60,
+      taxRate: 21,
+      isPack: true,
+      requiresProduct: true,
+      isActive: true
+    }
+  ],
+  products: [
+    {
+      id: 'legacy-product-1',
+      selected: true,
+      issues: [],
+      legacyId: '30',
+      legacyProductNumber: '9001',
+      sku: 'CREMA-01',
+      barcode: '843000000001',
+      name: 'Crema Hidratante',
+      description: 'Uso cabina',
+      category: 'Cosmética',
+      brand: 'LucyLabs',
+      supplier: 'Proveedor Demo',
+      cost: 9,
+      price: 29.95,
+      stock: 12,
+      minStock: 2,
+      maxStock: 20,
+      isActive: true
+    }
+  ],
+  bonoTemplates: [
+    {
+      id: 'legacy-bono-template-1',
+      selected: true,
+      issues: [],
+      legacyServiceId: '20',
+      serviceCode: 'HIDRA',
+      serviceName: 'Hidratación facial',
+      category: 'Faciales',
+      slot: 1,
+      totalSessions: 5,
+      price: 240,
+      isActive: true
+    }
+  ],
+  clientBonos: [
+    {
+      id: 'legacy-client-bono-1',
+      selected: true,
+      issues: [],
+      legacyId: '40',
+      legacyNumber: '1001',
+      clientNumber: '143',
+      serviceCode: 'HIDRA',
+      description: 'Bono Hidratación',
+      totalSessions: 10,
+      consumedSessions: 3,
+      remainingSessions: 7,
+      legacyValue: 240
+    }
+  ],
+  accountBalances: [
+    {
+      id: 'legacy-account-balance-1',
+      selected: true,
+      issues: [],
+      legacyId: '41',
+      legacyNumber: '1002',
+      clientNumber: '143',
+      description: 'ABONO',
+      kind: 'ABONO',
+      amount: 42.5,
+      rawNominal: 0,
+      rawConsumed: 0
+    }
+  ],
+  appointments: [
+    {
+      id: 'legacy-appointment-1',
+      selected: true,
+      issues: [],
+      legacyId: '50',
+      legacyClientNumber: '143',
+      clientName: 'Clara Ruiz Calcerrada',
+      phone: '670312806',
+      serviceCode: 'HIDRA',
+      serviceName: 'Hidratación facial',
+      date: '2026-04-20',
+      startTime: '10:45',
+      endTime: '11:45',
+      durationMinutes: 60,
+      cabin: 'CABINA 1',
+      legacyProfessionalCode: 'LUCY',
+      legacyProfessionalName: 'Lucía',
+      secondaryProfessionalCode: null,
+      status: 'CONFIRMADA',
+      notes: 'Primera sesión',
+      legacyPackNumber: '1001',
+      targetUserId: null
+    }
+  ],
+  agendaBlocks: [
+    {
+      id: 'legacy-agenda-block-1',
+      selected: true,
+      issues: [],
+      legacyId: '51',
+      legacyClientNumber: null,
+      date: '2026-04-20',
+      startTime: '12:00',
+      endTime: '12:30',
+      durationMinutes: 30,
+      cabin: 'CABINA 2',
+      legacyProfessionalCode: 'LUCY',
+      legacyProfessionalName: 'Lucía',
+      notes: 'Descanso'
+    }
+  ],
+  agendaNotes: [
+    {
+      id: 'legacy-agenda-note-1',
+      selected: true,
+      issues: [],
+      legacyId: '60',
+      dayKey: '2026-04-20',
+      legacyProfessionalCode: 'LUCY',
+      legacyProfessionalName: 'Lucía',
+      text: 'Preparar cabina facial',
+      isActive: true,
+      agenda: 'Principal',
+      stationNumber: 2
+    }
+  ],
+  consents: [
+    {
+      id: 'legacy-consent-1',
+      selected: true,
+      issues: [],
+      legacyId: '70',
+      clientNumber: '143',
+      clientName: 'Clara Ruiz Calcerrada',
+      health: 'Sin patologías relevantes',
+      medication: 'Vitamina D',
+      fileName: 'consentimiento-143.txt'
+    }
+  ],
+  signatures: [
+    {
+      id: 'legacy-signature-1',
+      selected: true,
+      issues: [],
+      legacyId: '80',
+      clientNumber: '143',
+      clientName: 'Clara Ruiz Calcerrada',
+      docType: 'Consentimiento facial',
+      fileName: 'firma-143.png',
+      legacyServiceNumber: '20',
+      signatureBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn2z3sAAAAASUVORK5CYII='
+    }
+  ],
+  photoReferencesSkipped: [{ tableName: 'tblfotos', rowCount: 2 }],
+  unsupportedPopulatedTables: [{ tableName: 'tblventaslegacy', rowCount: 1 }]
+})
+
+const createSqlImportTx = () => ({
+  user: {
+    findMany: vi.fn().mockResolvedValue([
+      {
+        id: 'admin-1',
+        email: 'admin@lucy3000.com',
+        username: 'admin',
+        name: 'Administrador',
+        role: 'ADMIN',
+        isActive: true
+      }
+    ]),
+    createMany: vi.fn().mockResolvedValue({ count: 1 })
+  },
+  client: {
+    count: vi.fn().mockResolvedValue(0),
+    createMany: vi.fn().mockResolvedValue({ count: 1 })
+  },
+  service: {
+    count: vi.fn().mockResolvedValue(0),
+    createMany: vi.fn().mockResolvedValue({ count: 1 })
+  },
+  product: {
+    count: vi.fn().mockResolvedValue(0),
+    createMany: vi.fn().mockResolvedValue({ count: 1 })
+  },
+  appointment: {
+    count: vi.fn().mockResolvedValue(0),
+    createMany: vi.fn().mockResolvedValue({ count: 1 })
+  },
+  appointmentService: {
+    createMany: vi.fn().mockResolvedValue({ count: 1 })
+  },
+  agendaBlock: {
+    count: vi.fn().mockResolvedValue(0),
+    createMany: vi.fn().mockResolvedValue({ count: 1 })
+  },
+  agendaDayNote: {
+    count: vi.fn().mockResolvedValue(0),
+    createMany: vi.fn().mockResolvedValue({ count: 1 })
+  },
+  bonoPack: {
+    count: vi.fn().mockResolvedValue(0),
+    createMany: vi.fn().mockResolvedValue({ count: 1 })
+  },
+  bonoSession: {
+    createMany: vi.fn().mockResolvedValue({ count: 10 })
+  },
+  accountBalanceMovement: {
+    count: vi.fn().mockResolvedValue(0),
+    createMany: vi.fn().mockResolvedValue({ count: 1 })
+  },
+  sale: {
+    count: vi.fn().mockResolvedValue(0)
+  },
+  quote: {
+    count: vi.fn().mockResolvedValue(0)
+  },
+  dashboardReminder: {
+    count: vi.fn().mockResolvedValue(0)
+  },
+  notification: {
+    count: vi.fn().mockResolvedValue(0)
+  },
+  setting: {
+    upsert: vi.fn().mockResolvedValue(undefined)
+  }
+})
+
 describe('API smoke tests', () => {
   beforeEach(() => {
     resetPrismaMock()
@@ -668,6 +975,162 @@ describe('API smoke tests', () => {
     expect(response.body.error).toContain('5MB limit')
   })
 
+  it('POST /api/sql/analyze keeps bonos, abonos y assets detectados in a 01dat dump', async () => {
+    const sampleSqlDump = `
+CREATE TABLE \`tblusuarios\` (
+  \`Id\` int NOT NULL,
+  \`Codigo\` varchar(10) DEFAULT NULL,
+  \`TUNombreCorto\` varchar(50) DEFAULT NULL,
+  \`TUNombreLargo\` varchar(100) DEFAULT NULL,
+  \`eMail\` varchar(100) DEFAULT NULL,
+  \`Activo\` tinyint DEFAULT NULL,
+  PRIMARY KEY (\`Id\`),
+  KEY \`Codigo\` (\`Codigo\`)
+) ENGINE=InnoDB;
+INSERT INTO \`tblusuarios\` VALUES (1,'LUCY','Lucy','Lucía','lucy@example.com',1);
+CREATE TABLE \`tblclientes\` (
+  \`Id\` int NOT NULL,
+  \`NroCliente\` int DEFAULT NULL,
+  \`Nombre\` varchar(120) DEFAULT NULL,
+  \`Movil\` varchar(20) DEFAULT NULL,
+  \`FechaAlta\` date DEFAULT NULL,
+  \`eMail\` varchar(100) DEFAULT NULL,
+  PRIMARY KEY (\`Id\`)
+) ENGINE=InnoDB;
+INSERT INTO \`tblclientes\` VALUES (10,143,'Clara Ruiz','670312806','2024-01-15','clara@example.com');
+CREATE TABLE \`tbltarifa\` (
+  \`Id\` int NOT NULL,
+  \`Codigo\` varchar(20) DEFAULT NULL,
+  \`Descripcion\` varchar(120) DEFAULT NULL,
+  \`Tiempo\` int DEFAULT NULL,
+  \`Precio\` decimal(10,2) DEFAULT NULL,
+  \`UnidadesBono1\` int DEFAULT NULL,
+  \`PrecioBono1\` decimal(10,2) DEFAULT NULL,
+  PRIMARY KEY (\`Id\`)
+) ENGINE=InnoDB;
+INSERT INTO \`tbltarifa\` VALUES (20,'HIDRA','Hidratación facial',60,55.00,5,240.00);
+CREATE TABLE \`tblbbpa\` (
+  \`Id\` int NOT NULL,
+  \`Nro\` int DEFAULT NULL,
+  \`NroCliente\` int DEFAULT NULL,
+  \`Tipo\` char(1) DEFAULT NULL,
+  \`TipoAb\` int DEFAULT NULL,
+  \`Nominal\` decimal(10,2) DEFAULT NULL,
+  \`Consumido\` decimal(10,2) DEFAULT NULL,
+  \`Codigo\` varchar(20) DEFAULT NULL,
+  \`Descripcion\` varchar(120) DEFAULT NULL,
+  \`XICV\` decimal(10,2) DEFAULT NULL,
+  PRIMARY KEY (\`Id\`),
+  KEY \`Codigo\` (\`Codigo\`)
+) ENGINE=InnoDB;
+INSERT INTO \`tblbbpa\` VALUES (40,1001,143,'B',0,10,7,'HIDRA','Bono Hidratación',NULL);
+INSERT INTO \`tblbbpa\` VALUES (41,1002,143,'A',0,0,0,NULL,'ABONO',425000);
+CREATE TABLE \`tblreservas\` (
+  \`Id\` int NOT NULL,
+  \`NroCliente\` int DEFAULT NULL,
+  \`NombreCliente\` varchar(120) DEFAULT NULL,
+  \`Telefono\` varchar(20) DEFAULT NULL,
+  \`CodSubSer\` varchar(20) DEFAULT NULL,
+  \`Fecha\` date DEFAULT NULL,
+  \`Hora\` varchar(10) DEFAULT NULL,
+  \`Minutos\` int DEFAULT NULL,
+  \`Cabina\` varchar(40) DEFAULT NULL,
+  \`Oficial1\` varchar(10) DEFAULT NULL,
+  PRIMARY KEY (\`Id\`)
+) ENGINE=InnoDB;
+INSERT INTO \`tblreservas\` VALUES (50,143,'Clara Ruiz','670312806','HIDRA','2026-04-20','10:45',60,'CABINA 1','LUCY');
+CREATE TABLE \`tblreservasnotas\` (
+  \`Id\` int NOT NULL,
+  \`Fecha\` date DEFAULT NULL,
+  \`Oficial\` varchar(10) DEFAULT NULL,
+  \`Nota\` varchar(255) DEFAULT NULL,
+  \`Activo\` tinyint DEFAULT NULL,
+  \`NroEstacion\` int DEFAULT NULL,
+  \`Agenda\` varchar(20) DEFAULT NULL,
+  PRIMARY KEY (\`Id\`)
+) ENGINE=InnoDB;
+INSERT INTO \`tblreservasnotas\` VALUES (60,'2026-04-20','LUCY','Preparar cabina',1,2,'Principal');
+CREATE TABLE \`tblconsentimientos\` (
+  \`Id\` int NOT NULL,
+  \`NroCliente\` int DEFAULT NULL,
+  \`Salud\` text,
+  \`Medicacion\` text,
+  PRIMARY KEY (\`Id\`)
+) ENGINE=InnoDB;
+INSERT INTO \`tblconsentimientos\` VALUES (70,143,'OK','Vitamina D');
+CREATE TABLE \`tblfirmas\` (
+  \`Id\` int NOT NULL,
+  \`NroCliente\` int DEFAULT NULL,
+  \`Doc\` varchar(40) DEFAULT NULL,
+  \`Archivo\` varchar(80) DEFAULT NULL,
+  \`NroServicio\` int DEFAULT NULL,
+  \`Firma\` longtext,
+  PRIMARY KEY (\`Id\`)
+) ENGINE=InnoDB;
+INSERT INTO \`tblfirmas\` VALUES (80,143,'Consentimiento facial','firma.png',20,'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn2z3sAAAAASUVORK5CYII=');
+CREATE TABLE \`tblfotos\` (\`Id\` int NOT NULL, PRIMARY KEY (\`Id\`)) ENGINE=InnoDB;
+INSERT INTO \`tblfotos\` VALUES (1);
+`
+
+    const response = await request(app)
+      .post('/api/sql/analyze')
+      .set('Authorization', createAuthHeader())
+      .attach('file', Buffer.from(sampleSqlDump, 'utf8'), {
+        filename: '01dat.sql',
+        contentType: 'application/sql'
+      })
+
+    expect(response.status).toBe(200)
+    expect(response.body.summary).toEqual(
+      expect.objectContaining({
+        clientBonos: 1,
+        accountBalances: 1,
+        appointments: 1,
+        agendaNotes: 1,
+        consents: 1,
+        signatures: 1,
+        photoReferencesSkipped: 1
+      })
+    )
+  })
+
+  it('POST /api/sql/import blocks the commit when there is business data in the target database', async () => {
+    const tx: any = createSqlImportTx()
+    tx.client.count.mockResolvedValue(2)
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx))
+
+    const response = await request(app)
+      .post('/api/sql/import')
+      .set('Authorization', createAuthHeader())
+      .send(createSqlImportPayload())
+
+    expect(response.status).toBe(409)
+    expect(response.body.error).toContain('BD funcionalmente vacía')
+  })
+
+  it('POST /api/sql/import commits the SQL restore and reports omitted photo references', async () => {
+    const tx: any = createSqlImportTx()
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx))
+
+    const response = await request(app)
+      .post('/api/sql/import')
+      .set('Authorization', createAuthHeader())
+      .send(createSqlImportPayload())
+
+    expect(response.status).toBe(200)
+    expect(response.body.created).toEqual(
+      expect.objectContaining({
+        clientBonos: 1,
+        accountBalances: 1,
+        appointments: 1,
+        agendaBlocks: 1,
+        agendaNotes: 1
+      })
+    )
+    expect(response.body.omitted.photoReferencesSkipped).toBe(2)
+    expect(response.body.assetsGenerated).toEqual({ consents: 1, signatures: 1 })
+  })
+
   it('POST /api/appointments/import accepts a valid Excel file for admins', async () => {
     prismaMock.client.findMany.mockResolvedValue([
       {
@@ -872,6 +1335,44 @@ describe('API smoke tests', () => {
         enabled: false,
         sendClientInvites: true,
         calendarId: 'primary'
+      })
+    )
+  })
+
+  it('POST /api/calendar/sync returns 400 when Google Calendar is not connected', async () => {
+    prismaMock.googleCalendarConfig.findFirst.mockResolvedValue(null)
+
+    const response = await request(app)
+      .post('/api/calendar/sync')
+      .set('Authorization', createAuthHeader())
+
+    expect(response.status).toBe(400)
+    expect(response.body.error).toContain('Google Calendar no está conectado')
+  })
+
+  it('POST /api/calendar/sync runs a manual full sync for admins', async () => {
+    prismaMock.googleCalendarConfig.findFirst.mockResolvedValue({
+      id: 'calendar-config-1',
+      refreshToken: 'refresh-token',
+      calendarId: 'primary',
+      enabled: false,
+      sendClientInvites: true
+    })
+
+    const response = await request(app)
+      .post('/api/calendar/sync')
+      .set('Authorization', createAuthHeader())
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        message: expect.any(String),
+        summary: expect.objectContaining({
+          total: 0,
+          synced: 0,
+          failed: 0,
+          skipped: 0
+        })
       })
     )
   })

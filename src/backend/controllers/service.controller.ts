@@ -12,6 +12,47 @@ const buildSearchTerms = (value: string) =>
     .map((term) => term.trim())
     .filter(Boolean)
 
+const BONO_TEMPLATES_SETTING_KEY = 'bono_templates_catalog'
+
+const normalizeCategoryMatch = (value: unknown) =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ')
+
+const isForeignKeyConstraintError = (error: unknown) =>
+  error instanceof Prisma.PrismaClientKnownRequestError ||
+  (typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: string }).code === 'P2003')
+
+const hasLinkedBonoTemplates = async (serviceIds: string[]) => {
+  if (serviceIds.length === 0) return false
+
+  const setting = await prisma.setting.findUnique({
+    where: { key: BONO_TEMPLATES_SETTING_KEY }
+  })
+
+  if (!setting?.value) return false
+
+  try {
+    const parsed = JSON.parse(setting.value)
+    if (!Array.isArray(parsed)) return false
+
+    const serviceIdSet = new Set(serviceIds)
+
+    return parsed.some((template) => {
+      const templateServiceId = String(template?.serviceId || '').trim()
+      return templateServiceId && serviceIdSet.has(templateServiceId)
+    })
+  } catch {
+    return false
+  }
+}
+
 const parseDecimal = (value: unknown): number | null => {
   if (value === null || value === undefined || String(value).trim() === '') return null
   const raw = String(value).trim().replace(/\s*€\s*/g, '').replace('%', '').replace(/\s/g, '')
@@ -190,6 +231,13 @@ export const updateService = async (req: Request, res: Response) => {
 export const deleteService = async (req: Request, res: Response) => {
   try {
     const { id } = req.params
+    const linkedBonoTemplates = await hasLinkedBonoTemplates([id])
+
+    if (linkedBonoTemplates) {
+      return res.status(409).json({
+        error: 'No se puede eliminar el tratamiento porque está vinculado a bonos del catálogo'
+      })
+    }
 
     await prisma.service.delete({
       where: { id }
@@ -197,7 +245,172 @@ export const deleteService = async (req: Request, res: Response) => {
 
     res.json({ message: 'Service deleted successfully' })
   } catch (error) {
+    if (isForeignKeyConstraintError(error)) {
+      return res.status(409).json({
+        error: 'No se puede eliminar el tratamiento porque está vinculado a citas, ventas, bonos o presupuestos'
+      })
+    }
+
     console.error('Delete service error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+const findMatchingAppointmentLegend = (
+  legends: Array<{ id: string; name: string }>,
+  category: string
+) =>
+  legends.find((legend) => normalizeCategoryMatch(legend.name) === normalizeCategoryMatch(category)) || null
+
+export const renameServiceCategory = async (req: Request, res: Response) => {
+  try {
+    const currentCategory = String(req.body.currentCategory || '').trim()
+    const nextCategory = String(req.body.nextCategory || '').trim()
+
+    const matchingServices = await prisma.service.findMany({
+      where: { category: currentCategory },
+      select: { id: true }
+    })
+
+    if (matchingServices.length === 0) {
+      return res.status(404).json({ error: 'La familia seleccionada no existe' })
+    }
+
+    const legends = await prisma.appointmentLegend.findMany({
+      select: {
+        id: true,
+        name: true
+      }
+    })
+
+    const currentLegend = findMatchingAppointmentLegend(legends, currentCategory)
+    const nextLegend = findMatchingAppointmentLegend(legends, nextCategory)
+
+    const updateResult = await prisma.service.updateMany({
+      where: { category: currentCategory },
+      data: { category: nextCategory }
+    })
+
+    if (currentLegend) {
+      if (nextLegend && nextLegend.id !== currentLegend.id) {
+        await prisma.appointmentLegend.delete({
+          where: { id: currentLegend.id }
+        })
+      } else {
+        await prisma.appointmentLegend.update({
+          where: { id: currentLegend.id },
+          data: { name: nextCategory }
+        })
+      }
+    }
+
+    res.json({
+      message: 'Familia actualizada correctamente',
+      category: nextCategory,
+      affectedServices: updateResult.count
+    })
+  } catch (error) {
+    console.error('Rename service category error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const deleteServiceCategory = async (req: Request, res: Response) => {
+  try {
+    const category = String(req.body.category || '').trim()
+    const replacementCategory = String(req.body.replacementCategory || '').trim()
+
+    const matchingServices = await prisma.service.findMany({
+      where: { category },
+      select: { id: true }
+    })
+
+    if (matchingServices.length === 0) {
+      return res.status(404).json({ error: 'La familia seleccionada no existe' })
+    }
+
+    const updateResult = await prisma.service.updateMany({
+      where: { category },
+      data: { category: replacementCategory }
+    })
+
+    const legends = await prisma.appointmentLegend.findMany({
+      select: {
+        id: true,
+        name: true
+      }
+    })
+    const currentLegend = findMatchingAppointmentLegend(legends, category)
+
+    if (currentLegend) {
+      await prisma.appointmentLegend.delete({
+        where: { id: currentLegend.id }
+      })
+    }
+
+    res.json({
+      message: 'Familia eliminada correctamente',
+      category: replacementCategory,
+      affectedServices: updateResult.count
+    })
+  } catch (error) {
+    console.error('Delete service category error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const deleteServiceCategoryWithServices = async (req: Request, res: Response) => {
+  try {
+    const category = String(req.body.category || '').trim()
+
+    const matchingServices = await prisma.service.findMany({
+      where: { category },
+      select: { id: true }
+    })
+
+    if (matchingServices.length === 0) {
+      return res.status(404).json({ error: 'La familia seleccionada no existe' })
+    }
+
+    const serviceIds = matchingServices.map((service) => service.id)
+    const linkedBonoTemplates = await hasLinkedBonoTemplates(serviceIds)
+
+    if (linkedBonoTemplates) {
+      return res.status(409).json({
+        error: 'No se puede eliminar la familia porque alguno de sus tratamientos está vinculado a bonos del catálogo'
+      })
+    }
+
+    const deleteResult = await prisma.service.deleteMany({
+      where: { category }
+    })
+
+    const legends = await prisma.appointmentLegend.findMany({
+      select: {
+        id: true,
+        name: true
+      }
+    })
+    const currentLegend = findMatchingAppointmentLegend(legends, category)
+
+    if (currentLegend) {
+      await prisma.appointmentLegend.delete({
+        where: { id: currentLegend.id }
+      })
+    }
+
+    res.json({
+      message: 'Familia y tratamientos eliminados correctamente',
+      affectedServices: deleteResult.count
+    })
+  } catch (error) {
+    if (isForeignKeyConstraintError(error)) {
+      return res.status(409).json({
+        error: 'No se puede eliminar la familia porque alguno de sus tratamientos está vinculado a citas, ventas, bonos o presupuestos'
+      })
+    }
+
+    console.error('Delete service category with services error:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 }

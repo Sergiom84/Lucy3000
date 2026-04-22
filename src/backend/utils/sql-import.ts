@@ -8,11 +8,49 @@ import {
 type SqlPrimitive = string | number | null
 type SqlRecord = Record<string, SqlPrimitive>
 
+type SqlWarningStep =
+  | 'file'
+  | 'clients'
+  | 'services'
+  | 'products'
+  | 'bonos'
+  | 'clientBonos'
+  | 'accountBalances'
+  | 'appointments'
+  | 'agendaBlocks'
+  | 'agendaNotes'
+  | 'assets'
+  | 'unsupported'
+
+type SqlAnalysisSummary = {
+  professionals: number
+  clients: number
+  services: number
+  products: number
+  bonoTemplates: number
+  clientBonos: number
+  accountBalances: number
+  appointments: number
+  agendaBlocks: number
+  agendaNotes: number
+  consents: number
+  signatures: number
+  photoReferencesSkipped: number
+  unsupportedPopulatedTables: number
+  warnings: number
+}
+
+type SqlEditablePreview = {
+  id: string
+  selected: boolean
+  issues: string[]
+}
+
 export type SqlImportWarning = {
   code: string
   message: string
   severity: 'info' | 'warning'
-  step: 'file' | 'clients' | 'services' | 'products' | 'bonos' | 'clientBonos' | 'accountBalances' | 'appointments'
+  step: SqlWarningStep
   count?: number
 }
 
@@ -25,12 +63,10 @@ export type SqlProfessionalPreview = {
   isActive: boolean
 }
 
-export type SqlClientPreview = {
-  id: string
-  selected: boolean
-  issues: string[]
+export type SqlClientPreview = SqlEditablePreview & {
   legacyId: string
   legacyClientNumber: string
+  barcode: string | null
   fullName: string
   firstName: string
   lastName: string
@@ -49,15 +85,31 @@ export type SqlClientPreview = {
   legacyProfessionalCode: string | null
   clientBrand: string | null
   appliedTariff: string | null
-  notes: string | null
+  text9A: string | null
+  text9B: string | null
+  text15: string | null
+  text25: string | null
+  text100: string | null
+  integer1: number | null
+  integer2: number | null
+  giftVoucher: string | null
   photoRef: string | null
+  photoSkinType: string | null
+  webKey: string | null
+  discountProfile: string | null
+  globalClientNumber: string | null
+  globalUpdated: boolean
+  rejectPostal: boolean
+  rejectSms: boolean
+  rejectEmail: boolean
+  excludeSurvey: boolean
+  registeredSurvey: boolean
+  legacySha1: string | null
+  notes: string | null
   isActive: boolean
 }
 
-export type SqlServicePreview = {
-  id: string
-  selected: boolean
-  issues: string[]
+export type SqlServicePreview = SqlEditablePreview & {
   legacyId: string
   code: string
   name: string
@@ -72,10 +124,7 @@ export type SqlServicePreview = {
   isActive: boolean
 }
 
-export type SqlProductPreview = {
-  id: string
-  selected: boolean
-  issues: string[]
+export type SqlProductPreview = SqlEditablePreview & {
   legacyId: string
   legacyProductNumber: string
   sku: string
@@ -93,10 +142,7 @@ export type SqlProductPreview = {
   isActive: boolean
 }
 
-export type SqlBonoTemplatePreview = {
-  id: string
-  selected: boolean
-  issues: string[]
+export type SqlBonoTemplatePreview = SqlEditablePreview & {
   legacyServiceId: string
   serviceCode: string
   serviceName: string
@@ -107,10 +153,7 @@ export type SqlBonoTemplatePreview = {
   isActive: boolean
 }
 
-export type SqlClientBonoPreview = {
-  id: string
-  selected: boolean
-  issues: string[]
+export type SqlClientBonoPreview = SqlEditablePreview & {
   legacyId: string
   legacyNumber: string
   clientNumber: string
@@ -122,10 +165,7 @@ export type SqlClientBonoPreview = {
   legacyValue: number | null
 }
 
-export type SqlAccountBalancePreview = {
-  id: string
-  selected: boolean
-  issues: string[]
+export type SqlAccountBalancePreview = SqlEditablePreview & {
   legacyId: string
   legacyNumber: string
   clientNumber: string
@@ -136,10 +176,103 @@ export type SqlAccountBalancePreview = {
   rawConsumed: number | null
 }
 
-export type SqlAppointmentPreview = {
-  id: string
-  selected: boolean
-  issues: string[]
+export type SqlAppointmentPreview = SqlEditablePreview & {
+  legacyId: string
+  legacyClientNumber: string | null
+  clientName: string
+  phone: string | null
+  serviceCode: string | null
+  serviceName: string | null
+  date: string
+  startTime: string
+  endTime: string | null
+  durationMinutes: number | null
+  cabin: string | null
+  legacyProfessionalCode: string | null
+  legacyProfessionalName: string | null
+  secondaryProfessionalCode: string | null
+  status: string | null
+  notes: string | null
+  legacyPackNumber: string | null
+  targetUserId?: string | null
+}
+
+export type SqlAgendaBlockPreview = SqlEditablePreview & {
+  legacyId: string
+  legacyClientNumber: string | null
+  date: string
+  startTime: string
+  endTime: string | null
+  durationMinutes: number | null
+  cabin: string | null
+  legacyProfessionalCode: string | null
+  legacyProfessionalName: string | null
+  notes: string | null
+}
+
+export type SqlAgendaNotePreview = SqlEditablePreview & {
+  legacyId: string
+  dayKey: string
+  legacyProfessionalCode: string | null
+  legacyProfessionalName: string | null
+  text: string
+  isActive: boolean
+  agenda: string | null
+  stationNumber: number | null
+}
+
+export type SqlConsentPreview = SqlEditablePreview & {
+  legacyId: string
+  clientNumber: string
+  clientName: string | null
+  health: string | null
+  medication: string | null
+  fileName: string
+}
+
+export type SqlSignaturePreview = SqlEditablePreview & {
+  legacyId: string
+  clientNumber: string
+  clientName: string | null
+  docType: string | null
+  fileName: string
+  legacyServiceNumber: string | null
+  signatureBase64: string | null
+}
+
+export type SqlPhotoReferencePreview = {
+  tableName: string
+  rowCount: number
+}
+
+export type SqlUnsupportedTablePreview = {
+  tableName: string
+  rowCount: number
+}
+
+export type SqlImportAnalysis = {
+  sourceName: string
+  encoding: 'utf8' | 'latin1'
+  detectedTables: string[]
+  summary: SqlAnalysisSummary
+  warnings: SqlImportWarning[]
+  professionals: SqlProfessionalPreview[]
+  clients: SqlClientPreview[]
+  services: SqlServicePreview[]
+  products: SqlProductPreview[]
+  bonoTemplates: SqlBonoTemplatePreview[]
+  clientBonos: SqlClientBonoPreview[]
+  accountBalances: SqlAccountBalancePreview[]
+  appointments: SqlAppointmentPreview[]
+  agendaBlocks: SqlAgendaBlockPreview[]
+  agendaNotes: SqlAgendaNotePreview[]
+  consents: SqlConsentPreview[]
+  signatures: SqlSignaturePreview[]
+  photoReferencesSkipped: SqlPhotoReferencePreview[]
+  unsupportedPopulatedTables: SqlUnsupportedTablePreview[]
+}
+
+type NormalizedReservationPreview = {
   legacyId: string
   legacyClientNumber: string | null
   clientName: string
@@ -158,49 +291,33 @@ export type SqlAppointmentPreview = {
   notes: string | null
   legacyPackNumber: string | null
   isInternalBlock: boolean
-  targetUserId?: string | null
 }
 
-export type SqlImportAnalysis = {
-  sourceName: string
-  encoding: 'utf8' | 'latin1'
-  detectedTables: string[]
-  summary: {
-    professionals: number
-    clients: number
-    services: number
-    products: number
-    bonoTemplates: number
-    clientBonos: number
-    accountBalances: number
-    appointments: number
-    warnings: number
-  }
-  warnings: SqlImportWarning[]
-  professionals: SqlProfessionalPreview[]
-  clients: SqlClientPreview[]
-  services: SqlServicePreview[]
-  products: SqlProductPreview[]
-  bonoTemplates: SqlBonoTemplatePreview[]
-  clientBonos: SqlClientBonoPreview[]
-  accountBalances: SqlAccountBalancePreview[]
-  appointments: SqlAppointmentPreview[]
-}
-
-const SQL_TABLES = [
+const SQL_ANALYZED_TABLES = [
   'tblclientes',
   'tbltarifa',
   'tblproductos',
   'tblproductoscantidades',
   'tblbbpa',
   'tblreservas',
-  'tblusuarios'
+  'tblusuarios',
+  'tblreservasnotas',
+  'tblconsentimientos',
+  'tblfirmas',
+  'tblfotos',
+  'tblantesydespues',
+  'tblgalerias'
 ] as const
 
+const PHOTO_REFERENCE_TABLES = ['tblfotos', 'tblantesydespues', 'tblgalerias'] as const
+
+const SUPPORTED_ANALYSIS_TABLE_SET = new Set<string>(SQL_ANALYZED_TABLES)
+const PHOTO_REFERENCE_TABLE_SET = new Set<string>(PHOTO_REFERENCE_TABLES)
 const mojibakePattern = /Ã.|Â.|â.|ðŸ/g
 
 const compactText = (value: SqlPrimitive) => {
   if (value === null) return null
+
   const normalized = String(value)
     .replace(/\r?\n/g, ' ')
     .replace(/\s+/g, ' ')
@@ -246,6 +363,30 @@ const toTimeValue = (value: SqlPrimitive) => {
   return match ? match[1] : null
 }
 
+const toNullablePositiveString = (value: SqlPrimitive) => {
+  const parsed = toInteger(value)
+  if (parsed === null || parsed <= 0) {
+    return null
+  }
+
+  return String(parsed)
+}
+
+const normalizeGender = (value: SqlPrimitive) => {
+  if (typeof value === 'number') {
+    if (value === 1) return 'F'
+    if (value === 0) return 'M'
+  }
+
+  const text = compactText(value)
+  if (!text) return null
+
+  if (/^(1|f|femenino|mujer)$/i.test(text)) return 'F'
+  if (/^(0|m|masculino|hombre)$/i.test(text)) return 'M'
+
+  return text
+}
+
 const splitClientName = (fullName: string) => {
   const trimmed = fullName.trim()
   if (!trimmed) {
@@ -282,14 +423,16 @@ const decodeSqlBuffer = (buffer: Buffer): { content: string; encoding: 'utf8' | 
 const createTableRegex = (tableName: string) =>
   new RegExp(`CREATE TABLE \\\`${tableName}\\\` \\(([\\s\\S]*?)\\) ENGINE=`, 'i')
 
-const insertRegex = (tableName: string) =>
-  new RegExp(`INSERT INTO \\\`${tableName}\\\` VALUES ([\\s\\S]*?);`, 'gi')
-
 const extractColumns = (content: string, tableName: string) => {
   const match = createTableRegex(tableName).exec(content)
   if (!match) return []
 
-  return [...match[1].matchAll(/`([^`]+)`/g)].map((entry) => entry[1])
+  return match[1]
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('`'))
+    .map((line) => /^`([^`]+)`/.exec(line)?.[1] ?? null)
+    .filter((column): column is string => Boolean(column))
 }
 
 const parseToken = (rawValue: string, quoted: boolean): SqlPrimitive => {
@@ -401,28 +544,42 @@ const parseInsertRows = (valuesSegment: string) => {
   return rows
 }
 
-const extractTableRecords = (content: string, tableName: string): SqlRecord[] => {
-  const columns = extractColumns(content, tableName)
-  if (columns.length === 0) return []
+const collectInsertRowsByTable = (content: string) => {
+  const rowsByTable = new Map<string, SqlPrimitive[][]>()
+  const insertMatcher = /INSERT INTO `([^`]+)` VALUES ([\s\S]*?);/gi
 
-  const records: SqlRecord[] = []
-  const matches = content.matchAll(insertRegex(tableName))
-
-  for (const match of matches) {
-    const rows = parseInsertRows(match[1])
-
-    for (const row of rows) {
-      const record: SqlRecord = {}
-
-      columns.forEach((column, index) => {
-        record[column] = row[index] ?? null
-      })
-
-      records.push(record)
-    }
+  for (const match of content.matchAll(insertMatcher)) {
+    const tableName = match[1]
+    const parsedRows = parseInsertRows(match[2])
+    const currentRows = rowsByTable.get(tableName) || []
+    currentRows.push(...parsedRows)
+    rowsByTable.set(tableName, currentRows)
   }
 
-  return records
+  return rowsByTable
+}
+
+const extractTableRecords = (
+  content: string,
+  tableName: string,
+  rowsByTable: Map<string, SqlPrimitive[][]>
+): SqlRecord[] => {
+  const columns = extractColumns(content, tableName)
+  const rows = rowsByTable.get(tableName) || []
+
+  if (columns.length === 0 || rows.length === 0) {
+    return []
+  }
+
+  return rows.map((row) => {
+    const record: SqlRecord = {}
+
+    columns.forEach((column, index) => {
+      record[column] = row[index] ?? null
+    })
+
+    return record
+  })
 }
 
 const buildIssueList = (...issues: Array<string | null | undefined>) => issues.filter(Boolean) as string[]
@@ -433,7 +590,7 @@ const buildProfessionals = (records: SqlRecord[]) =>
   records
     .map<SqlProfessionalPreview | null>((record) => {
       const code = normalizeCode(record.Codigo)
-      if (!code || code === '@') return null
+      if (!code) return null
 
       const shortName = compactText(record.TUNombreCorto)
       const longName = compactText(record.TUNombreLargo)
@@ -456,6 +613,9 @@ const buildClients = (records: SqlRecord[]) =>
     .map<SqlClientPreview>((record) => {
       const fullName = compactText(record.Nombre) ?? ''
       const splitName = splitClientName(fullName)
+      const firstName = compactText(record.Nom) || splitName.firstName
+      const lastName =
+        [compactText(record.Ap1), compactText(record.Ap2)].filter(Boolean).join(' ') || splitName.lastName
       const mobilePhone = compactText(record.Movil)
       const landlinePhone = compactText(record.Tfno)
       const phone = mobilePhone || landlinePhone
@@ -470,9 +630,10 @@ const buildClients = (records: SqlRecord[]) =>
         ),
         legacyId: String(record.Id ?? ''),
         legacyClientNumber: String(record.NroCliente ?? ''),
+        barcode: compactText(record.CodBarras),
         fullName,
-        firstName: splitName.firstName,
-        lastName: splitName.lastName,
+        firstName,
+        lastName,
         dni: compactText(record.DNI),
         email: compactText(record.eMail),
         phone,
@@ -484,12 +645,31 @@ const buildClients = (records: SqlRecord[]) =>
         postalCode: compactText(record.CP),
         birthDate: toDateValue(record.FechaDeNacimiento),
         registrationDate: toDateValue(record.FechaAlta),
-        gender: compactText(record.Sexo),
+        gender: normalizeGender(record.Sexo),
         legacyProfessionalCode: normalizeCode(record.Oficiala),
         clientBrand: compactText(record.Marca),
         appliedTariff: compactText(record.TarifaAAplicar),
-        notes: compactText(record.Nota),
+        text9A: compactText(record.Texto9a),
+        text9B: compactText(record.Texto9b),
+        text15: compactText(record.Texto15),
+        text25: compactText(record.Texto25),
+        text100: compactText(record.Texto100),
+        integer1: toInteger(record.Entero1),
+        integer2: toInteger(record.Entero2),
+        giftVoucher: compactText(record.Obsequio),
         photoRef: compactText(record.FichFoto),
+        photoSkinType: compactText(record.Fototipo),
+        webKey: compactText(record.ClaveWeb),
+        discountProfile: compactText(record.Perfil),
+        globalClientNumber: toNullablePositiveString(record.NroClienteGlobal),
+        globalUpdated: toBooleanFlag(record.ActualizadoGlobal),
+        rejectPostal: toBooleanFlag(record.RechazaCorrespondencia),
+        rejectSms: toBooleanFlag(record.RechazaSMS),
+        rejectEmail: toBooleanFlag(record.RechazaEmail),
+        excludeSurvey: toBooleanFlag(record.ExcSurvey),
+        registeredSurvey: toBooleanFlag(record.RegSurvey),
+        legacySha1: compactText(record.TCSSHA1),
+        notes: compactText(record.Nota),
         isActive
       }
     })
@@ -679,7 +859,7 @@ const buildAccountBalances = (records: SqlRecord[]) =>
 
       return {
         id: `legacy-account-balance-${record.Id}`,
-        selected: false,
+        selected: amount !== null,
         issues: buildIssueList(
           amount === null ? 'No se ha podido derivar el importe del abono legacy' : 'Importe derivado desde campos legacy; revisar antes de importar'
         ),
@@ -695,7 +875,7 @@ const buildAccountBalances = (records: SqlRecord[]) =>
     })
     .sort((left, right) => left.clientNumber.localeCompare(right.clientNumber, 'es', { sensitivity: 'base' }))
 
-const buildAppointments = (
+const buildNormalizedReservations = (
   records: SqlRecord[],
   professionals: SqlProfessionalPreview[],
   services: SqlServicePreview[]
@@ -710,7 +890,7 @@ const buildAppointments = (
   }
 
   return records
-    .map<SqlAppointmentPreview>((record) => {
+    .map<NormalizedReservationPreview>((record) => {
       const legacyProfessionalCode = normalizeCode(record.Oficial1)
       const secondaryProfessionalCode = normalizeCode(record.Oficial2)
       const legacyProfessionalName =
@@ -724,27 +904,21 @@ const buildAppointments = (
       const normalizedProfessional =
         legacyProfessionalName ? resolveAppointmentProfessional(legacyProfessionalName, cabin) : null
       const notes = compactText(record.Comentario)
+      const clientName = compactText(record.NombreCliente) ?? ''
       const isInternalBlock = isLikelyAgendaBlockRow({
         clientCode: record.NroCliente,
-        clientName: record.NombreCliente,
+        clientName,
         serviceCode,
         serviceDescription: service?.name
       })
 
       return {
-        id: `legacy-appointment-${record.Id}`,
-        selected: !isInternalBlock,
-        issues: buildIssueList(
-          isInternalBlock ? 'Bloque interno o nota de agenda detectada' : null,
-          !serviceCode ? 'Cita sin código de tratamiento' : null,
-          !compactText(record.NombreCliente) ? 'Cita sin nombre de cliente' : null
-        ),
         legacyId: String(record.Id ?? ''),
         legacyClientNumber: compactText(record.NroCliente),
-        clientName: compactText(record.NombreCliente) ?? '',
+        clientName,
         phone: compactText(record.Telefono),
         serviceCode,
-        serviceName: service?.name ?? null,
+        serviceName: service?.name ?? compactText(record.CodSubSer),
         date: toDateValue(record.Fecha) ?? '',
         startTime,
         endTime,
@@ -762,10 +936,205 @@ const buildAppointments = (
     .sort((left, right) => `${left.date} ${left.startTime}`.localeCompare(`${right.date} ${right.startTime}`))
 }
 
+const buildAppointments = (reservations: NormalizedReservationPreview[]) =>
+  reservations
+    .filter((reservation) => !reservation.isInternalBlock)
+    .map<SqlAppointmentPreview>((reservation) => ({
+      id: `legacy-appointment-${reservation.legacyId}`,
+      selected: true,
+      issues: buildIssueList(
+        !reservation.serviceCode ? 'Cita sin código de tratamiento' : null,
+        !reservation.clientName ? 'Cita sin nombre de cliente' : null,
+        !reservation.date ? 'Cita sin fecha válida' : null
+      ),
+      legacyId: reservation.legacyId,
+      legacyClientNumber: reservation.legacyClientNumber,
+      clientName: reservation.clientName,
+      phone: reservation.phone,
+      serviceCode: reservation.serviceCode,
+      serviceName: reservation.serviceName,
+      date: reservation.date,
+      startTime: reservation.startTime,
+      endTime: reservation.endTime,
+      durationMinutes: reservation.durationMinutes,
+      cabin: reservation.cabin,
+      legacyProfessionalCode: reservation.legacyProfessionalCode,
+      legacyProfessionalName: reservation.legacyProfessionalName,
+      secondaryProfessionalCode: reservation.secondaryProfessionalCode,
+      status: reservation.status,
+      notes: reservation.notes,
+      legacyPackNumber: reservation.legacyPackNumber
+    }))
+
+const buildAgendaBlocks = (reservations: NormalizedReservationPreview[]) =>
+  reservations
+    .filter((reservation) => reservation.isInternalBlock)
+    .map<SqlAgendaBlockPreview>((reservation) => ({
+      id: `legacy-agenda-block-${reservation.legacyId}`,
+      selected: true,
+      issues: buildIssueList(
+        !reservation.date ? 'Bloque sin fecha válida' : null,
+        !reservation.startTime ? 'Bloque sin hora de inicio' : null
+      ),
+      legacyId: reservation.legacyId,
+      legacyClientNumber: reservation.legacyClientNumber,
+      date: reservation.date,
+      startTime: reservation.startTime,
+      endTime: reservation.endTime,
+      durationMinutes: reservation.durationMinutes,
+      cabin: reservation.cabin,
+      legacyProfessionalCode: reservation.legacyProfessionalCode,
+      legacyProfessionalName: reservation.legacyProfessionalName,
+      notes:
+        [reservation.clientName, reservation.serviceName, reservation.notes]
+          .filter(Boolean)
+          .join(' · ') || null
+    }))
+
+const buildAgendaNotes = (
+  records: SqlRecord[],
+  professionals: SqlProfessionalPreview[]
+) => {
+  const professionalByCode = new Map(professionals.map((professional) => [professional.code, professional]))
+
+  return records
+    .map<SqlAgendaNotePreview>((record) => {
+      const legacyProfessionalCode = normalizeCode(record.Oficial)
+      const legacyProfessionalName =
+        (legacyProfessionalCode ? professionalByCode.get(legacyProfessionalCode)?.name : null) || legacyProfessionalCode
+      const dayKey = toDateValue(record.Fecha) ?? ''
+      const text = compactText(record.Nota) ?? ''
+
+      return {
+        id: `legacy-agenda-note-${record.Id}`,
+        selected: true,
+        issues: buildIssueList(
+          !dayKey ? 'Nota de agenda sin fecha válida' : null,
+          !text ? 'Nota de agenda vacía' : null
+        ),
+        legacyId: String(record.Id ?? ''),
+        dayKey,
+        legacyProfessionalCode,
+        legacyProfessionalName,
+        text,
+        isActive: record.Activo === null ? true : toBooleanFlag(record.Activo),
+        agenda: compactText(record.Agenda),
+        stationNumber: toInteger(record.NroEstacion)
+      }
+    })
+    .sort((left, right) => `${left.dayKey}-${left.legacyId}`.localeCompare(`${right.dayKey}-${right.legacyId}`))
+}
+
+const buildConsentFileName = (clientNumber: string, legacyId: string) =>
+  `consentimiento-legacy-${clientNumber || 'sin-cliente'}-${legacyId}.txt`
+
+const buildSignatureFileName = (clientNumber: string, legacyId: string, docType: string | null) => {
+  const normalizedDocType = (docType || 'firma')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+
+  return `${normalizedDocType || 'firma'}-${clientNumber || 'sin-cliente'}-${legacyId}.png`
+}
+
+const sanitizeBase64Signature = (value: SqlPrimitive) => {
+  const text = compactText(value)
+  if (!text) return null
+
+  const dataUriMatch = text.match(/^data:[^;]+;base64,(.+)$/i)
+  return (dataUriMatch ? dataUriMatch[1] : text).replace(/\s+/g, '')
+}
+
+const buildConsents = (records: SqlRecord[], clients: SqlClientPreview[]) => {
+  const clientNameByNumber = new Map(clients.map((client) => [client.legacyClientNumber, client.fullName]))
+
+  return records
+    .map<SqlConsentPreview>((record) => {
+      const clientNumber = String(record.NroCliente ?? '')
+      const health = compactText(record.Salud)
+      const medication = compactText(record.Medicacion)
+
+      return {
+        id: `legacy-consent-${record.Id}`,
+        selected: true,
+        issues: buildIssueList(!health && !medication ? 'Consentimiento sin contenido reconocible' : null),
+        legacyId: String(record.Id ?? ''),
+        clientNumber,
+        clientName: clientNameByNumber.get(clientNumber) || null,
+        health,
+        medication,
+        fileName: buildConsentFileName(clientNumber, String(record.Id ?? ''))
+      }
+    })
+    .sort((left, right) => left.clientNumber.localeCompare(right.clientNumber, 'es', { sensitivity: 'base' }))
+}
+
+const buildSignatures = (records: SqlRecord[], clients: SqlClientPreview[]) => {
+  const clientNameByNumber = new Map(clients.map((client) => [client.legacyClientNumber, client.fullName]))
+
+  return records
+    .map<SqlSignaturePreview>((record) => {
+      const clientNumber = String(record.NroCliente ?? '')
+      const docType = compactText(record.Doc)
+      const signatureBase64 = sanitizeBase64Signature(record.Firma)
+
+      return {
+        id: `legacy-signature-${record.Id}`,
+        selected: Boolean(signatureBase64),
+        issues: buildIssueList(!signatureBase64 ? 'Firma sin contenido base64 válido' : null),
+        legacyId: String(record.Id ?? ''),
+        clientNumber,
+        clientName: clientNameByNumber.get(clientNumber) || null,
+        docType,
+        fileName: buildSignatureFileName(clientNumber, String(record.Id ?? ''), docType),
+        legacyServiceNumber: toNullablePositiveString(record.NroServicio),
+        signatureBase64
+      }
+    })
+    .sort((left, right) => left.clientNumber.localeCompare(right.clientNumber, 'es', { sensitivity: 'base' }))
+}
+
+const buildPhotoReferences = (rowsByTable: Map<string, SqlPrimitive[][]>) =>
+  PHOTO_REFERENCE_TABLES.map((tableName) => ({
+    tableName,
+    rowCount: rowsByTable.get(tableName)?.length || 0
+  })).filter((item) => item.rowCount > 0)
+
+const buildUnsupportedPopulatedTables = (
+  detectedTables: string[],
+  rowsByTable: Map<string, SqlPrimitive[][]>
+) =>
+  detectedTables
+    .map<SqlUnsupportedTablePreview | null>((tableName) => {
+      if (SUPPORTED_ANALYSIS_TABLE_SET.has(tableName) || PHOTO_REFERENCE_TABLE_SET.has(tableName)) {
+        return null
+      }
+
+      const rowCount = rowsByTable.get(tableName)?.length || 0
+      if (rowCount <= 0) {
+        return null
+      }
+
+      return {
+        tableName,
+        rowCount
+      }
+    })
+    .filter((table): table is SqlUnsupportedTablePreview => Boolean(table))
+    .sort((left, right) => right.rowCount - left.rowCount || left.tableName.localeCompare(right.tableName))
+
 const buildWarnings = (payload: {
+  sourceName: string
   missingTables: string[]
   accountBalances: SqlAccountBalancePreview[]
-  appointments: SqlAppointmentPreview[]
+  agendaBlocks: SqlAgendaBlockPreview[]
+  agendaNotes: SqlAgendaNotePreview[]
+  consents: SqlConsentPreview[]
+  signatures: SqlSignaturePreview[]
+  photoReferences: SqlPhotoReferencePreview[]
+  unsupportedPopulatedTables: SqlUnsupportedTablePreview[]
 }) => {
   const warnings: SqlImportWarning[] = []
 
@@ -779,14 +1148,23 @@ const buildWarnings = (payload: {
     })
   }
 
-  const internalBlocks = payload.appointments.filter((appointment) => appointment.isInternalBlock).length
-  if (internalBlocks > 0) {
+  if (payload.agendaBlocks.length > 0) {
     warnings.push({
-      code: 'appointments_internal_blocks',
-      message: 'Se han detectado bloques internos o notas de agenda entre las citas legacy',
+      code: 'agenda_blocks_detected',
+      message: 'Se han detectado bloqueos internos en la agenda legacy y se restaurarán aparte de las citas',
       severity: 'warning',
-      step: 'appointments',
-      count: internalBlocks
+      step: 'agendaBlocks',
+      count: payload.agendaBlocks.length
+    })
+  }
+
+  if (payload.agendaNotes.length > 0) {
+    warnings.push({
+      code: 'agenda_notes_detected',
+      message: 'Se han detectado notas diarias de agenda legacy',
+      severity: 'info',
+      step: 'agendaNotes',
+      count: payload.agendaNotes.length
     })
   }
 
@@ -800,15 +1178,66 @@ const buildWarnings = (payload: {
     })
   }
 
+  if (payload.consents.length > 0) {
+    warnings.push({
+      code: 'consents_detected',
+      message: 'Se han detectado consentimientos legacy para conservar como archivos del cliente',
+      severity: 'info',
+      step: 'assets',
+      count: payload.consents.length
+    })
+  }
+
+  if (payload.signatures.length > 0) {
+    warnings.push({
+      code: 'signatures_detected',
+      message: 'Se han detectado firmas legacy que se exportarán como assets del cliente',
+      severity: 'info',
+      step: 'assets',
+      count: payload.signatures.length
+    })
+  }
+
+  const skippedPhotoReferences = payload.photoReferences.reduce((count, item) => count + item.rowCount, 0)
+  if (skippedPhotoReferences > 0) {
+    warnings.push({
+      code: 'photo_references_skipped',
+      message: 'Hay referencias de fotos legacy detectadas, pero v1 no las importará',
+      severity: 'warning',
+      step: 'assets',
+      count: skippedPhotoReferences
+    })
+  }
+
+  if (payload.unsupportedPopulatedTables.length > 0) {
+    warnings.push({
+      code: 'unsupported_populated_tables',
+      message: 'Hay tablas legacy con datos no soportados todavía y se reportarán como alcance pendiente',
+      severity: 'warning',
+      step: 'unsupported',
+      count: payload.unsupportedPopulatedTables.length
+    })
+  }
+
+  if (!/01dat/i.test(payload.sourceName)) {
+    warnings.push({
+      code: 'source_name_non_standard',
+      message: 'El nombre del fichero no coincide con 01dat.sql. Revisa que pertenezca a la familia soportada',
+      severity: 'info',
+      step: 'file'
+    })
+  }
+
   return warnings
 }
 
 export const analyzeLegacySqlDump = (buffer: Buffer, sourceName: string): SqlImportAnalysis => {
   const { content, encoding } = decodeSqlBuffer(buffer)
   const detectedTables = [...content.matchAll(/CREATE TABLE `([^`]+)`/g)].map((match) => match[1])
+  const rowsByTable = collectInsertRowsByTable(content)
   const relevantRecords = Object.fromEntries(
-    SQL_TABLES.map((tableName) => [tableName, extractTableRecords(content, tableName)])
-  ) as Record<(typeof SQL_TABLES)[number], SqlRecord[]>
+    SQL_ANALYZED_TABLES.map((tableName) => [tableName, extractTableRecords(content, tableName, rowsByTable)])
+  ) as Record<(typeof SQL_ANALYZED_TABLES)[number], SqlRecord[]>
 
   const professionals = buildProfessionals(relevantRecords.tblusuarios)
   const services = buildServices(relevantRecords.tbltarifa)
@@ -816,14 +1245,27 @@ export const analyzeLegacySqlDump = (buffer: Buffer, sourceName: string): SqlImp
   const bonoTemplates = buildBonoTemplates(relevantRecords.tbltarifa)
   const clientBonos = buildClientBonos(relevantRecords.tblbbpa)
   const accountBalances = buildAccountBalances(relevantRecords.tblbbpa)
-  const appointments = buildAppointments(relevantRecords.tblreservas, professionals, services)
   const clients = buildClients(relevantRecords.tblclientes)
+  const normalizedReservations = buildNormalizedReservations(relevantRecords.tblreservas, professionals, services)
+  const appointments = buildAppointments(normalizedReservations)
+  const agendaBlocks = buildAgendaBlocks(normalizedReservations)
+  const agendaNotes = buildAgendaNotes(relevantRecords.tblreservasnotas, professionals)
+  const consents = buildConsents(relevantRecords.tblconsentimientos, clients)
+  const signatures = buildSignatures(relevantRecords.tblfirmas, clients)
+  const photoReferencesSkipped = buildPhotoReferences(rowsByTable)
+  const unsupportedPopulatedTables = buildUnsupportedPopulatedTables(detectedTables, rowsByTable)
 
-  const missingTables = SQL_TABLES.filter((tableName) => !detectedTables.includes(tableName))
+  const missingTables = SQL_ANALYZED_TABLES.filter((tableName) => !detectedTables.includes(tableName))
   const warnings = buildWarnings({
+    sourceName,
     missingTables,
     accountBalances,
-    appointments
+    agendaBlocks,
+    agendaNotes,
+    consents,
+    signatures,
+    photoReferences: photoReferencesSkipped,
+    unsupportedPopulatedTables
   })
 
   return {
@@ -839,6 +1281,12 @@ export const analyzeLegacySqlDump = (buffer: Buffer, sourceName: string): SqlImp
       clientBonos: clientBonos.length,
       accountBalances: accountBalances.length,
       appointments: appointments.length,
+      agendaBlocks: agendaBlocks.length,
+      agendaNotes: agendaNotes.length,
+      consents: consents.length,
+      signatures: signatures.length,
+      photoReferencesSkipped: photoReferencesSkipped.reduce((count, item) => count + item.rowCount, 0),
+      unsupportedPopulatedTables: unsupportedPopulatedTables.length,
       warnings: warnings.length
     },
     warnings,
@@ -849,6 +1297,12 @@ export const analyzeLegacySqlDump = (buffer: Buffer, sourceName: string): SqlImp
     bonoTemplates,
     clientBonos,
     accountBalances,
-    appointments
+    appointments,
+    agendaBlocks,
+    agendaNotes,
+    consents,
+    signatures,
+    photoReferencesSkipped,
+    unsupportedPopulatedTables
   }
 }

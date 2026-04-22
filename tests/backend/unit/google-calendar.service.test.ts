@@ -125,4 +125,150 @@ describe('googleCalendar.service', () => {
       error: null
     })
   })
+
+  it('formats nested Google API error objects into readable messages', async () => {
+    const service = new GoogleCalendarService()
+    const config = {
+      id: 'calendar-config-1',
+      refreshToken: 'refresh-token',
+      calendarId: 'primary',
+      enabled: true,
+      sendClientInvites: true
+    }
+
+    vi.spyOn(service as any, 'getStoredConfig').mockResolvedValue(config)
+    vi.spyOn(service as any, 'getAuthorizedCalendar').mockResolvedValue({
+      config,
+      calendar: {
+        events: {
+          insert: vi.fn().mockRejectedValue({
+            response: {
+              data: {
+                error: {
+                  code: 403,
+                  message: 'Insufficient Permission',
+                  status: 'PERMISSION_DENIED'
+                }
+              }
+            }
+          })
+        }
+      }
+    })
+
+    const result = await service.upsertAppointmentEvent({
+      appointmentId: 'appointment-1',
+      title: 'Limpieza facial - Ana',
+      description: 'Cita',
+      date: '2099-06-15',
+      startTime: '10:00',
+      endTime: '10:30',
+      clientEmail: 'ana@example.com',
+      clientName: 'Ana'
+    })
+
+    expect(result).toEqual({
+      eventId: null,
+      status: 'ERROR',
+      error: 'Insufficient Permission (PERMISSION_DENIED)'
+    })
+  })
+
+  it('uses Europe/Madrid local date when building calendar datetimes from stored UTC dates', async () => {
+    const service = new GoogleCalendarService()
+    const config = {
+      id: 'calendar-config-1',
+      refreshToken: 'refresh-token',
+      calendarId: 'primary',
+      enabled: true,
+      sendClientInvites: true
+    }
+    const insert = vi.fn().mockResolvedValue({
+      data: {
+        id: 'event-1'
+      }
+    })
+
+    vi.spyOn(service as any, 'getStoredConfig').mockResolvedValue(config)
+    vi.spyOn(service as any, 'getAuthorizedCalendar').mockResolvedValue({
+      config,
+      calendar: {
+        events: {
+          insert
+        }
+      }
+    })
+
+    await service.upsertAppointmentEvent({
+      appointmentId: 'appointment-1',
+      title: 'Dep. electrica 20 min - Julia',
+      description: 'Cita',
+      date: new Date('2026-05-17T22:00:00.000Z'),
+      startTime: '11:00',
+      endTime: '11:30',
+      clientName: 'Julia'
+    })
+
+    expect(insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestBody: expect.objectContaining({
+          start: expect.objectContaining({
+            dateTime: '2026-05-18T11:00:00'
+          }),
+          end: expect.objectContaining({
+            dateTime: '2026-05-18T11:30:00'
+          })
+        })
+      })
+    )
+  })
+
+  it('allows an explicit manual sync even when automatic sync is disabled', async () => {
+    const service = new GoogleCalendarService()
+    const config = {
+      id: 'calendar-config-1',
+      refreshToken: 'refresh-token',
+      calendarId: 'primary',
+      enabled: false,
+      sendClientInvites: true
+    }
+    const insert = vi.fn().mockResolvedValue({
+      data: {
+        id: 'event-1'
+      }
+    })
+
+    vi.spyOn(service as any, 'getStoredConfig').mockResolvedValue(config)
+    vi.spyOn(service as any, 'getAuthorizedCalendar').mockResolvedValue({
+      config,
+      calendar: {
+        events: {
+          insert
+        }
+      }
+    })
+
+    const result = await service.upsertAppointmentEvent(
+      {
+        appointmentId: 'appointment-1',
+        title: 'Limpieza facial - Ana',
+        description: 'Cita',
+        date: '2099-06-15',
+        startTime: '10:00',
+        endTime: '10:30',
+        clientEmail: 'ana@example.com',
+        clientName: 'Ana'
+      },
+      {
+        forceSync: true
+      }
+    )
+
+    expect(insert).toHaveBeenCalledOnce()
+    expect(result).toEqual({
+      eventId: 'event-1',
+      status: 'SYNCED',
+      error: null
+    })
+  })
 })

@@ -70,6 +70,7 @@ export default function Settings() {
   const [calendarConfig, setCalendarConfig] = useState<GoogleCalendarConfig>(DEFAULT_CALENDAR_CONFIG)
   const [loadingCalendar, setLoadingCalendar] = useState(false)
   const [savingCalendar, setSavingCalendar] = useState(false)
+  const [syncingCalendar, setSyncingCalendar] = useState(false)
   const [calendarId, setCalendarId] = useState(DEFAULT_CALENDAR_CONFIG.calendarId)
   const [desktopExePath, setDesktopExePath] = useState('')
   const [desktopUserDataPath, setDesktopUserDataPath] = useState('')
@@ -174,7 +175,7 @@ export default function Settings() {
       setSavingCalendar(true)
 
       const trimmedCalendarId = calendarId.trim() || 'primary'
-      await api.put('/calendar/config', {
+      const response = await api.put('/calendar/config', {
         enabled: calendarConfig.enabled,
         sendClientInvites: calendarConfig.sendClientInvites,
         calendarId: trimmedCalendarId
@@ -185,7 +186,7 @@ export default function Settings() {
         calendarId: trimmedCalendarId
       }))
       setCalendarId(trimmedCalendarId)
-      toast.success('Configuración de Google Calendar actualizada')
+      toast.success(response.data?.message || 'Configuración de Google Calendar actualizada')
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Error al guardar configuración')
     } finally {
@@ -205,6 +206,21 @@ export default function Settings() {
       toast.success('Google Calendar desconectado')
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Error al desconectar Google Calendar')
+    }
+  }
+
+  const handleManualCalendarSync = async () => {
+    if (!isAdmin) return
+
+    try {
+      setSyncingCalendar(true)
+      const response = await api.post('/calendar/sync')
+      toast.success(response.data?.message || 'Sincronización completada')
+      await loadCalendarConfig()
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Error al ejecutar la sincronización')
+    } finally {
+      setSyncingCalendar(false)
     }
   }
 
@@ -280,7 +296,7 @@ export default function Settings() {
 
   const handleRestoreBackup = async () => {
     if (!desktopMode) return
-    if (!confirm('Esto reemplazara la base de datos actual con el backup seleccionado. Se creara una copia de seguridad automatica antes de restaurar. ¿Continuar?')) return
+    if (!confirm('Esto reemplazara la base de datos actual con el backup seleccionado. Si el backup es completo, tambien se restauraran los assets locales del cliente. Se creara una copia de seguridad automatica antes de restaurar. ¿Continuar?')) return
     try {
       const result = await window.electronAPI!.backup.restore()
       if (result.success) {
@@ -707,13 +723,23 @@ export default function Settings() {
                 </p>
               </div>
 
-              <button
-                onClick={handleSaveCalendarConfig}
-                className="btn btn-primary w-full"
-                disabled={savingCalendar}
-              >
-                {savingCalendar ? 'Guardando...' : 'Guardar configuración'}
-              </button>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <button
+                  onClick={handleSaveCalendarConfig}
+                  className="btn btn-primary w-full"
+                  disabled={savingCalendar || syncingCalendar}
+                >
+                  {savingCalendar ? 'Guardando...' : 'Guardar configuración'}
+                </button>
+
+                <button
+                  onClick={handleManualCalendarSync}
+                  className="btn btn-secondary w-full"
+                  disabled={savingCalendar || syncingCalendar}
+                >
+                  {syncingCalendar ? 'Sincronizando...' : 'Sincronización'}
+                </button>
+              </div>
             </div>
           ) : (
             <div className="space-y-4">
@@ -850,7 +876,7 @@ export default function Settings() {
                 className="btn btn-primary w-full"
                 disabled={creatingBackup}
               >
-                {creatingBackup ? 'Creando backup...' : 'Hacer backup ahora'}
+                {creatingBackup ? 'Creando backup...' : 'Hacer backup completo ahora'}
               </button>
 
               <button

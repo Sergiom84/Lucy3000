@@ -2,11 +2,10 @@ import { Prisma } from '@prisma/client'
 import { Request, Response } from 'express'
 import { prisma } from '../db'
 import { AuthRequest } from '../middleware/auth.middleware'
-import { AppointmentSyncInput, googleCalendarService } from '../services/googleCalendar.service'
+import { CalendarSyncResult, googleCalendarService } from '../services/googleCalendar.service'
 import {
   getAppointmentDisplayEmail,
-  getAppointmentDisplayName,
-  getAppointmentDisplayPhone
+  getAppointmentDisplayName
 } from '../utils/customer-display'
 import { logError, logWarn } from '../utils/logger'
 import { isActiveAppointmentStatus, validateAppointmentSlot } from '../utils/appointment-validation'
@@ -39,19 +38,33 @@ import {
   getProfessionalCatalog,
   normalizeProfessionalName
 } from '../utils/professional-catalog'
+import {
+  appointmentCalendarSyncInclude,
+  buildAppointmentCalendarSyncInput
+} from '../utils/appointment-calendar'
+import {
+  doesAppointmentMatchBonoService,
+  type ComparableBonoTemplate
+} from '../utils/bonoServiceMatch'
+import { readAppointmentBonoTemplates } from '../utils/bonoTemplateCatalog'
 
 const appointmentInclude = {
-  client: true,
-  user: {
-    select: { id: true, name: true, email: true }
-  },
-  service: true,
-  appointmentServices: {
-    include: {
-      service: true
-    },
-    orderBy: {
-      sortOrder: 'asc' as const
+  ...appointmentCalendarSyncInclude,
+  bonoSessions: {
+    orderBy: { sessionNumber: 'asc' as const },
+    select: {
+      id: true,
+      bonoPackId: true,
+      sessionNumber: true,
+      status: true,
+      consumedAt: true,
+      appointmentId: true,
+      bonoPack: {
+        select: {
+          id: true,
+          name: true
+        }
+      }
     }
   },
   sale: {
@@ -79,6 +92,30 @@ const appointmentInclude = {
     }
   }
 } satisfies Prisma.AppointmentInclude
+
+const appointmentChargeBonoPackInclude = {
+  service: {
+    select: {
+      id: true,
+      name: true,
+      category: true,
+      serviceCode: true
+    }
+  },
+  sessions: {
+    orderBy: { sessionNumber: 'asc' as const },
+    select: {
+      id: true,
+      appointmentId: true,
+      sessionNumber: true,
+      status: true
+    }
+  }
+} satisfies Prisma.BonoPackInclude
+
+type AppointmentChargeBonoPack = Prisma.BonoPackGetPayload<{
+  include: typeof appointmentChargeBonoPackInclude
+}>
 
 const toDate = (value: string | Date) => new Date(value)
 
@@ -135,6 +172,153 @@ const getExistingAppointmentServiceIds = (appointment: {
 
   const fallbackServiceId = String(appointment.serviceId || '').trim()
   return fallbackServiceId ? [fallbackServiceId] : []
+}
+
+const getExistingAppointmentComparableServices = (appointment: {
+  serviceId?: string | null
+  service?: {
+    id?: string | null
+    name?: string | null
+    category?: string | null
+    serviceCode?: string | null
+  } | null
+  appointmentServices?:
+    | Array<{
+        serviceId?: string | null
+        service?: {
+          id?: string | null
+          name?: string | null
+          category?: string | null
+          serviceCode?: string | null
+        } | null
+      }>
+    | null
+}) => {
+  const nestedServices = Array.isArray(appointment.appointmentServices)
+    ? appointment.appointmentServices
+        .map((item) => ({
+          id: String(item.serviceId || item.service?.id || '').trim() || null,
+          name: item.service?.name || null,
+          category: item.service?.category || null,
+          serviceCode: item.service?.serviceCode || null
+        }))
+        .filter((service) => Boolean(service.id || service.name))
+    : []
+
+  if (nestedServices.length > 0) {
+    return nestedServices
+  }
+
+  const fallbackServiceId = String(appointment.serviceId || appointment.service?.id || '').trim()
+  const fallbackServiceName = appointment.service?.name || null
+  return fallbackServiceId || fallbackServiceName
+    ? [
+        {
+          id: fallbackServiceId || null,
+          name: fallbackServiceName,
+          category: appointment.service?.category || null,
+          serviceCode: appointment.service?.serviceCode || null
+        }
+      ]
+    : []
+}
+
+const getAvailableBonoSessionCount = (bonoPack: AppointmentChargeBonoPack) =>
+  bonoPack.sessions.filter((session) => session.status === 'AVAILABLE').length
+
+const getAppointmentConsumedBonoSessions = (appointment: {
+  bonoSessions?: Array<{ status?: string | null }> | null
+}) =>
+  Array.isArray(appointment.bonoSessions)
+    ? appointment.bonoSessions.filter((session) => String(session.status || '').toUpperCase() === 'CONSUMED')
+    : []
+
+const resolveBonoPackComparableService = (
+  bonoPack: AppointmentChargeBonoPack,
+  bonoTemplates: ComparableBonoTemplate[]
+) => {
+  const explicitTemplateId = normalizeNullableId(bonoPack.bonoTemplateId)
+  const explicitTemplate =
+    explicitTemplateId
+      ? bonoTemplates.find((template) => normalizeNullableId(template?.id) === explicitTemplateId) || null
+      : null
+
+  return {
+    id: explicitTemplate?.serviceId || bonoPack.serviceId || bonoPack.service?.id || null,
+    name: explicitTemplate?.serviceName || bonoPack.service?.name || null,
+    category: explicitTemplate?.category || bonoPack.service?.category || null,
+    serviceCode: explicitTemplate?.serviceLookup || bonoPack.service?.serviceCode || null
+  }
+}
+
+const buildAppointmentBonoOptions = (
+  appointment: {
+    id: string
+    clientId?: string | null
+    serviceId?: string | null
+    service?: {
+      id?: string | null
+      name?: string | null
+      category?: string | null
+      serviceCode?: string | null
+    } | null
+    appointmentServices?:
+      | Array<{
+          serviceId?: string | null
+          service?: {
+            id?: string | null
+            name?: string | null
+            category?: string | null
+            serviceCode?: string | null
+          } | null
+        }>
+      | null
+  },
+  bonoPacks: AppointmentChargeBonoPack[],
+  bonoTemplates: ComparableBonoTemplate[] = []
+) => {
+  const appointmentServices = getExistingAppointmentComparableServices(appointment)
+
+  return bonoPacks
+    .map((bonoPack) => {
+      const linkedSessions = bonoPack.sessions.filter(
+        (session) => session.status === 'AVAILABLE' && session.appointmentId === appointment.id
+      )
+      const freeSessions = bonoPack.sessions.filter(
+        (session) => session.status === 'AVAILABLE' && session.appointmentId === null
+      )
+      const comparableBonoService = resolveBonoPackComparableService(bonoPack, bonoTemplates)
+      const serviceMatches = doesAppointmentMatchBonoService(
+        appointmentServices,
+        comparableBonoService,
+        {
+          templates: bonoTemplates,
+          allowGenericBono: false
+        }
+      )
+      const chargeableSessions = serviceMatches ? [...linkedSessions, ...freeSessions] : []
+
+      return {
+        bonoPack,
+        linkedSessions,
+        chargeableSessions,
+        remainingSessions: getAvailableBonoSessionCount(bonoPack),
+        serviceMatches,
+        comparableBonoService
+      }
+    })
+    .filter((item) => item.chargeableSessions.length > 0 && item.remainingSessions > 0)
+    .sort((left, right) => {
+      if (Boolean(left.linkedSessions.length) !== Boolean(right.linkedSessions.length)) {
+        return left.linkedSessions.length > 0 ? -1 : 1
+      }
+
+      if (left.serviceMatches !== right.serviceMatches) {
+        return left.serviceMatches ? -1 : 1
+      }
+
+      return left.bonoPack.name.localeCompare(right.bonoPack.name, 'es', { sensitivity: 'base' })
+    })
 }
 
 const loadSelectedAppointmentServices = async (serviceIds: string[]) => {
@@ -214,25 +398,6 @@ const buildAppointmentUpdatePayload = (
   if (payload.reminder !== undefined) data.reminder = Boolean(payload.reminder)
 
   return data
-}
-
-const buildCalendarSyncInput = (appointment: any): AppointmentSyncInput => {
-  const clientName = getAppointmentDisplayName(appointment)
-  const phone = getAppointmentDisplayPhone(appointment)
-  const phoneLine = phone ? `\nTelefono: ${phone}` : ''
-  const serviceLabel = getAppointmentServiceLabel(appointment) || String(appointment.service?.name || '').trim()
-
-  return {
-    appointmentId: appointment.id,
-    existingEventId: appointment.googleCalendarEventId || null,
-    title: `${serviceLabel} - ${clientName}`,
-    description: `Cita para ${serviceLabel}\nCliente: ${clientName}${phoneLine}`,
-    date: appointment.date,
-    startTime: appointment.startTime,
-    endTime: appointment.endTime,
-    clientEmail: getAppointmentDisplayEmail(appointment),
-    clientName
-  }
 }
 
 const validateAppointmentPartyUpdate = (
@@ -325,7 +490,7 @@ const getAppointmentLegendCategoriesCatalog = async () => {
   )
 }
 
-const persistCalendarSyncResult = async (appointmentId: string, syncResult: Awaited<ReturnType<typeof googleCalendarService.upsertAppointmentEvent>>) => {
+const persistCalendarSyncResult = async (appointmentId: string, syncResult: CalendarSyncResult) => {
   return prisma.appointment.update({
     where: { id: appointmentId },
     data: {
@@ -1266,7 +1431,7 @@ export const importAppointmentsFromExcel = async (req: AuthRequest, res: Respons
           continue
         }
 
-        await prisma.appointment.create({
+        const createdAppointment = await prisma.appointment.create({
           data: {
             clientId,
             userId: req.user.id,
@@ -1281,7 +1446,6 @@ export const importAppointmentsFromExcel = async (req: AuthRequest, res: Respons
             reminder: true
           }
         })
-
         processedImportKeys.add(importKey)
         results.success += 1
       } catch (error) {
@@ -1486,7 +1650,9 @@ export const createAppointment = async (req: AuthRequest, res: Response) => {
       include: appointmentInclude
     })
 
-    const syncResult = await googleCalendarService.upsertAppointmentEvent(buildCalendarSyncInput(createdAppointment))
+    const syncResult = await googleCalendarService.upsertAppointmentEvent(
+      buildAppointmentCalendarSyncInput(createdAppointment)
+    )
     const appointment = await persistCalendarSyncResult(createdAppointment.id, syncResult)
 
     if (syncResult.status === 'ERROR') {
@@ -1616,12 +1782,25 @@ export const updateAppointment = async (req: AuthRequest, res: Response) => {
 
     const movedToCancelled =
       updatedAppointment.status === 'CANCELLED' || updatedAppointment.status === 'NO_SHOW'
+    const registeredClientChanged =
+      updateData.clientId !== undefined &&
+      normalizeNullableId(updateData.clientId) !== normalizeNullableId(existing.clientId)
 
     if (movedToCancelled) {
       await releaseReservedBonoSessions(updatedAppointment.id)
+    } else if (serviceSelectionChanged || registeredClientChanged) {
+      await releaseReservedBonoSessions(updatedAppointment.id)
     }
 
-    const syncResult = await googleCalendarService.upsertAppointmentEvent(buildCalendarSyncInput(updatedAppointment))
+    const syncResult =
+      updatedAppointment.status === 'CANCELLED'
+        ? await googleCalendarService.deleteAppointmentEvent(
+            updatedAppointment.googleCalendarEventId,
+            getAppointmentDisplayEmail(updatedAppointment)
+          )
+        : await googleCalendarService.upsertAppointmentEvent(
+            buildAppointmentCalendarSyncInput(updatedAppointment)
+          )
     const appointment = await persistCalendarSyncResult(updatedAppointment.id, syncResult)
 
     if (syncResult.status === 'ERROR') {
@@ -1647,12 +1826,193 @@ export const updateAppointment = async (req: AuthRequest, res: Response) => {
   }
 }
 
+export const chargeAppointmentWithBono = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params
+    const requestedBonoPackId = String(req.body.bonoPackId || '').trim() || null
+    const requestedSessionsToConsume = Math.max(1, Number.parseInt(String(req.body.sessionsToConsume ?? '1'), 10) || 1)
+
+    const appointment = await prisma.appointment.findUnique({
+      where: { id },
+      include: appointmentInclude
+    })
+
+    if (!appointment) {
+      return res.status(404).json({ error: 'Appointment not found' })
+    }
+
+    if (!appointment.clientId) {
+      return res.status(400).json({ error: 'Solo se pueden cobrar bonos en citas con cliente registrado' })
+    }
+
+    if (appointment.sale) {
+      return res.status(400).json({ error: 'La cita ya está vinculada a una venta y no puede cobrarse con bono' })
+    }
+
+    const appointmentStatus = String(appointment.status || '').toUpperCase()
+    if (appointmentStatus === 'CANCELLED' || appointmentStatus === 'NO_SHOW') {
+      return res.status(400).json({ error: 'No se puede cobrar un bono en una cita cancelada o no acudida' })
+    }
+
+    if (getAppointmentConsumedBonoSessions(appointment).length > 0) {
+      return res.status(400).json({ error: 'La cita ya está cobrada con bono' })
+    }
+
+    const bonoPacks = await prisma.bonoPack.findMany({
+      where: {
+        clientId: appointment.clientId,
+        status: 'ACTIVE'
+      },
+      include: appointmentChargeBonoPackInclude,
+      orderBy: {
+        purchaseDate: 'desc'
+      }
+    })
+
+    const bonoTemplates = await readAppointmentBonoTemplates()
+    const appointmentBonoOptions = buildAppointmentBonoOptions(appointment, bonoPacks, bonoTemplates)
+
+    if (appointmentBonoOptions.length === 0) {
+      return res.status(400).json({ error: 'No hay bonos activos compatibles para esta cita' })
+    }
+
+    const selectedOption = requestedBonoPackId
+      ? appointmentBonoOptions.find((option) => option.bonoPack.id === requestedBonoPackId) || null
+      : appointmentBonoOptions.length === 1
+        ? appointmentBonoOptions[0]
+        : null
+
+    if (requestedBonoPackId && !selectedOption) {
+      return res.status(400).json({ error: 'El bono seleccionado no es compatible con esta cita' })
+    }
+
+    if (!selectedOption) {
+      return res.status(409).json({
+        error: 'Hay varios bonos compatibles para esta cita. Selecciona cuál quieres descontar.',
+        bonoOptions: appointmentBonoOptions.map((option) => ({
+          id: option.bonoPack.id,
+          name: option.bonoPack.name,
+          serviceName: option.bonoPack.service?.name || null,
+          remainingSessions: option.remainingSessions,
+          chargeableSessions: option.chargeableSessions.length,
+          isReservedForAppointment: option.linkedSessions.length > 0,
+          reservedSessionNumber: option.linkedSessions[0]?.sessionNumber || null
+        }))
+      })
+    }
+
+    if (selectedOption.chargeableSessions.length === 0) {
+      return res.status(400).json({ error: 'No hay sesiones disponibles para el bono seleccionado' })
+    }
+
+    if (requestedSessionsToConsume > selectedOption.chargeableSessions.length) {
+      return res.status(400).json({
+        error: `No hay suficientes sesiones disponibles para descontar ${requestedSessionsToConsume}. Máximo disponible: ${selectedOption.chargeableSessions.length}.`
+      })
+    }
+
+    const consumedAt = new Date()
+    const serviceLabel = getAppointmentServiceLabel(appointment) || selectedOption.bonoPack.name
+    const sessionsToConsume = selectedOption.chargeableSessions.slice(0, requestedSessionsToConsume)
+    const consumedSessionNumbers = sessionsToConsume
+      .map((session) => session.sessionNumber)
+      .filter((sessionNumber): sessionNumber is number => Number.isFinite(sessionNumber))
+    const consumedAppointment = await prisma.$transaction(async (tx) => {
+      for (const session of sessionsToConsume) {
+        const consumeResult = await tx.bonoSession.updateMany({
+          where: {
+            id: session.id,
+            status: 'AVAILABLE',
+            appointmentId: session.appointmentId ?? null
+          },
+          data: {
+            appointmentId: appointment.id,
+            status: 'CONSUMED',
+            consumedAt
+          }
+        })
+
+        if (consumeResult.count === 0) {
+          throw new Error('BONO_SESSION_NOT_AVAILABLE')
+        }
+      }
+
+      if (selectedOption.remainingSessions - sessionsToConsume.length === 0) {
+        await tx.bonoPack.update({
+          where: { id: selectedOption.bonoPack.id },
+          data: { status: 'DEPLETED' }
+        })
+
+        await tx.notification.create({
+          data: {
+            type: 'BONO_DEPLETED',
+            title: `Bono agotado: ${selectedOption.bonoPack.name}`,
+            message: `El bono "${selectedOption.bonoPack.name}" de ${appointment.client?.firstName || ''} ${appointment.client?.lastName || ''}`.trim(),
+            priority: 'NORMAL'
+          }
+        })
+      }
+
+      await tx.appointment.update({
+        where: { id: appointment.id },
+        data: {
+          status: 'COMPLETED'
+        }
+      })
+
+      await tx.clientHistory.create({
+        data: {
+          clientId: appointment.clientId!,
+          date: consumedAt,
+          service: serviceLabel,
+          notes:
+            sessionsToConsume.length === 1
+              ? `Sesion descontada del bono "${selectedOption.bonoPack.name}"`
+              : `${sessionsToConsume.length} sesiones descontadas del bono "${selectedOption.bonoPack.name}"`,
+          amount: 0
+        }
+      })
+
+      return tx.appointment.findUnique({
+        where: { id: appointment.id },
+        include: appointmentInclude
+      })
+    })
+
+    if (!consumedAppointment) {
+      return res.status(404).json({ error: 'Appointment not found after bono charge' })
+    }
+
+    res.json({
+      ...consumedAppointment,
+      bonoChargeSummary: {
+        bonoPackId: selectedOption.bonoPack.id,
+        bonoPackName: selectedOption.bonoPack.name,
+        sessionsConsumed: sessionsToConsume.length,
+        sessionNumbers: consumedSessionNumbers
+      }
+    })
+  } catch (error) {
+    if (error instanceof Error && error.message === 'BONO_SESSION_NOT_AVAILABLE') {
+      return res.status(409).json({ error: 'Una de las sesiones del bono ya no está disponible. Recarga e inténtalo de nuevo.' })
+    }
+
+    logError('Charge appointment with bono error', error, {
+      userId: req.user?.id || null,
+      params: req.params,
+      body: req.body
+    })
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
 export const deleteAppointment = async (req: Request, res: Response) => {
   try {
     const { id } = req.params
     const appointment = await prisma.appointment.findUnique({
       where: { id },
       include: {
+        bonoSessions: { select: { id: true, status: true } },
         sale: { select: { id: true, status: true } },
         client: true,
         service: true
@@ -1665,6 +2025,14 @@ export const deleteAppointment = async (req: Request, res: Response) => {
 
     if (appointment.sale?.status === 'COMPLETED') {
       return res.status(400).json({ error: 'Cannot delete an appointment with a completed sale linked' })
+    }
+
+    if (getAppointmentConsumedBonoSessions(appointment).length > 0) {
+      return res.status(400).json({ error: 'Cannot delete an appointment with a consumed bono linked' })
+    }
+
+    if (Array.isArray(appointment.bonoSessions) && appointment.bonoSessions.some((session) => session.status === 'AVAILABLE')) {
+      await releaseReservedBonoSessions(appointment.id)
     }
 
     const deleteSyncResult = await googleCalendarService.deleteAppointmentEvent(

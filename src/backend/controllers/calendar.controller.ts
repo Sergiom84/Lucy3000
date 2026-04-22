@@ -1,5 +1,6 @@
 import { Request, Response } from 'express'
 import { AuthRequest } from '../middleware/auth.middleware'
+import { appointmentCalendarSyncService } from '../services/appointmentCalendarSync.service'
 import { googleCalendarService } from '../services/googleCalendar.service'
 import { logError, logWarn } from '../utils/logger'
 
@@ -78,6 +79,31 @@ const renderCallbackPage = (success: boolean, message: string) => {
   `
 }
 
+const buildCalendarSyncMessage = (
+  summary: { total: number; synced: number; failed: number; skipped: number },
+  fallback: string
+) => {
+  const parts = [fallback]
+
+  if (summary.total > 0) {
+    parts.push(`${summary.total} elemento${summary.total === 1 ? '' : 's'} revisado${summary.total === 1 ? '' : 's'}.`)
+  }
+
+  if (summary.synced > 0) {
+    parts.push(`${summary.synced} sincronizado${summary.synced === 1 ? '' : 's'}.`)
+  }
+
+  if (summary.failed > 0) {
+    parts.push(`${summary.failed} con error.`)
+  }
+
+  if (summary.skipped > 0) {
+    parts.push(`${summary.skipped} omitido${summary.skipped === 1 ? '' : 's'}.`)
+  }
+
+  return parts.join(' ')
+}
+
 export const getAuthUrl = async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest
@@ -135,7 +161,14 @@ export const handleCallback = async (req: Request, res: Response) => {
 
     await googleCalendarService.saveTokens(code)
 
-    res.type('html').send(renderCallbackPage(true, 'La cuenta ha quedado conectada y ya puedes volver a Lucy3000.'))
+    res
+      .type('html')
+      .send(
+        renderCallbackPage(
+          true,
+          'La cuenta ha quedado conectada. Si quieres enviar la agenda existente a Google Calendar, usa el boton Sincronizacion en Configuracion.'
+        )
+      )
   } catch (error: any) {
     logError('Handle calendar callback error', error)
     const statusCode = error?.name === 'JsonWebTokenError' || error?.name === 'TokenExpiredError' ? 400 : 500
@@ -186,7 +219,7 @@ export const updateConfig = async (req: Request, res: Response) => {
     })
 
     res.json({
-      message: 'Configuración actualizada',
+      message: 'Configuración actualizada.',
       config: {
         enabled: config.enabled,
         sendClientInvites: config.sendClientInvites,
@@ -197,6 +230,30 @@ export const updateConfig = async (req: Request, res: Response) => {
     logError('Update calendar config error', error)
     const statusCode = error?.message?.includes('Primero debes autorizar') ? 400 : 500
     res.status(statusCode).json({ error: error.message || 'Error actualizando configuración' })
+  }
+}
+
+export const syncCalendar = async (_req: Request, res: Response) => {
+  try {
+    const config = await googleCalendarService.getConfig()
+
+    if (!config) {
+      return res.status(400).json({
+        error: 'Google Calendar no está conectado. Conecta primero la cuenta antes de lanzar la sincronización.'
+      })
+    }
+
+    const summary = await appointmentCalendarSyncService.syncEntireAgenda({
+      reason: 'google-calendar-manual-sync'
+    })
+
+    res.json({
+      message: buildCalendarSyncMessage(summary, 'Sincronización completada.'),
+      summary
+    })
+  } catch (error: any) {
+    logError('Manual calendar sync error', error)
+    res.status(500).json({ error: error.message || 'Error ejecutando la sincronización manual' })
   }
 }
 

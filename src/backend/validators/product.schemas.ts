@@ -86,6 +86,34 @@ export const updateProductBodySchema = z
     }
   })
 
+export const renameProductCategoryBodySchema = z
+  .object({
+    currentCategory: categorySchema,
+    nextCategory: categorySchema
+  })
+  .strict()
+  .refine((payload) => payload.currentCategory !== payload.nextCategory, {
+    message: 'The new category must be different',
+    path: ['nextCategory']
+  })
+
+export const deleteProductCategoryBodySchema = z
+  .object({
+    category: categorySchema,
+    replacementCategory: categorySchema
+  })
+  .strict()
+  .refine((payload) => payload.category !== payload.replacementCategory, {
+    message: 'Replacement category must be different',
+    path: ['replacementCategory']
+  })
+
+export const deleteProductCategoryWithProductsBodySchema = z
+  .object({
+    category: categorySchema
+  })
+  .strict()
+
 export const addStockMovementBodySchema = z
   .object({
     type: stockMovementTypeSchema,

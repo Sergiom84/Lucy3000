@@ -5,6 +5,9 @@ import {
   createService,
   updateService,
   deleteService,
+  renameServiceCategory,
+  deleteServiceCategory,
+  deleteServiceCategoryWithServices,
   importServicesFromExcel
 } from '../controllers/service.controller'
 import { adminMiddleware, authMiddleware } from '../middleware/auth.middleware'
@@ -12,6 +15,9 @@ import { spreadsheetUpload, validateSpreadsheetUpload } from '../middleware/uplo
 import { validateRequest } from '../middleware/validation.middleware'
 import {
   createServiceBodySchema,
+  deleteServiceCategoryBodySchema,
+  deleteServiceCategoryWithServicesBodySchema,
+  renameServiceCategoryBodySchema,
   serviceIdParamSchema,
   servicesQuerySchema,
   updateServiceBodySchema
@@ -22,6 +28,13 @@ const router = Router()
 router.use(authMiddleware)
 
 router.get('/', validateRequest({ query: servicesQuerySchema }), getServices)
+router.patch('/categories', validateRequest({ body: renameServiceCategoryBodySchema }), renameServiceCategory)
+router.delete('/categories', validateRequest({ body: deleteServiceCategoryBodySchema }), deleteServiceCategory)
+router.delete(
+  '/categories/with-services',
+  validateRequest({ body: deleteServiceCategoryWithServicesBodySchema }),
+  deleteServiceCategoryWithServices
+)
 router.get('/:id', validateRequest({ params: serviceIdParamSchema }), getServiceById)
 router.post('/', validateRequest({ body: createServiceBodySchema }), createService)
 router.post(

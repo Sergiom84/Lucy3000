@@ -26,6 +26,7 @@ import {
   saleAnalyticsInclude,
   saleSummarySelect
 } from '../utils/sales-reporting'
+import { computeCashCountTotals } from '../utils/cashCount'
 
 const PRIVATE_NO_TICKET_CASH_PIN = '0852'
 
@@ -35,6 +36,8 @@ const formatCurrency = (amount: number) => {
     currency: 'EUR'
   }).format(amount)
 }
+
+const roundCurrency = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100
 
 const getDayRange = (referenceDate: Date) => {
   const start = new Date(referenceDate)
@@ -118,6 +121,29 @@ const pendingCollectionRangeWhere = (
   }
 })
 
+const privateCashSaleRangeWhere = (start: Date, end: Date): Prisma.SaleWhereInput => ({
+  status: 'COMPLETED',
+  pendingPayment: null,
+  paymentMethod: 'CASH',
+  showInOfficialCash: false,
+  date: {
+    gte: start,
+    lte: end
+  }
+})
+
+const privateCashCollectionRangeWhere = (
+  start: Date,
+  end: Date
+): Prisma.PendingPaymentCollectionWhereInput => ({
+  paymentMethod: 'CASH',
+  showInOfficialCash: false,
+  operationDate: {
+    gte: start,
+    lte: end
+  }
+})
+
 const computeExpectedBalance = (cashRegister: {
   openingBalance: Prisma.Decimal
   movements: {
@@ -148,6 +174,83 @@ const computeExpectedBalance = (cashRegister: {
   return total
 }
 
+const getPrivateCashCollectedAmount = (
+  performedSales: Array<{
+    paymentMethod?: string | null
+    paymentBreakdown?: string | null
+    showInOfficialCash?: boolean | null
+    total: number | string | Prisma.Decimal
+    accountBalanceMovements?: Array<{
+      type?: string | null
+      amount?: number | string | Prisma.Decimal | null
+    }>
+    pendingPayment?: {
+      collections?: Array<{
+        paymentMethod?: string | null
+        amount: number | string | Prisma.Decimal
+        showInOfficialCash?: boolean | null
+      }>
+    } | null
+  }>,
+  privateCashSales: Array<{
+    paymentMethod?: string | null
+    paymentBreakdown?: string | null
+    showInOfficialCash?: boolean | null
+    total: number | string | Prisma.Decimal
+  }>,
+  privateCashCollections: Array<{
+    paymentMethod?: string | null
+    amount: number | string | Prisma.Decimal
+    showInOfficialCash?: boolean | null
+  }>
+) =>
+  roundCurrency(
+    performedSales.reduce((sum, sale) => sum + getSalePrivateCashAmount(sale), 0) +
+      privateCashSales.reduce((sum, sale) => sum + getSalePrivateCashAmount(sale), 0) +
+      privateCashCollections.reduce((sum, collection) => sum + Number(collection.amount || 0), 0)
+  )
+
+const buildPrivateCashConcept = (items: Array<{ description?: string | null }>) => {
+  const concepts = Array.from(
+    new Set(
+      (items || [])
+        .map((item) => String(item?.description || '').trim())
+        .filter(Boolean)
+    )
+  )
+
+  if (concepts.length === 0) return 'Sin detalle'
+  if (concepts.length === 1) return concepts[0]
+  if (concepts.length === 2) return `${concepts[0]} · ${concepts[1]}`
+  return `${concepts[0]} + ${concepts.length - 1} más`
+}
+
+const buildPrivateCashPaymentDetail = (payload: {
+  type: 'SALE' | 'COLLECTION'
+  total?: number | string | Prisma.Decimal
+  paymentMethod?: string | null
+  paymentBreakdown?: string | null
+  showInOfficialCash?: boolean | null
+}) => {
+  if (payload.type === 'COLLECTION') {
+    return 'Cobro pendiente · efectivo privado'
+  }
+
+  const privateCashAmount = getSalePrivateCashAmount({
+    total: payload.total ?? 0,
+    paymentMethod: payload.paymentMethod ?? null,
+    paymentBreakdown: payload.paymentBreakdown ?? null,
+    showInOfficialCash: payload.showInOfficialCash ?? null
+  })
+  const totalAmount = Number(payload.total || 0)
+
+  if (privateCashAmount > 0 && privateCashAmount < totalAmount) {
+    return 'Pago mixto · efectivo privado'
+  }
+
+  return 'Efectivo privado'
+}
+
 const buildCashSummary = async (referenceDate: Date) => {
   const { start: dayStart, end: dayEnd } = getDayRange(referenceDate)
   const { start: monthStart, end: monthEnd } = getPeriodRange('MONTH', referenceDate)
@@ -161,9 +264,11 @@ const buildCashSummary = async (referenceDate: Date) => {
     dayPerformedSales,
     monthPerformedSales,
     yearPerformedSales,
+    dayPrivateCashSales,
     dayCollections,
     monthCollections,
     yearCollections,
+    dayPrivateCashCollections,
     dayTopUps,
     monthTopUps,
     yearTopUps
@@ -207,6 +312,10 @@ const buildCashSummary = async (referenceDate: Date) => {
       where: commercialSaleRangeWhere(yearStart, yearEnd),
       select: saleSummarySelect
     }),
+    prisma.sale.findMany({
+      where: privateCashSaleRangeWhere(dayStart, dayEnd),
+      select: saleSummarySelect
+    }),
     prisma.pendingPaymentCollection.findMany({
       where: pendingCollectionRangeWhere(dayStart, dayEnd),
       select: pendingCollectionSummarySelect
@@ -217,6 +326,10 @@ const buildCashSummary = async (referenceDate: Date) => {
     }),
     prisma.pendingPaymentCollection.findMany({
       where: pendingCollectionRangeWhere(yearStart, yearEnd),
+      select: pendingCollectionSummarySelect
+    }),
+    prisma.pendingPaymentCollection.findMany({
+      where: privateCashCollectionRangeWhere(dayStart, dayEnd),
       select: pendingCollectionSummarySelect
     }),
     prisma.accountBalanceMovement.findMany({
@@ -268,6 +381,14 @@ const buildCashSummary = async (referenceDate: Date) => {
 
   const openingBalance = activeCashRegister ? Number(activeCashRegister.openingBalance) : 0
   const currentBalance = activeCashRegister ? computeExpectedBalance(activeCashRegister) : 0
+  const privateCashCollected = getPrivateCashCollectedAmount(
+    dayPerformedSales,
+    dayPrivateCashSales,
+    dayPrivateCashCollections
+  )
+  const officialCashCollected = roundCurrency(paymentsByMethod.CASH || 0)
+  const cardCollected = roundCurrency(paymentsByMethod.CARD || 0)
+  const bizumCollected = roundCurrency(paymentsByMethod.BIZUM || 0)
 
   return {
     activeCashRegister,
@@ -292,6 +413,16 @@ const buildCashSummary = async (referenceDate: Date) => {
         day: getWorkPerformedRevenue(dayPerformedSales),
         month: getWorkPerformedRevenue(monthPerformedSales),
         year: getWorkPerformedRevenue(yearPerformedSales)
+      },
+      closingSummary: {
+        expectedOfficialCash: currentBalance,
+        officialCashCollected,
+        cardCollected,
+        bizumCollected,
+        privateCashCollected,
+        totalCollectedExcludingAbono: roundCurrency(
+          officialCashCollected + cardCollected + bizumCollected + privateCashCollected
+        )
       },
       currentBalance,
       manualAdjustments: {
@@ -384,26 +515,32 @@ export const getPrivateNoTicketCashSales = async (req: Request, res: Response) =
       return res.status(403).json({ error: 'PIN incorrecto' })
     }
 
-      const [sales, collections] = await prisma.$transaction([
-        prisma.sale.findMany({
-          where: {
-            status: 'COMPLETED',
-            pendingPayment: null,
-            OR: [
-              {
-                paymentMethod: 'CASH',
-                showInOfficialCash: false
-              },
-              {
-                paymentBreakdown: {
-                  not: null
-                }
+    const dateRange =
+      req.query.startDate && req.query.endDate
+        ? buildInclusiveDateRange(req.query.startDate as string, req.query.endDate as string)
+        : null
+
+    const [sales, collections] = await prisma.$transaction([
+      prisma.sale.findMany({
+        where: {
+          status: 'COMPLETED',
+          pendingPayment: null,
+          ...(dateRange ? { date: dateRange } : {}),
+          OR: [
+            {
+              paymentMethod: 'CASH',
+              showInOfficialCash: false
+            },
+            {
+              paymentBreakdown: {
+                not: null
               }
-            ]
-          },
-          include: {
-            client: {
-              select: {
+            }
+          ]
+        },
+        include: {
+          client: {
+            select: {
               firstName: true,
               lastName: true
             }
@@ -417,6 +554,11 @@ export const getPrivateNoTicketCashSales = async (req: Request, res: Response) =
             select: {
               name: true
             }
+          },
+          items: {
+            select: {
+              description: true
+            }
           }
         },
         orderBy: { date: 'desc' }
@@ -424,7 +566,8 @@ export const getPrivateNoTicketCashSales = async (req: Request, res: Response) =
       prisma.pendingPaymentCollection.findMany({
         where: {
           paymentMethod: 'CASH',
-          showInOfficialCash: false
+          showInOfficialCash: false,
+          ...(dateRange ? { operationDate: dateRange } : {})
         },
         include: {
           sale: {
@@ -444,57 +587,76 @@ export const getPrivateNoTicketCashSales = async (req: Request, res: Response) =
                 select: {
                   name: true
                 }
+              },
+              items: {
+                select: {
+                  description: true
+                }
               }
             }
           }
         },
         orderBy: [{ operationDate: 'desc' }, { createdAt: 'desc' }]
       })
-      ])
+    ])
 
-      const saleRows = sales
-        .map((sale) => {
-          const privateCashAmount = getSalePrivateCashAmount(sale)
-          if (privateCashAmount <= 0) {
-            return null
-          }
+    const saleRows = sales
+      .map((sale) => {
+        const privateCashAmount = getSalePrivateCashAmount(sale)
+        if (privateCashAmount <= 0) {
+          return null
+        }
 
-          return {
-            id: sale.id,
-            saleNumber: sale.saleNumber,
-            date: sale.date,
-            amount: privateCashAmount,
-            description: sale.notes || null,
-            clientName: getSaleDisplayName(sale),
-            professionalName: formatProfessionalName(sale.professional, sale.user?.name)
-          }
-        })
-        .filter(
-          (
-            row
-          ): row is {
-            id: string
-            saleNumber: string
-            date: Date
-            amount: number
-            description: string | null
-            clientName: string
-            professionalName: string
-          } => Boolean(row)
-        )
+        return {
+          id: sale.id,
+          saleNumber: sale.saleNumber,
+          date: sale.date,
+          amount: privateCashAmount,
+          description: sale.notes || null,
+          clientName: getSaleDisplayName(sale),
+          professionalName: formatProfessionalName(sale.professional, sale.user?.name),
+          paymentDetail: buildPrivateCashPaymentDetail({
+            type: 'SALE',
+            total: sale.total,
+            paymentMethod: sale.paymentMethod,
+            paymentBreakdown: sale.paymentBreakdown,
+            showInOfficialCash: sale.showInOfficialCash
+          }),
+          treatmentName: buildPrivateCashConcept(sale.items)
+        }
+      })
+      .filter(
+        (
+          row
+        ): row is {
+          id: string
+          saleNumber: string
+          date: Date
+          amount: number
+          description: string | null
+          clientName: string
+          professionalName: string
+          paymentDetail: string
+          treatmentName: string
+        } => Boolean(row)
+      )
 
-      const rows = [
-        ...saleRows,
-        ...collections.map((collection) => ({
-          id: collection.id,
-          saleNumber: collection.sale.saleNumber,
-          date: collection.operationDate,
-          amount: Number(collection.amount),
-          description: 'Cobro pendiente sin ticket',
-          clientName: getSaleDisplayName(collection.sale),
-          professionalName: formatProfessionalName(collection.sale.professional, collection.sale.user?.name)
-        }))
-      ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    const rows = [
+      ...saleRows,
+      ...collections.map((collection) => ({
+        id: collection.id,
+        saleNumber: collection.sale.saleNumber,
+        date: collection.operationDate,
+        amount: Number(collection.amount),
+        description: 'Cobro pendiente sin ticket',
+        clientName: getSaleDisplayName(collection.sale),
+        professionalName: formatProfessionalName(collection.sale.professional, collection.sale.user?.name),
+        paymentDetail: buildPrivateCashPaymentDetail({
+          type: 'COLLECTION'
+        }),
+        treatmentName: buildPrivateCashConcept(collection.sale.items)
+      }))
+    ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
     res.json({
       rows,
@@ -821,6 +983,93 @@ export const updateOpeningBalance = async (req: AuthRequest, res: Response) => {
     res.json(updatedCashRegister)
   } catch (error) {
     console.error('Update opening balance error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const createCashCount = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params
+    const { denominations, isBlind, appliedAsClose, notes } = req.body as {
+      denominations: Record<string, number>
+      isBlind?: boolean
+      appliedAsClose?: boolean
+      notes?: string | null
+    }
+
+    const cashRegister = await prisma.cashRegister.findUnique({
+      where: { id },
+      include: { movements: true }
+    })
+
+    if (!cashRegister) {
+      return res.status(404).json({ error: 'Cash register not found' })
+    }
+
+    if (cashRegister.status === 'CLOSED' && !appliedAsClose) {
+      return res.status(400).json({ error: 'Cannot create cash count for a closed register' })
+    }
+
+    const expectedTotal = computeExpectedBalance(cashRegister)
+    const { countedTotal, difference, normalizedDenominations } = computeCashCountTotals(
+      denominations || {},
+      expectedTotal
+    )
+
+    const created = await prisma.cashCount.create({
+      data: {
+        cashRegisterId: id,
+        userId: req.user!.id,
+        expectedTotal,
+        countedTotal,
+        difference,
+        denominations: JSON.stringify(normalizedDenominations),
+        isBlind: Boolean(isBlind),
+        appliedAsClose: Boolean(appliedAsClose),
+        notes: notes || null
+      },
+      include: {
+        user: { select: { name: true } }
+      }
+    })
+
+    res.status(201).json({
+      ...created,
+      denominations: normalizedDenominations
+    })
+  } catch (error) {
+    console.error('Create cash count error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const listCashCounts = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    const limit = Number(req.query.limit) || 20
+
+    const counts = await prisma.cashCount.findMany({
+      where: { cashRegisterId: id },
+      include: {
+        user: { select: { name: true } }
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit
+    })
+
+    const parsed = counts.map((count) => {
+      let denominations: Record<string, number> = {}
+      try {
+        denominations = JSON.parse(count.denominations)
+      } catch {
+        denominations = {}
+      }
+      return { ...count, denominations }
+    })
+
+    res.json(parsed)
+  } catch (error) {
+    console.error('List cash counts error:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 }

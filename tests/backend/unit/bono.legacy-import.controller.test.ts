@@ -75,6 +75,23 @@ describe('bono legacy import controller', () => {
       ],
       []
     ])
+    prismaMock.setting.findUnique.mockResolvedValue({
+      key: 'bono_templates_catalog',
+      value: JSON.stringify([
+        {
+          id: 'template-facial-6',
+          category: 'Facial',
+          description: 'Bono facial',
+          serviceId: 'service-1',
+          serviceName: 'Bono facial',
+          serviceLookup: 'FAC-01',
+          totalSessions: 6,
+          price: 120,
+          isActive: true,
+          createdAt: '2026-04-21T00:00:00.000Z'
+        }
+      ])
+    })
     prismaMock.bonoPack.create.mockResolvedValue({ id: 'bono-pack-1' })
 
     const buffer = await createWorkbookBuffer(
@@ -101,6 +118,7 @@ describe('bono legacy import controller', () => {
         data: expect.objectContaining({
           clientId: 'client-1',
           serviceId: 'service-1',
+          bonoTemplateId: 'template-facial-6',
           legacyRef: 'B-101',
           importSource: 'LEGACY_CLIENT_BONO',
           totalSessions: 6,

@@ -29,6 +29,7 @@ model User {
   // Relaciones
   appointments  Appointment[]
   cashMovements CashMovement[]
+  cashCounts    CashCount[]
   pendingPaymentCollections PendingPaymentCollection[]
   sales         Sale[]
 
@@ -187,8 +188,8 @@ model Appointment {
   user        User     @relation(fields: [userId], references: [id])
   service     Service  @relation(fields: [serviceId], references: [id])
   appointmentServices AppointmentService[]
-  bonoSession BonoSession?
-  sale        Sale?
+  bonoSessions       BonoSession[]
+  sale               Sale?
 
   @@map("appointments")
 }
@@ -415,8 +416,29 @@ model CashRegister {
   closedAt        DateTime?
 
   movements       CashMovement[]
+  cashCounts      CashCount[]
 
   @@map("cash_registers")
+}
+
+model CashCount {
+  id              String   @id @default(uuid())
+  cashRegisterId  String
+  userId          String
+  expectedTotal   Decimal
+  countedTotal    Decimal
+  difference      Decimal
+  denominations   String
+  isBlind         Boolean  @default(false)
+  appliedAsClose  Boolean  @default(false)
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  cashRegister    CashRegister @relation(fields: [cashRegisterId], references: [id], onDelete: Cascade)
+  user            User         @relation(fields: [userId], references: [id])
+
+  @@index([cashRegisterId, createdAt])
+  @@map("cash_counts")
 }
 
 model CashMovement {
@@ -519,6 +541,7 @@ model BonoPack {
   clientId       String
   name           String
   serviceId      String?
+  bonoTemplateId String?
   legacyRef      String?
   importSource   String?
   totalSessions  Int
@@ -544,7 +567,7 @@ model BonoSession {
   sessionNumber  Int
   status         String    @default("AVAILABLE")
   consumedAt     DateTime?
-  appointmentId  String?   @unique
+  appointmentId  String?
   notes          String?
 
   bonoPack       BonoPack     @relation(fields: [bonoPackId], references: [id], onDelete: Cascade)

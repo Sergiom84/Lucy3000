@@ -1,19 +1,17 @@
 # Arquitectura de Lucy3000
 
-Estado actualizado: 2026-04-16
+Estado actualizado: 2026-04-21
 
 ## Topología oficial
 
-Lucy3000 se distribuye como aplicación de escritorio.
-
-Topología real del producto:
+Lucy3000 se distribuye como aplicación de escritorio con backend local embebido.
 
 ```text
 Electron Main
     |
-    +-- arranca backend local empaquetado
+    +-- arranca backend empaquetado
     +-- expone bridge seguro al renderer
-    +-- gestiona backups, impresión y assets de cliente
+    +-- gestiona backups, logs, impresión y assets
     |
     v
 React Renderer
@@ -25,75 +23,91 @@ Express API local
 Prisma
     |
     v
-SQLite local
+SQLite local por instalación
 ```
 
-Aunque el backend puede ejecutarse standalone en desarrollo, el canal oficial de release es el `.exe` local, no un despliegue remoto.
+En desarrollo puede ejecutarse por piezas, pero el producto real se usa como escritorio local.
 
 ## Capas principales
 
 ### 1. Electron
 
-Responsabilidad:
-
+Responsabilidades:
 - crear la ventana principal;
-- arrancar el backend empaquetado en producción local;
-- gestionar backups;
-- gestionar assets locales de cliente;
-- gestionar impresión de tickets;
-- exponer APIs seguras al renderer.
+- iniciar el backend empaquetado;
+- localizar o crear la base SQLite en `userData`;
+- generar `jwt-secret.txt` si falta;
+- exponer logs, backups, impresión y carpeta de datos;
+- servir el protocolo seguro de assets de cliente.
 
 Archivos clave:
-
 - `src/main/main.ts`
-- `src/preload.ts`
+- `src/main/backup.ts`
 - `src/main/clientAssets.ts`
+- `src/main/logging.ts`
 - `src/main/escpos.ts`
+- `src/preload.ts`
 
-### 2. Renderer React
+El runtime de escritorio también permite:
+- abrir carpeta de datos;
+- abrir logs;
+- restaurar backups;
+- resetear la instalación local y volver al bootstrap inicial.
 
-Responsabilidad:
+### 2. Preload
 
-- UI de negocio;
-- navegación por rutas;
+El bridge expuesto en `src/preload.ts` cubre:
+- versión y paths de la app;
+- logs;
+- backups;
+- impresión PDF y tickets;
+- assets locales de cliente;
+- relanzado y cierre controlado de la app.
+
+Esto mantiene `contextIsolation` y evita acceso directo del renderer a Node.
+
+### 3. Renderer React
+
+Responsabilidades:
+- navegación y UI de negocio;
 - estado de autenticación y tema;
-- consumo del backend a través de `src/renderer/utils/api.ts`;
-- integración con bridge de Electron cuando corre como escritorio.
+- consumo de la API solo mediante `src/renderer/utils/api.ts`;
+- uso del bridge Electron cuando existe.
 
-Páginas principales:
+Rutas activas:
+- `/`
+- `/login`
+- `/clients`
+- `/clients/:id`
+- `/appointments`
+- `/services`
+- `/products`
+- `/sales`
+- `/cash`
+- `/ranking`
+- `/settings`
+- `/reports` solo admin
+- `/accounts` solo admin
+- `/sql` solo admin
 
-- `Login`
-- `Dashboard`
-- `Clients`
-- `ClientDetail`
-- `Appointments`
-- `Services`
-- `Products`
-- `Sales`
-- `Cash`
-- `Reports`
-- `ClientRanking`
-- `Settings`
+Detalles relevantes:
+- usa `BrowserRouter` en dev y `HashRouter` en `file://`;
+- las rutas pesadas se cargan con `React.lazy`;
+- el login soporta bootstrap del primer admin;
+- `Settings` concentra impresora, backups, logs, Google Calendar e importaciones.
 
-Detalles actuales:
+### 4. Backend Express
 
-- Las rutas pesadas se cargan con `React.lazy`.
-- El login incluye bootstrap del primer admin cuando no existen usuarios.
-- Los importadores soportan solo `.xlsx`.
-
-### 3. Backend Express
-
-Responsabilidad:
-
+Responsabilidades:
 - exponer la API REST local;
-- autenticar y autorizar;
 - validar requests con Zod;
+- autenticar con JWT;
 - ejecutar reglas de negocio;
-- servir la SPA compilada cuando la app se ejecuta empaquetada.
+- servir la SPA compilada como fallback.
 
-Rutas montadas actualmente:
-
+Rutas montadas en `src/backend/app.ts`:
 - `/api/auth`
+- `/api/users`
 - `/api/clients`
 - `/api/appointments`
 - `/api/services`
@@ -103,89 +117,83 @@ Rutas montadas actualmente:
 - `/api/notifications`
 - `/api/reports`
 - `/api/dashboard`
+- `/api/reminders`
 - `/api/ranking`
 - `/api/bonos`
 - `/api/calendar`
 - `/api/quotes`
+- `/api/sql`
 - `/health`
 
-Archivos clave:
+## Módulos de negocio actuales
 
-- `src/backend/app.ts`
-- `src/backend/server.ts`
-- `src/backend/routes/*`
-- `src/backend/controllers/*`
-- `src/backend/validators/*`
-
-## Módulos de negocio reales
-
-Los módulos activos que debe reflejar cualquier documentación o cambio futuro son:
-
-- autenticación y usuarios;
-- clientes e historial;
-- assets de cliente: fotos, consentimientos y documentos;
-- citas y calendario;
-- servicios;
-- productos, stock y movimientos;
-- ventas y tickets;
-- caja y movimientos privados sin ticket;
-- bonos, packs y sesiones;
-- saldo a cuenta;
+Los módulos reales que la documentación debe reflejar son:
+- autenticación y bootstrap inicial;
+- usuarios internos y cuentas;
+- clientes, historial y assets locales;
+- agenda, citas, bloques, notas y leyendas;
+- servicios y productos;
+- stock y movimientos;
+- ventas;
+- cobros pendientes;
+- caja y arqueos;
+- bonos, packs, sesiones y saldo a cuenta;
+- dashboard y recordatorios;
+- ranking y reportes;
 - presupuestos;
-- ranking de clientes;
-- reportes;
-- notificaciones;
-- backups locales;
-- integración opcional con Google Calendar.
+- backups y restore local;
+- Google Calendar;
+- restauración SQL legacy asistida.
 
-## Flujo de autenticación
+## Autenticación y permisos
 
-### Login normal
+### Flujo de login
 
 ```text
-Login UI -> Axios -> POST /api/auth/login -> Prisma user lookup -> JWT -> authStore
+Login UI -> POST /api/auth/login -> JWT -> authStore
 ```
 
-### Bootstrap inicial
+### Flujo de bootstrap
 
 ```text
 Login UI -> GET /api/auth/bootstrap-status
           -> si required=true
-          -> formulario inicial
           -> POST /api/auth/bootstrap-admin
-          -> JWT + usuario ADMIN
+          -> usuario ADMIN + JWT
 ```
 
-El producto ya no crea un admin por seed de distribución.
+Roles observados:
+- `ADMIN`
+- `MANAGER`
+- `EMPLOYEE`
 
-## Flujo de arranque en producción local
-
-En el build empaquetado:
-
-1. Electron arranca.
-2. `src/main/main.ts` localiza o crea la base SQLite del usuario.
-3. Si no existe `JWT_SECRET`, genera uno en el directorio de datos del usuario.
-4. Arranca el backend empaquetado con `ELECTRON_RUN_AS_NODE=1`.
-5. Espera a que `/health` responda.
-6. Carga la SPA en la ventana principal.
-
-Esto evita depender de un servidor externo para el uso diario.
+Estado actual de permisos:
+- `register`, `users`, `calendar` y `sql` ya tienen guard admin explícito;
+- muchos módulos de negocio siguen siendo `auth only`.
 
 ## Persistencia
 
-### Modelo
+### Modelo principal
 
-La persistencia está en `prisma/schema.prisma` y cubre, entre otros:
-
+`prisma/schema.prisma` incluye, entre otros:
 - `User`
 - `Client`
-- `Appointment`
+- `ClientHistory`
 - `Service`
+- `Appointment`
+- `AppointmentService`
+- `AppointmentLegend`
+- `AgendaBlock`
+- `AgendaDayNote`
+- `DashboardReminder`
 - `Product`
 - `StockMovement`
 - `Sale`
+- `PendingPayment`
+- `PendingPaymentCollection`
 - `SaleItem`
 - `CashRegister`
+- `CashCount`
 - `CashMovement`
 - `AccountBalanceMovement`
 - `Notification`
@@ -196,71 +204,89 @@ La persistencia está en `prisma/schema.prisma` y cubre, entre otros:
 - `Quote`
 - `QuoteItem`
 
-### Migraciones
+### Migraciones Prisma
 
-Regla general:
+Las migraciones versionadas viven en `prisma/migrations/*`.
+Las más recientes cubren:
+- leyendas de cita;
+- bloqueos y notas de agenda;
+- múltiples servicios por cita;
+- usernames;
+- recordatorios de dashboard;
+- cobros pendientes;
+- arqueos de caja;
+- vínculo de packs con catálogo de bonos.
 
-- cambios de modelo en `prisma/schema.prisma`;
-- migración versionada en `prisma/migrations/*`;
-- `prisma generate` y `prisma migrate` según entorno.
+### Compatibility migrations SQLite
 
-### Compatibility migrations en runtime
-
-`src/backend/db.ts` mantiene guards de compatibilidad para SQLite histórica en runtime:
-
+`src/backend/db.ts` todavía ejecuta guards runtime para instalaciones antiguas.
+Hoy cubren:
+- `users.username`;
 - `account_balance_movements.paymentMethod`;
-- soporte de `guestName` y `guestPhone` en `appointments`.
+- refs legacy en saldo;
+- refs legacy y `bonoTemplateId` en bonos;
+- soporte de clienta invitada;
+- `appointment_services`;
+- `appointment_legends`;
+- `agenda_blocks`;
+- `agenda_day_notes`;
+- `dashboard_reminders`;
+- `pending_payments`;
+- `pending_payment_collections`;
+- leyendas por defecto.
 
-Estas guards existen para continuidad de instalaciones previas. No deben convertirse en mecanismo general para cambios de esquema nuevos; lo correcto es seguir usando migraciones Prisma versionadas.
+Son útiles para continuidad, pero no deben sustituir al flujo normal de Prisma.
 
-## Seguridad y límites
+## Flujos de escritorio relevantes
 
-- JWT para autenticación.
-- `contextIsolation` activado en Electron.
-- `contextBridge` en `preload`.
-- Validación Zod en rutas críticas y ya extendida a `clients`, `services`, `notifications`, `reports` y `quotes`.
-- Uploads validados en backend con `multer` y middleware específico.
-- Sin credenciales demo distribuidas.
+### Arranque empaquetado
+1. Electron arranca.
+2. Busca o crea `lucy3000.db` en `userData`.
+3. Genera `jwt-secret.txt` si no existe.
+4. Lee `.env` compatible desde carpeta del `.exe`, `resources/` o `userData`.
+5. Lanza el backend empaquetado con `ELECTRON_RUN_AS_NODE=1`.
+6. Espera a `/health`.
+7. Carga la SPA.
 
-Límites vigentes:
+### Backups
+- manuales y automáticos desde Electron;
+- snapshot de seguridad antes de restore;
+- soporte de backup completo con assets y backup antiguo `.db`.
 
-- el runtime oficial es local por instalación;
-- la base es SQLite;
-- la impresión y backups dependen del entorno de escritorio.
+### Assets de cliente
+- Electron expone un protocolo seguro para previsualización;
+- los ficheros viven fuera del bundle, en carpetas locales del usuario.
 
-## Integraciones de escritorio
+### Impresión
+- modo Windows con impresora instalada;
+- modo ESC/POS por red;
+- generación de PDF desde ventana oculta.
 
-El bridge expuesto en `src/preload.ts` cubre:
+## Integraciones opcionales
 
-- versión y paths de la app;
-- apertura de carpeta de logs;
-- creación, restauración y listado de backups;
-- configuración e impresión de tickets;
-- gestión de assets locales de cliente.
+### Google Calendar
+- OAuth iniciado desde `Settings`;
+- callback público en `/api/calendar/callback`;
+- sincronización de citas y bloqueos de agenda;
+- sync manual completa desde `Settings`;
+- disconnect limpia el estado local, no garantiza borrar eventos remotos ya existentes.
 
-Esto separa lo que pertenece al entorno de escritorio de lo que pertenece a la API.
+### WhatsApp
+Existen servicios y variables `WHATSAPP_*` para recordatorios, pero no es el eje de la topología principal.
 
-## Build y empaquetado
+## Testing
 
-`npm run build` ejecuta:
-
-1. `build:prepare-db`
-2. `tsc`
-3. `vite build`
-4. `build:backend`
-5. `electron-builder`
-
-Resultado:
-
-- instaladores en `release/`;
-- backend compilado en `dist/backend`;
-- SPA compilada en `dist/`.
+El proyecto ya no tiene solo tests de backend.
+Hay suites en:
+- `tests/backend/*`
+- `tests/main/*`
+- `tests/renderer/unit/*`
 
 ## Regla de mantenimiento
 
-Si cambia un contrato de API o un flujo de negocio, el cambio debe mantenerse coherente en cuatro capas:
-
+Si cambia un flujo real, el cambio debe mantenerse coherente en estas capas:
 1. validador Zod;
-2. ruta o controlador backend;
-3. consumo en frontend;
-4. test o smoke relevante.
+2. ruta/controller o servicio backend;
+3. frontend o preload afectado;
+4. documentación raíz;
+5. test relevante cuando aplique.

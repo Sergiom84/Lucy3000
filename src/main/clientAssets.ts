@@ -74,6 +74,27 @@ type ImportClientAssetsInput = {
   photoCategory?: PhotoCategoryId | null
 }
 
+export type ImportGeneratedClientAssetInput = {
+  clientId: string
+  clientName: string
+  kind: ClientAssetKind
+  fileName: string
+  originalName: string
+  contentBase64: string
+  mimeType?: string | null
+  takenAt?: string | null
+  photoCategory?: PhotoCategoryId | null
+}
+
+export type ImportGeneratedClientAssetsResult = {
+  importedCount: number
+  clients: Array<{
+    clientId: string
+    clientName: string
+    baseDir: string
+  }>
+}
+
 type SetPhotoCategoryInput = {
   clientId: string
   clientName: string
@@ -504,6 +525,66 @@ export const createClientAssetManager = ({
     return buildAssetResponse(clientId, clientName)
   }
 
+  const importGeneratedClientAssets = async (
+    items: ImportGeneratedClientAssetInput[]
+  ): Promise<ImportGeneratedClientAssetsResult> => {
+    if (!items.length) {
+      return {
+        importedCount: 0,
+        clients: []
+      }
+    }
+
+    const groupedItems = new Map<string, ImportGeneratedClientAssetInput[]>()
+
+    for (const item of items) {
+      const key = `${item.clientId}::${item.clientName}`
+      const currentItems = groupedItems.get(key) || []
+      currentItems.push(item)
+      groupedItems.set(key, currentItems)
+    }
+
+    const clients: ImportGeneratedClientAssetsResult['clients'] = []
+    let importedCount = 0
+
+    for (const [groupKey, groupItems] of groupedItems.entries()) {
+      const [clientId, clientName] = groupKey.split('::')
+      const baseDir = await getClientBaseDir(clientId, clientName)
+      const manifest = await loadClientManifest(baseDir)
+
+      for (const item of groupItems) {
+        const parsed = path.parse(item.fileName)
+        const storedName = `${Date.now()}-${randomUUID()}${parsed.ext.toLowerCase()}`
+        const resolvedPhotoCategory =
+          item.kind === 'photos' && isPhotoCategoryId(item.photoCategory) ? item.photoCategory : 'unclassified'
+        const asset: StoredClientAsset = {
+          id: randomUUID(),
+          kind: item.kind,
+          fileName: storedName,
+          originalName: item.originalName || item.fileName,
+          addedAt: new Date().toISOString(),
+          takenAt: item.takenAt || new Date().toISOString(),
+          ...(item.kind === 'photos' ? { photoCategory: resolvedPhotoCategory } : {})
+        }
+
+        const targetPath = resolveStoredAssetAbsolutePath(baseDir, asset)
+        await ensureDir(path.dirname(targetPath))
+        await fsPromises.writeFile(targetPath, Buffer.from(item.contentBase64, 'base64'))
+        manifest.assets.push(asset)
+        importedCount += 1
+      }
+
+      manifest.primaryPhotoId = pickPrimaryPhotoId(manifest.assets, manifest.primaryPhotoId)
+      await saveClientManifest(baseDir, manifest)
+      clients.push({ clientId, clientName, baseDir })
+    }
+
+    return {
+      importedCount,
+      clients
+    }
+  }
+
   const deleteClientAsset = async (clientId: string, clientName: string, assetId: string): Promise<ClientAssetsResponse> => {
     const baseDir = await getClientBaseDir(clientId, clientName)
     const manifest = await loadClientManifest(baseDir)
@@ -580,6 +661,7 @@ export const createClientAssetManager = ({
     getClientBaseDir,
     buildAssetResponse,
     importClientAssets,
+    importGeneratedClientAssets,
     deleteClientAsset,
     setPrimaryClientPhoto,
     setClientPhotoCategory,

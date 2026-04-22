@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthRequest } from '../../../src/backend/middleware/auth.middleware'
-import { collectPendingSale, createSale, updateSale } from '../../../src/backend/controllers/sale.controller'
+import { collectPendingSale, createSale, deleteSale, updateSale } from '../../../src/backend/controllers/sale.controller'
 import { createMockRequest, createMockResponse } from '../helpers/http'
 import { prismaMock, resetPrismaMock } from '../mocks/prisma.mock'
 
@@ -117,6 +117,63 @@ describe('sale.controller', () => {
       })
     )
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ saleNumber: 'V-000100' }))
+  })
+
+  it('returns 409 when the appointment already has a pending sale linked', async () => {
+    const tx: any = {
+      appointment: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'appointment-1',
+          clientId: 'client-1',
+          client: { firstName: 'Ana', lastName: 'Lopez' },
+          sale: {
+            id: 'sale-pending-1',
+            saleNumber: 'V-000099',
+            status: 'PENDING'
+          }
+        })
+      },
+      sale: {
+        findFirst: vi.fn(),
+        create: vi.fn()
+      }
+    }
+
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx))
+
+    const req = createMockRequest<AuthRequest>({
+      user: { id: 'user-1', email: 'admin@lucy3000.com', role: 'ADMIN' },
+      body: {
+        clientId: 'client-1',
+        appointmentId: 'appointment-1',
+        items: [
+          {
+            productId: null,
+            serviceId: 'service-1',
+            description: 'Limpieza facial',
+            quantity: 1,
+            price: 45
+          }
+        ],
+        discount: 0,
+        tax: 0,
+        paymentMethod: 'CASH',
+        status: 'COMPLETED',
+        notes: null
+      }
+    })
+
+    const res = createMockResponse()
+
+    await createSale(req, res)
+
+    expect(res.status).toHaveBeenCalledWith(409)
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: 'This appointment already has the pending sale V-000099. Open it from sales to continue the collection.'
+      })
+    )
+    expect(tx.sale.create).not.toHaveBeenCalled()
   })
 
   it('creates bono packs when a completed sale includes bono items', async () => {
@@ -1427,6 +1484,9 @@ describe('sale.controller', () => {
       product: {
         update: vi.fn().mockResolvedValue(undefined)
       },
+      appointment: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 })
+      },
       stockMovement: {
         create: vi.fn().mockResolvedValue(undefined)
       }
@@ -1458,6 +1518,15 @@ describe('sale.controller', () => {
     await updateSale(req as any, res)
 
     expect(tx.cashMovement.delete).toHaveBeenCalledWith({ where: { saleId: 'sale-1' } })
+    expect(tx.appointment.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'appointment-1',
+        status: 'COMPLETED'
+      },
+      data: {
+        status: 'SCHEDULED'
+      }
+    })
   })
 
   it('creates bono packs when a pending sale is marked as completed', async () => {
@@ -1608,5 +1677,65 @@ describe('sale.controller', () => {
         })
       })
     )
+  })
+
+  it('restores the linked appointment when deleting a completed sale', async () => {
+    const tx: any = {
+      sale: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'sale-1',
+          clientId: 'client-1',
+          userId: 'user-1',
+          appointmentId: 'appointment-1',
+          saleNumber: 'V-000100',
+          total: 80,
+          status: 'COMPLETED',
+          paymentMethod: 'CARD',
+          items: []
+        }),
+        delete: vi.fn().mockResolvedValue(undefined)
+      },
+      client: {
+        update: vi.fn().mockResolvedValue(undefined)
+      },
+      cashMovement: {
+        findUnique: vi.fn().mockResolvedValue({ id: 'movement-1' }),
+        delete: vi.fn().mockResolvedValue(undefined)
+      },
+      bonoPack: {
+        findMany: vi.fn().mockResolvedValue([]),
+        delete: vi.fn().mockResolvedValue(undefined)
+      },
+      appointment: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 })
+      },
+      product: {
+        update: vi.fn().mockResolvedValue(undefined)
+      },
+      stockMovement: {
+        create: vi.fn().mockResolvedValue(undefined)
+      }
+    }
+
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx))
+
+    const req = createMockRequest({
+      params: { id: 'sale-1' }
+    })
+    const res = createMockResponse()
+
+    await deleteSale(req as any, res)
+
+    expect(tx.appointment.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'appointment-1',
+        status: 'COMPLETED'
+      },
+      data: {
+        status: 'SCHEDULED'
+      }
+    })
+    expect(tx.sale.delete).toHaveBeenCalledWith({ where: { id: 'sale-1' } })
+    expect(res.json).toHaveBeenCalledWith({ message: 'Sale deleted successfully' })
   })
 })

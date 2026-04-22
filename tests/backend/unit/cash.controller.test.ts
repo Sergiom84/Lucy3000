@@ -126,6 +126,9 @@ describe('cash.controller', () => {
       ])
       .mockResolvedValueOnce([{ total: 90, paymentMethod: 'CARD', accountBalanceMovements: [] }])
       .mockResolvedValueOnce([{ total: 300, paymentMethod: 'BIZUM', accountBalanceMovements: [] }])
+      .mockResolvedValueOnce([
+        { total: 30, paymentMethod: 'CASH', showInOfficialCash: false, accountBalanceMovements: [] }
+      ])
     prismaMock.pendingPaymentCollection.findMany
       .mockResolvedValueOnce([
         { amount: 25, paymentMethod: 'CARD', showInOfficialCash: true },
@@ -133,6 +136,7 @@ describe('cash.controller', () => {
       ])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ amount: 12, paymentMethod: 'CASH', showInOfficialCash: false }])
     prismaMock.accountBalanceMovement.findMany
       .mockResolvedValueOnce([{ type: 'TOP_UP', amount: 20, paymentMethod: 'CASH' }])
       .mockResolvedValueOnce([{ type: 'TOP_UP', amount: 20, paymentMethod: 'CASH' }])
@@ -168,6 +172,14 @@ describe('cash.controller', () => {
             BIZUM: 0,
             ABONO: 88
           }),
+          closingSummary: expect.objectContaining({
+            expectedOfficialCash: 175,
+            officialCashCollected: 70,
+            cardCollected: 115,
+            bizumCollected: 0,
+            privateCashCollected: 42,
+            totalCollectedExcludingAbono: 227
+          }),
           income: expect.objectContaining({
             day: 185
           }),
@@ -201,7 +213,9 @@ describe('cash.controller', () => {
       .mockResolvedValueOnce([combinedSale])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
     prismaMock.pendingPaymentCollection.findMany
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
@@ -225,6 +239,14 @@ describe('cash.controller', () => {
             CARD: 120,
             BIZUM: 0,
             ABONO: 0
+          }),
+          closingSummary: expect.objectContaining({
+            expectedOfficialCash: 50,
+            officialCashCollected: 0,
+            cardCollected: 120,
+            bizumCollected: 0,
+            privateCashCollected: 80,
+            totalCollectedExcludingAbono: 200
           }),
           income: expect.objectContaining({
             day: 120
@@ -321,7 +343,8 @@ describe('cash.controller', () => {
         notes: null,
         professional: 'CHEMA',
         client: { firstName: 'Sergio', lastName: 'Hernandez Lara' },
-        user: { name: 'Administrador' }
+        user: { name: 'Administrador' },
+        items: [{ description: 'Higiene facial' }]
       }
     ])
     prismaMock.pendingPaymentCollection.findMany.mockResolvedValue([
@@ -334,7 +357,8 @@ describe('cash.controller', () => {
           professional: 'LUCY',
           client: { firstName: 'Ana', lastName: 'Lopez' },
           appointment: null,
-          user: { name: 'Administrador' }
+          user: { name: 'Administrador' },
+          items: [{ description: 'Radiofrecuencia' }]
         }
       }
     ])
@@ -353,16 +377,53 @@ describe('cash.controller', () => {
         rows: expect.arrayContaining([
           expect.objectContaining({
             clientName: 'Sergio Hernandez Lara',
-            professionalName: 'Chema'
+            professionalName: 'Chema',
+            paymentDetail: 'Efectivo privado',
+            treatmentName: 'Higiene facial'
           }),
           expect.objectContaining({
             clientName: 'Ana Lopez',
-            professionalName: 'Lucy'
+            professionalName: 'Lucy',
+            paymentDetail: 'Cobro pendiente · efectivo privado',
+            treatmentName: 'Radiofrecuencia'
           })
         ]),
         totalAmount: 100
       })
     )
+  })
+
+  it('applies the selected date range to private cash queries', async () => {
+    prismaMock.sale.findMany.mockResolvedValue([])
+    prismaMock.pendingPaymentCollection.findMany.mockResolvedValue([])
+
+    const req = createMockRequest({
+      query: {
+        pin: '0852',
+        startDate: '2026-03-01',
+        endDate: '2026-03-31'
+      }
+    })
+    const res = createMockResponse()
+
+    await getPrivateNoTicketCashSales(req as any, res)
+
+    const saleArgs = prismaMock.sale.findMany.mock.calls[0][0]
+    const collectionArgs = prismaMock.pendingPaymentCollection.findMany.mock.calls[0][0]
+
+    expect(saleArgs.where.date.gte).toBeInstanceOf(Date)
+    expect(saleArgs.where.date.lte).toBeInstanceOf(Date)
+    expect(saleArgs.where.date.gte.getHours()).toBe(0)
+    expect(saleArgs.where.date.lte.getHours()).toBe(23)
+    expect(saleArgs.where.date.gte.getDate()).toBe(1)
+    expect(saleArgs.where.date.lte.getDate()).toBe(31)
+
+    expect(collectionArgs.where.operationDate.gte).toBeInstanceOf(Date)
+    expect(collectionArgs.where.operationDate.lte).toBeInstanceOf(Date)
+    expect(collectionArgs.where.operationDate.gte.getHours()).toBe(0)
+    expect(collectionArgs.where.operationDate.lte.getHours()).toBe(23)
+    expect(collectionArgs.where.operationDate.gte.getDate()).toBe(1)
+    expect(collectionArgs.where.operationDate.lte.getDate()).toBe(31)
   })
 
   it('returns the private cash leg of a combined sale in the private cash section', async () => {
@@ -379,7 +440,8 @@ describe('cash.controller', () => {
         professional: 'LUCY',
         client: { firstName: 'Ana', lastName: 'Lopez' },
         appointment: null,
-        user: { name: 'Administrador' }
+        user: { name: 'Administrador' },
+        items: [{ description: 'Pack corporal' }]
       }
     ])
     prismaMock.pendingPaymentCollection.findMany.mockResolvedValue([])
@@ -400,7 +462,9 @@ describe('cash.controller', () => {
             saleNumber: 'V-000011',
             clientName: 'Ana Lopez',
             professionalName: 'Lucy',
-            amount: 35
+            amount: 35,
+            paymentDetail: 'Pago mixto · efectivo privado',
+            treatmentName: 'Pack corporal'
           })
         ]),
         totalAmount: 35

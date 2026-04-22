@@ -10,7 +10,9 @@ import {
   addCashMovement,
   getCashMovements,
   updateOpeningBalance,
-  getPrivateNoTicketCashSales
+  getPrivateNoTicketCashSales,
+  createCashCount,
+  listCashCounts
 } from '../controllers/cash.controller'
 import { authMiddleware } from '../middleware/auth.middleware'
 import { validateRequest } from '../middleware/validation.middleware'
@@ -21,6 +23,8 @@ import {
   cashListQuerySchema,
   cashSummaryQuerySchema,
   closeCashRegisterBodySchema,
+  createCashCountBodySchema,
+  listCashCountsQuerySchema,
   openCashRegisterBodySchema,
   privateNoTicketCashQuerySchema,
   updateOpeningBalanceBodySchema
@@ -56,6 +60,16 @@ router.put(
   '/:id/opening-balance',
   validateRequest({ params: cashIdParamSchema, body: updateOpeningBalanceBodySchema }),
   updateOpeningBalance
+)
+router.post(
+  '/:id/counts',
+  validateRequest({ params: cashIdParamSchema, body: createCashCountBodySchema }),
+  createCashCount
+)
+router.get(
+  '/:id/counts',
+  validateRequest({ params: cashIdParamSchema, query: listCashCountsQuerySchema }),
+  listCashCounts
 )
 
 export default router

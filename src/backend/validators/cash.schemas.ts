@@ -70,12 +70,19 @@ export const cashSummaryQuerySchema = z.object({
   referenceDate: dateQuerySchema.optional()
 })
 
-export const privateNoTicketCashQuerySchema = z.object({
-  pin: z
-    .string()
-    .trim()
-    .regex(/^\d{4}$/, 'PIN inválido')
-})
+export const privateNoTicketCashQuerySchema = z
+  .object({
+    pin: z
+      .string()
+      .trim()
+      .regex(/^\d{4}$/, 'PIN inválido'),
+    startDate: dateQuerySchema.optional(),
+    endDate: dateQuerySchema.optional()
+  })
+  .refine(({ startDate, endDate }) => (!startDate && !endDate) || (startDate && endDate), {
+    message: 'startDate y endDate deben enviarse juntos',
+    path: ['startDate']
+  })
 
 export const updateOpeningBalanceBodySchema = z
   .object({
@@ -83,3 +90,16 @@ export const updateOpeningBalanceBodySchema = z
     notes: optionalNullableTextSchema(1000)
   })
   .strict()
+
+export const createCashCountBodySchema = z
+  .object({
+    denominations: z.record(z.string(), z.coerce.number().int().min(0).max(999999)),
+    isBlind: z.boolean().optional().default(false),
+    appliedAsClose: z.boolean().optional().default(false),
+    notes: optionalNullableTextSchema(1000)
+  })
+  .strict()
+
+export const listCashCountsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).optional().default(20)
+})

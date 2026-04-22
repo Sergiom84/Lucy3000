@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createClient, getClients, importClientsFromExcel, updateClient } from '../../../src/backend/controllers/client.controller'
+import { createClient, getClientById, getClients, importClientsFromExcel, updateClient } from '../../../src/backend/controllers/client.controller'
+import { googleCalendarService } from '../../../src/backend/services/googleCalendar.service'
 import { createWorkbookBuffer } from '../helpers/spreadsheet'
 import { createMockRequest, createMockResponse } from '../helpers/http'
 import { prismaMock, resetPrismaMock } from '../mocks/prisma.mock'
@@ -13,6 +14,7 @@ describe('client.controller list ordering', () => {
 
   it('getClients returns paginated clients ordered by latest completed appointment activity', async () => {
     prismaMock.client.count
+      .mockResolvedValueOnce(2)
       .mockResolvedValueOnce(2)
       .mockResolvedValueOnce(2)
       .mockResolvedValueOnce(1)
@@ -55,6 +57,7 @@ describe('client.controller list ordering', () => {
     expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1)
     const sql = prismaMock.$queryRaw.mock.calls[0][0]?.sql || ''
     expect(sql).toContain(`a."status" = 'COMPLETED'`)
+    expect(sql).not.toContain('c."lastVisit"')
     expect(prismaMock.client.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
@@ -84,7 +87,7 @@ describe('client.controller list ordering', () => {
         }),
         expect.objectContaining({
           id: 'client-1',
-          effectiveLastVisit: new Date('2026-03-01T00:00:00.000Z')
+          effectiveLastVisit: null
         })
       ],
       pagination: {
@@ -123,6 +126,7 @@ describe('client.controller list ordering', () => {
   it('getClients summary counts clients with pending amount even without debt alert flag', async () => {
     prismaMock.client.count
       .mockResolvedValueOnce(20)
+      .mockResolvedValueOnce(20)
       .mockResolvedValueOnce(18)
       .mockResolvedValueOnce(13)
     prismaMock.$queryRaw.mockResolvedValue([])
@@ -140,7 +144,7 @@ describe('client.controller list ordering', () => {
 
     await getClients(req as any, res)
 
-    expect(prismaMock.client.count.mock.calls[2][0]).toEqual({
+    expect(prismaMock.client.count.mock.calls[3][0]).toEqual({
       where: {
         AND: [
           { isActive: true },
@@ -730,5 +734,79 @@ describe('client.controller gender validation', () => {
       expect.arrayContaining(['%ser%', '%her%', true])
     )
     expect(res.json).toHaveBeenCalledWith([])
+  })
+})
+
+describe('client.controller google calendar reconciliation', () => {
+  beforeEach(() => {
+    resetPrismaMock()
+  })
+
+  it('marks active appointments as cancelled when Google Calendar event was cancelled externally', async () => {
+    const initialClient = {
+      id: 'client-1',
+      firstName: 'Ana',
+      lastName: 'Lopez',
+      appointments: [
+        {
+          id: 'appointment-1',
+          status: 'SCHEDULED',
+          googleCalendarEventId: 'event-1',
+          serviceId: 'service-1',
+          cabin: 'LUCY',
+          startTime: '10:00',
+          endTime: '10:30',
+          date: new Date('2099-06-15T00:00:00.000Z'),
+          service: { id: 'service-1', name: 'Limpieza facial' },
+          user: { name: 'Lucy' },
+          sale: null
+        }
+      ],
+      sales: [],
+      pendingPayments: [],
+      clientHistory: [],
+      bonoPacks: [],
+      linkedClient: null,
+      relatedClients: []
+    }
+    const refreshedClient = {
+      ...initialClient,
+      appointments: [
+        {
+          ...initialClient.appointments[0],
+          status: 'CANCELLED'
+        }
+      ]
+    }
+
+    prismaMock.client.findUnique
+      .mockResolvedValueOnce(initialClient)
+      .mockResolvedValueOnce(refreshedClient)
+    prismaMock.appointment.update.mockResolvedValue({
+      id: 'appointment-1',
+      status: 'CANCELLED'
+    })
+    vi.spyOn(googleCalendarService, 'getAppointmentEventState').mockResolvedValue('CANCELLED')
+
+    const req = createMockRequest({
+      params: {
+        id: 'client-1'
+      }
+    })
+    const res = createMockResponse()
+
+    await getClientById(req as any, res)
+
+    expect(prismaMock.appointment.update).toHaveBeenCalledWith({
+      where: { id: 'appointment-1' },
+      data: expect.objectContaining({
+        status: 'CANCELLED',
+        googleCalendarEventId: 'event-1',
+        googleCalendarSyncStatus: 'SYNCED',
+        googleCalendarSyncError: null,
+        googleCalendarSyncedAt: expect.any(Date)
+      })
+    })
+    expect(res.json).toHaveBeenCalledWith(refreshedClient)
   })
 })

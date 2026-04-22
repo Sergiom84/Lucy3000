@@ -15,6 +15,10 @@ import api from '../utils/api'
 import AgendaBlockForm from './AgendaBlockForm'
 import { getAppointmentColorTheme } from '../utils/appointmentColors'
 import {
+  isAppointmentInactiveForCalendar,
+  requiresAppointmentCharge
+} from '../utils/appointmentBilling'
+import {
   loadAppointmentLegendItems,
   type AppointmentLegendCatalogItem
 } from '../utils/appointmentCatalogs'
@@ -51,7 +55,6 @@ const professionalLabels: Record<string, string> = {
   CHEMA: 'Chema',
   OTROS: 'Otros'
 }
-const INACTIVE_STATUSES = new Set(['COMPLETED', 'CANCELLED', 'NO_SHOW'])
 const cabinLabels: Record<string, string> = {
   LUCY: 'Lucy',
   TAMARA: 'Tamara',
@@ -65,6 +68,7 @@ const formatProfessionalLabel = (professional: string | null | undefined) =>
 interface ClientCalendarDockProps {
   onClose: () => void
   selectedClientId?: string | null
+  selectedClientName?: string | null
 }
 
 function AppointmentEvent({ event }: { event: any }) {
@@ -130,7 +134,8 @@ function AppointmentEvent({ event }: { event: any }) {
 
 export default function ClientCalendarDock({
   onClose,
-  selectedClientId = null
+  selectedClientId = null,
+  selectedClientName = null
 }: ClientCalendarDockProps) {
   const [appointments, setAppointments] = useState<any[]>([])
   const [agendaBlocks, setAgendaBlocks] = useState<any[]>([])
@@ -146,14 +151,20 @@ export default function ClientCalendarDock({
   const [preselectedStartTime, setPreselectedStartTime] = useState<string | undefined>()
   const [preselectedEndTime, setPreselectedEndTime] = useState<string | undefined>()
   const [initialCabin, setInitialCabin] = useState<'LUCY' | 'TAMARA' | 'CABINA_1' | 'CABINA_2'>('LUCY')
+  const [showOnlySelectedClient, setShowOnlySelectedClient] = useState(Boolean(selectedClientId))
+  const activeClientId = showOnlySelectedClient ? selectedClientId : null
 
   useEffect(() => {
-    fetchAppointments()
-  }, [currentDate, view])
+    void fetchAppointments()
+  }, [activeClientId, currentDate, view])
 
   useEffect(() => {
     void fetchAppointmentLegends()
   }, [])
+
+  useEffect(() => {
+    setShowOnlySelectedClient(Boolean(selectedClientId))
+  }, [selectedClientId])
 
   useEffect(() => {
     const resizeTimeout = window.setTimeout(() => {
@@ -177,9 +188,13 @@ export default function ClientCalendarDock({
         endDate = moment(currentDate).endOf('day').toDate()
       }
 
-      const params = {
+      const params: Record<string, string> = {
         startDate: startDate.toISOString(),
         endDate: endDate.toISOString()
+      }
+
+      if (activeClientId) {
+        params.clientId = activeClientId
       }
 
       const [appointmentsResponse, agendaBlocksResponse] = await Promise.all([
@@ -257,7 +272,7 @@ export default function ClientCalendarDock({
 
   const pendingPayment = useMemo(
     () =>
-      appointments.filter((apt) => !apt.sale || apt.sale.status !== 'COMPLETED').length,
+      appointments.filter((appointment) => requiresAppointmentCharge(appointment)).length,
     [appointments]
   )
 
@@ -298,7 +313,7 @@ export default function ClientCalendarDock({
       const durationMinutes = event.durationMinutes ?? 0
       const isTiny = durationMinutes <= 30
       const isCompact = durationMinutes > 30 && durationMinutes <= 60
-      const isInactive = INACTIVE_STATUSES.has(String(event.appointment.status || '').toUpperCase())
+      const isInactive = isAppointmentInactiveForCalendar(event.appointment)
 
       return {
         style: {
@@ -450,6 +465,26 @@ export default function ClientCalendarDock({
             </button>
           </div>
 
+          {selectedClientId && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl border border-cyan-400/20 bg-cyan-400/10 px-3 py-2">
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] uppercase tracking-[0.15em] text-cyan-200/80">
+                  Cliente seleccionado
+                </p>
+                <p className="truncate text-sm font-semibold text-white">
+                  {selectedClientName || 'Cliente'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowOnlySelectedClient((current) => !current)}
+                className="rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-100 transition hover:bg-white/10"
+              >
+                {showOnlySelectedClient ? 'Ver todas' : 'Ver solo este cliente'}
+              </button>
+            </div>
+          )}
+
           {/* Estadisticas */}
           <div className="mt-3 grid grid-cols-1 items-start gap-2 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_14rem]">
             <div className="self-start rounded-xl border border-white/10 bg-white/5 px-3 py-2">
@@ -520,8 +555,8 @@ export default function ClientCalendarDock({
                 })}
               </div>
             </div>
-            <div className="md:col-span-2 xl:col-span-2">
-              <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0 md:col-span-2 xl:col-span-2">
+              <div className="flex flex-wrap items-center gap-3">
                 <div className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 p-1">
                   <button
                     onClick={() => setView('day')}
@@ -545,19 +580,19 @@ export default function ClientCalendarDock({
                   </button>
                 </div>
 
-                <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-2 py-1">
+                <div className="flex min-w-0 flex-1 items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-1">
                   <button
                     onClick={() =>
                       setCurrentDate((current) =>
                         moment(current).subtract(view === 'week' ? 7 : 1, 'days').toDate()
                       )
                     }
-                    className="inline-flex h-8 items-center justify-center rounded-full px-3 text-xs font-medium text-slate-200 transition hover:bg-white/10"
+                    className="inline-flex h-8 shrink-0 items-center justify-center rounded-full px-2.5 text-xs font-medium text-slate-200 transition hover:bg-white/10 sm:px-3"
                     title="Anterior"
                   >
                     Anterior
                   </button>
-                  <div className="min-w-[10rem] text-center text-sm font-medium text-white">
+                  <div className="min-w-0 flex-1 truncate px-2 text-center text-xs font-medium text-white sm:text-sm">
                     {view === 'week'
                       ? `${formatCalendarText(startOfCalendarWeek(currentDate), 'D MMM')} - ${formatCalendarText(endOfCalendarWeek(currentDate), 'D MMM')}`
                       : formatCalendarText(currentDate, 'dddd D [de] MMMM')}
@@ -568,7 +603,7 @@ export default function ClientCalendarDock({
                         moment(current).add(view === 'week' ? 7 : 1, 'days').toDate()
                       )
                     }
-                    className="inline-flex h-8 items-center justify-center rounded-full px-3 text-xs font-medium text-slate-200 transition hover:bg-white/10"
+                    className="inline-flex h-8 shrink-0 items-center justify-center rounded-full px-2.5 text-xs font-medium text-slate-200 transition hover:bg-white/10 sm:px-3"
                     title="Siguiente"
                   >
                     Siguiente
@@ -732,6 +767,8 @@ export default function ClientCalendarDock({
             preselectedStartTime={preselectedStartTime}
             preselectedEndTime={preselectedEndTime}
             initialCabin={initialCabin}
+            preselectedClientId={selectedClientId || undefined}
+            lockClientSelection={Boolean(activeClientId)}
           />
         </div>
       </Modal>

@@ -1,115 +1,152 @@
 # Backup y Restauración
 
-Estado actualizado: 2026-04-16
+Estado actualizado: 2026-04-21
 
 ## Alcance
 
-Este documento cubre dos cosas distintas:
+En el repositorio conviven tres flujos distintos y no deben mezclarse:
+1. backup y restore del runtime local actual;
+2. restore legacy asistido desde la pantalla `SQL`;
+3. scripts históricos de PostgreSQL/Supabase.
 
-- backups y restauración del runtime actual de escritorio basado en SQLite;
-- restauración histórica apoyada en scripts PostgreSQL/Supabase heredados.
+## 1. Runtime local actual
 
-No son el mismo flujo y no deben mezclarse.
+El flujo operativo normal del producto es el backup de escritorio gestionado por Electron.
 
-## 1. Runtime actual de escritorio
+### Qué expone la app
 
-El escritorio usa SQLite local. Los backups operativos diarios se resuelven copiando el fichero `.db`.
+Desde `Settings` y `src/main/main.ts` existen estas operaciones:
+- crear backup manual completo;
+- restaurar un backup completo o un `.db` legacy;
+- listar backups disponibles;
+- elegir carpeta de backups;
+- activar o desactivar auto-backup;
+- abrir carpeta de datos local;
+- resetear la instalación local.
 
-### Qué hace hoy la app
+### Qué incluye un backup completo
 
-Desde Electron, `src/main/main.ts` expone:
+Cada snapshot puede incluir:
+- la base SQLite activa;
+- ficheros `-wal` y `-shm` si existen;
+- assets locales de cliente en disco.
 
-- creación manual de backup;
-- restauración desde un backup seleccionado;
-- listado de backups existentes;
-- configuración de carpeta de backups;
-- auto-backup simple semanal.
+Esto cubre la operativa diaria de:
+- clientes;
+- servicios;
+- productos;
+- citas;
+- bonos;
+- saldo a cuenta;
+- ventas;
+- caja;
+- configuraciones persistidas en la base.
 
-Comportamiento actual:
+### Comportamiento actual
 
-- los backups manuales generan `lucy3000-backup-<timestamp>.db`;
+- los backups manuales usan prefijo `lucy3000-backup-<timestamp>`;
+- los automáticos usan `lucy3000-auto-backup-<timestamp>`;
+- antes de restaurar se crea `lucy3000-pre-restore-backup-<timestamp>`;
+- el reset local crea `lucy3000-reset-backup-<timestamp>.db` si existía BD previa;
+- en empaquetado, Electron pausa el backend mientras snapshota o restaura;
 - se conservan los últimos 10 backups manuales;
-- la restauración crea antes una copia de seguridad adicional `*.pre-restore`;
-- el auto-backup conserva los últimos 4 backups automáticos.
+- se conservan los últimos 4 auto-backups;
+- el auto-backup real es semanal mediante `setInterval`.
 
-### Dónde viven
+### Dónde vive la información
 
-Por defecto, la app usa el directorio de datos del usuario. La carpeta de destino puede cambiarse desde `Settings`.
+- base productiva empaquetada: carpeta de datos local del usuario;
+- backups: carpeta configurable desde `Settings`;
+- assets de cliente: carpetas locales del usuario, fuera del bundle.
 
-### Recomendación operativa
+### Restore soportado
 
-- usa una carpeta sincronizada si quieres réplica externa, por ejemplo OneDrive o Google Drive;
-- no reemplaces la base en caliente fuera del flujo de restauración de la app;
-- después de restaurar, reinicia la aplicación.
+Lucy3000 distingue dos fuentes:
+- carpeta de backup completo creada por la propia app;
+- fichero `.db` antiguo.
 
-## 2. Restauración histórica
+Si restauras una carpeta completa:
+- se restaura base + assets soportados.
 
-El repositorio conserva tooling para analizar y reconstruir un backup histórico PostgreSQL/Supabase. Esto no convierte a Supabase en la base activa del producto; es un flujo separado de auditoría o recuperación.
+Si restauras solo un `.db`:
+- se restaura la base;
+- los assets locales no se tocan.
 
-Scripts relevantes:
+### Recomendaciones operativas
 
+- usa el restore de la propia app, no sustituyas la BD “en caliente”;
+- si necesitas copia externa, apunta la carpeta de backups a OneDrive, Google Drive o similar;
+- tras un restore que requiera relanzado, deja que la app se reinicie;
+- usa “Restablecer instalación local” solo cuando quieras volver al bootstrap del primer administrador.
+
+## 2. Restore SQL legacy asistido
+
+La pantalla `SQL` es un flujo admin aparte.
+No sustituye al backup diario y no es una restauración universal de todo el negocio.
+
+### Qué hace
+
+- analiza un `01dat.sql`;
+- muestra un wizard por bloques de datos;
+- permite revisar, seleccionar y editar filas antes del commit;
+- registra eventos de importación;
+- crea un backup local de seguridad antes de escribir;
+- importa a la BD vacía únicamente lo soportado.
+
+### Qué puede restaurar
+
+Según el código actual, el asistente cubre:
+- clientes;
+- tratamientos;
+- productos;
+- catálogo de bonos;
+- bonos de clientes;
+- saldo o abonos de clientes;
+- citas;
+- bloqueos de agenda;
+- notas de agenda;
+- consentimientos y firmas como assets generados.
+
+### Qué no cubre
+
+- ventas;
+- caja;
+- referencias legacy de fotos;
+- una reconstrucción total y fiel de todo el sistema antiguo.
+
+### Reglas del flujo
+
+- requiere rol administrador;
+- está pensado para escritorio, no para navegador puro;
+- asume base de negocio funcionalmente vacía antes del commit;
+- usa el bridge de Electron para el backup previo y para guardar assets generados.
+
+## 3. Scripts históricos PostgreSQL/Supabase
+
+Estos scripts siguen en el repo para soporte o recuperación puntual, pero no forman parte del uso diario del producto.
+
+Scripts disponibles:
 - `scripts/analyze-backup.ps1`
 - `scripts/restore-backup.ps1`
 - `scripts/rebuild-supabase-db.ps1`
 - `scripts/pull-schema-no-docker.ps1`
 - `scripts/public-data-counts.sql`
 
-## Resumen del backup histórico auditado
+Se ejecutan directamente, no desde `npm run`.
 
-- Backup analizado: `db_cluster-08-11-2025@00-27-55.backup`
-- Formato detectado: SQL plano
-- Flujo automático disponible: `npm run db:rebuild`
-- Binarios PostgreSQL portables disponibles en `tools/postgresql-17/pgsql/bin`
+## Cuándo usar cada flujo
 
-Inventario de negocio detectado:
-
-- `users`
-- `clients`
-- `client_history`
-- `services`
-- `appointments`
-- `products`
-- `stock_movements`
-- `sales`
-- `sale_items`
-- `cash_registers`
-- `cash_movements`
-- `notifications`
-- `settings`
-
-Conteos auditados en el histórico:
-
-- `users`: 1
-- `clients`: 2
-- `services`: 24
-- resto de tablas de negocio: 0
-
-## Flujo recomendado para reconstrucción histórica
-
-```powershell
-npm run db:rebuild
-```
-
-Después:
-
-- valida conteos con `scripts/public-data-counts.sql`;
-- revisa permisos del entorno restaurado;
-- valida login y flujos básicos antes de usar ese entorno para soporte o migración.
-
-## Snapshot de esquema remoto sin Docker
-
-Si necesitas extraer un snapshot de esquema remoto sin `supabase db pull`:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pull-schema-no-docker.ps1 `
-  -DatabaseUrl "<DATABASE_URL>" `
-  -Schemas public `
-  -PgBinDir ".\tools\postgresql-17\pgsql\bin"
-```
+- Backup local de escritorio:
+  para operación diaria, soporte y restore habitual.
+- Pantalla `SQL`:
+  para rescatar datos legacy parciales desde `01dat.sql` con revisión manual.
+- Scripts PostgreSQL/Supabase:
+  para auditoría histórica o soporte sobre backups remotos heredados.
 
 ## Qué no hacer
 
-- no trates el flujo histórico PostgreSQL como si fuera el runtime diario del escritorio;
-- no documentes Supabase como dependencia obligatoria del producto actual;
-- no restaures un backup antiguo sobre una instalación activa sin conservar copia previa del `.db` local;
+- no documentes Supabase como base activa del producto actual;
+- no uses el asistente SQL como si fuera backup diario;
+- no reemplaces la SQLite local por fuera del flujo de restore salvo soporte muy controlado;
+- no mezcles restore `.db`, restore SQL y scripts históricos como si fuesen equivalentes;
 - no toques migraciones históricas ya aplicadas para “arreglar” un restore puntual.

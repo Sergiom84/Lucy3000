@@ -1,6 +1,10 @@
+import os from 'os'
+import path from 'path'
+import { promises as fsPromises } from 'fs'
 import { describe, expect, it } from 'vitest'
 import {
   buildPhotoCategorySummaries,
+  createClientAssetManager,
   inferClientAssetPreviewType,
   mapLegacyPhotoFolderNameToCategory,
   normalizeClientAssetManifest,
@@ -109,5 +113,47 @@ describe('clientAssets helpers', () => {
     expect(pickPrimaryPhotoId(assets, 'photo-2')).toBe('photo-2')
     expect(pickPrimaryPhotoId(assets, 'missing-photo')).toBe('photo-1')
     expect(pickPrimaryPhotoId([{ id: 'consent-1', kind: 'consents' as const }], 'missing-photo')).toBeNull()
+  })
+
+  it('imports generated consent and signature assets without a file picker', async () => {
+    const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'lucy-client-assets-'))
+    const documentsRoot = path.join(tempRoot, 'documents')
+    const legacyRoot = path.join(tempRoot, 'legacy')
+    const manager = createClientAssetManager({
+      getDocumentsClientsRootDir: () => documentsRoot,
+      getLegacyClientsRootDir: () => legacyRoot,
+      buildPreviewUrl: (absolutePath) => `lucyasset://asset/${path.basename(absolutePath)}`
+    })
+
+    const result = await manager.importGeneratedClientAssets([
+      {
+        clientId: 'client-1',
+        clientName: 'Clara Ruiz',
+        kind: 'consents',
+        fileName: 'consentimiento.txt',
+        originalName: 'consentimiento.txt',
+        contentBase64: Buffer.from('Consentimiento demo', 'utf8').toString('base64')
+      },
+      {
+        clientId: 'client-1',
+        clientName: 'Clara Ruiz',
+        kind: 'documents',
+        fileName: 'firma.png',
+        originalName: 'firma.png',
+        contentBase64: Buffer.from('firma-demo', 'utf8').toString('base64')
+      }
+    ])
+
+    expect(result.importedCount).toBe(2)
+
+    const response = await manager.buildAssetResponse('client-1', 'Clara Ruiz')
+    expect(response.consents).toHaveLength(1)
+    expect(response.documents).toHaveLength(1)
+
+    const consentContent = await fsPromises.readFile(response.consents[0].absolutePath, 'utf8')
+    const signatureContent = await fsPromises.readFile(response.documents[0].absolutePath, 'utf8')
+
+    expect(consentContent).toBe('Consentimiento demo')
+    expect(signatureContent).toBe('firma-demo')
   })
 })

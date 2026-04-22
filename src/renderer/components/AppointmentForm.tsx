@@ -27,6 +27,7 @@ import {
   filterSearchableOptions,
   type SearchableOption
 } from '../utils/searchableOptions'
+import { getRemainingBonoSessions } from '../utils/appointmentBonos'
 
 interface BonoAppointmentContext {
   bonoPackId: string
@@ -43,6 +44,8 @@ interface AppointmentFormProps {
   preselectedDate?: Date
   preselectedStartTime?: string
   preselectedEndTime?: string
+  preselectedClientId?: string | null
+  lockClientSelection?: boolean
   initialCabin?: CabinValue
   fromBono?: BonoAppointmentContext | null
 }
@@ -495,11 +498,6 @@ const cabinOptions = (Object.entries(CABIN_LABELS) as Array<[CabinValue, string]
   })
 )
 
-const getRemainingSessions = (bonoPack: ClientBonoSummary) => {
-  const consumed = bonoPack.sessions.filter((session) => session.status === 'CONSUMED').length
-  return Math.max(Number(bonoPack.totalSessions || 0) - consumed, 0)
-}
-
 export default function AppointmentForm({
   appointment,
   onSuccess,
@@ -507,6 +505,8 @@ export default function AppointmentForm({
   preselectedDate,
   preselectedStartTime,
   preselectedEndTime,
+  preselectedClientId = null,
+  lockClientSelection = false,
   initialCabin = 'LUCY',
   fromBono = null
 }: AppointmentFormProps) {
@@ -524,9 +524,11 @@ export default function AppointmentForm({
   const isCreatingFromBono = !appointment && Boolean(fromBono?.bonoPackId)
   const canCreateCopies = !appointment && !isCreatingFromBono
   const isEditingGuestAppointment = Boolean(appointment?.id) && !appointment?.clientId
-  const lockClient = isCreatingFromBono && Boolean(fromBono?.lockClient)
+  const lockClient =
+    (isCreatingFromBono && Boolean(fromBono?.lockClient)) ||
+    (!appointment && Boolean(lockClientSelection && preselectedClientId))
   const lockService = isCreatingFromBono && Boolean(fromBono?.lockService)
-  const canToggleGuestMode = !appointment && !isCreatingFromBono
+  const canToggleGuestMode = !appointment && !isCreatingFromBono && !lockClient
   const [guestMode, setGuestMode] = useState(isEditingGuestAppointment)
   const [copyAppointmentEnabled, setCopyAppointmentEnabled] = useState(false)
   const [appointmentCopies, setAppointmentCopies] = useState<AppointmentCopyItem[]>([])
@@ -535,7 +537,7 @@ export default function AppointmentForm({
   )
 
   const [formData, setFormData] = useState({
-    clientId: fromBono?.clientId || '',
+    clientId: fromBono?.clientId || preselectedClientId || '',
     guestName: '',
     guestPhone: '',
     serviceIds: fromBono?.serviceId ? [fromBono.serviceId] : [],
@@ -656,7 +658,7 @@ export default function AppointmentForm({
     setProfessionalTouched(false)
     setFormData((prev) => ({
       ...prev,
-      clientId: fromBono?.clientId || prev.clientId,
+      clientId: fromBono?.clientId || preselectedClientId || prev.clientId,
       guestName: isCreatingFromBono ? '' : prev.guestName,
       guestPhone: isCreatingFromBono ? '' : prev.guestPhone,
       serviceIds: fromBono?.serviceId ? [fromBono.serviceId] : prev.serviceIds,
@@ -682,7 +684,8 @@ export default function AppointmentForm({
     user,
     initialCabin,
     fromBono,
-    isCreatingFromBono
+    isCreatingFromBono,
+    preselectedClientId
   ])
 
   useEffect(() => {
@@ -775,7 +778,7 @@ export default function AppointmentForm({
     return clientBonos
       .map((bonoPack) => ({
         ...bonoPack,
-        remainingSessions: getRemainingSessions(bonoPack)
+        remainingSessions: getRemainingBonoSessions(bonoPack)
       }))
       .filter((bonoPack) => bonoPack.status === 'ACTIVE' && bonoPack.remainingSessions > 0)
   }, [clientBonos])
@@ -1593,7 +1596,9 @@ export default function AppointmentForm({
                 />
                 {lockClient && (
                   <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Cliente fijado por el bono seleccionado.
+                    {isCreatingFromBono
+                      ? 'Cliente fijado por el bono seleccionado.'
+                      : 'Cliente fijado por el filtro activo de agenda.'}
                   </p>
                 )}
               </>

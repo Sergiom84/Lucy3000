@@ -78,6 +78,7 @@ export const clientIdParamSchema = uuidParamSchema
 export const clientsQuerySchema = z.object({
   search: z.string().trim().min(1, 'Search cannot be empty').optional(),
   isActive: booleanQuerySchema.optional(),
+  pendingOnly: booleanQuerySchema.optional(),
   paginated: booleanQuerySchema.optional(),
   includeCounts: booleanQuerySchema.optional(),
   sortBy: clientSortBySchema.optional(),

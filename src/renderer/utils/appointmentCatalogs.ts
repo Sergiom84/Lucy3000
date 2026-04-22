@@ -101,6 +101,13 @@ export const invalidateAppointmentProfessionalsCache = () => {
   professionalsPromise = null
 }
 
+export const invalidateAppointmentLegendsCache = () => {
+  appointmentLegendsCache = null
+  appointmentLegendsPromise = null
+  appointmentLegendCategoriesCache = null
+  appointmentLegendCategoriesPromise = null
+}
+
 const sortClients = (clients: AppointmentClientCatalogItem[]) =>
   [...clients].sort((left, right) => {
     const leftLabel = `${left.firstName || ''} ${left.lastName || ''}`.trim()

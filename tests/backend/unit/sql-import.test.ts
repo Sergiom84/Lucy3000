@@ -8,15 +8,21 @@ CREATE TABLE \`tblusuarios\` (
   \`TUNombreCorto\` varchar(50) DEFAULT NULL,
   \`TUNombreLargo\` varchar(100) DEFAULT NULL,
   \`eMail\` varchar(100) DEFAULT NULL,
-  \`Activo\` tinyint DEFAULT NULL
+  \`Activo\` tinyint DEFAULT NULL,
+  PRIMARY KEY (\`Id\`),
+  KEY \`Codigo\` (\`Codigo\`)
 ) ENGINE=InnoDB;
 INSERT INTO \`tblusuarios\` VALUES (1,'LUCY','Lucy','Lucía','lucy@example.com',1);
 
 CREATE TABLE \`tblclientes\` (
   \`Id\` int NOT NULL,
   \`NroCliente\` int DEFAULT NULL,
+  \`CodBarras\` varchar(20) DEFAULT NULL,
   \`DNI\` varchar(20) DEFAULT NULL,
   \`Nombre\` varchar(120) DEFAULT NULL,
+  \`Nom\` varchar(80) DEFAULT NULL,
+  \`Ap1\` varchar(80) DEFAULT NULL,
+  \`Ap2\` varchar(80) DEFAULT NULL,
   \`Direccion\` varchar(120) DEFAULT NULL,
   \`Poblacion\` varchar(80) DEFAULT NULL,
   \`CP\` varchar(10) DEFAULT NULL,
@@ -29,13 +35,33 @@ CREATE TABLE \`tblclientes\` (
   \`Marca\` varchar(80) DEFAULT NULL,
   \`Nota\` varchar(255) DEFAULT NULL,
   \`TarifaAAplicar\` varchar(20) DEFAULT NULL,
+  \`Texto9a\` varchar(20) DEFAULT NULL,
+  \`Texto9b\` varchar(20) DEFAULT NULL,
+  \`Texto15\` varchar(50) DEFAULT NULL,
+  \`Texto25\` varchar(50) DEFAULT NULL,
+  \`Texto100\` varchar(255) DEFAULT NULL,
+  \`Entero1\` int DEFAULT NULL,
+  \`Entero2\` int DEFAULT NULL,
+  \`Obsequio\` varchar(80) DEFAULT NULL,
   \`FichFoto\` varchar(80) DEFAULT NULL,
+  \`Fototipo\` varchar(20) DEFAULT NULL,
   \`Borrado\` tinyint DEFAULT NULL,
   \`Desactivado\` tinyint DEFAULT NULL,
   \`eMail\` varchar(100) DEFAULT NULL,
-  \`Sexo\` varchar(10) DEFAULT NULL
+  \`Sexo\` tinyint DEFAULT NULL,
+  \`ClaveWeb\` varchar(40) DEFAULT NULL,
+  \`Perfil\` varchar(40) DEFAULT NULL,
+  \`NroClienteGlobal\` int DEFAULT NULL,
+  \`ActualizadoGlobal\` tinyint DEFAULT NULL,
+  \`RechazaCorrespondencia\` tinyint DEFAULT NULL,
+  \`RechazaSMS\` tinyint DEFAULT NULL,
+  \`RechazaEmail\` tinyint DEFAULT NULL,
+  \`ExcSurvey\` tinyint DEFAULT NULL,
+  \`RegSurvey\` tinyint DEFAULT NULL,
+  \`TCSSHA1\` varchar(60) DEFAULT NULL,
+  PRIMARY KEY (\`Id\`)
 ) ENGINE=InnoDB;
-INSERT INTO \`tblclientes\` VALUES (10,143,'12345678A','Clara Ruiz Calcerrada','Calle Mayor 1','Madrid','28001','Madrid','910000000','670312806','1988-05-01','2024-01-15','LUCY','Premium','Cliente fiel','GENERAL','clara.jpg',0,0,'clara@example.com','M');
+INSERT INTO \`tblclientes\` VALUES (10,143,'CB-143','12345678A','Clara Ruiz Calcerrada','Clara','Ruiz','Calcerrada','Calle Mayor 1','Madrid','28001','Madrid','910000000','670312806','1988-05-01','2024-01-15','LUCY','Premium','Cliente fiel','GENERAL','A1','B1','Texto15','Texto25','Texto100',7,9,'Regalo','clara.jpg','III',0,0,'clara@example.com',1,'web-143','VIP',999,1,1,0,1,0,1,'sha1-demo');
 
 CREATE TABLE \`tbltarifa\` (
   \`Id\` int NOT NULL,
@@ -55,9 +81,10 @@ CREATE TABLE \`tbltarifa\` (
   \`NombreGrupoPantallaTactil\` varchar(80) DEFAULT NULL,
   \`NombreGrupoComisiones\` varchar(80) DEFAULT NULL,
   \`Activo\` tinyint DEFAULT NULL,
-  \`SeNecesitanProductos\` tinyint DEFAULT NULL
+  \`PeticionProducto\` varchar(5) DEFAULT NULL,
+  PRIMARY KEY (\`Id\`)
 ) ENGINE=InnoDB;
-INSERT INTO \`tbltarifa\` VALUES (20,'HIDRA','Hidratación facial',60,55.00,55.00,NULL,NULL,21.00,0,1,5,240.00,'Faciales','Faciales',NULL,1,0);
+INSERT INTO \`tbltarifa\` VALUES (20,'HIDRA','Hidratación facial',60,55.00,55.00,NULL,NULL,21.00,0,1,5,240.00,'Faciales','Faciales',NULL,1,'S');
 
 CREATE TABLE \`tblproductos\` (
   \`Id\` int NOT NULL,
@@ -70,7 +97,8 @@ CREATE TABLE \`tblproductos\` (
   \`Marca\` varchar(80) DEFAULT NULL,
   \`Proveedor\` varchar(80) DEFAULT NULL,
   \`IVAPVT\` decimal(10,2) DEFAULT NULL,
-  \`IVACoste\` decimal(10,2) DEFAULT NULL
+  \`IVACoste\` decimal(10,2) DEFAULT NULL,
+  PRIMARY KEY (\`Id\`)
 ) ENGINE=InnoDB;
 INSERT INTO \`tblproductos\` VALUES (30,9001,'CREMA-01','843000000001','Crema Hidratante','Uso cabina','Cosmética','LucyLabs','Proveedor Demo',25.00,8.50);
 
@@ -83,7 +111,8 @@ CREATE TABLE \`tblproductoscantidades\` (
   \`Cantidad\` int DEFAULT NULL,
   \`Minimo\` int DEFAULT NULL,
   \`Maximo\` int DEFAULT NULL,
-  \`Activo\` tinyint DEFAULT NULL
+  \`Activo\` tinyint DEFAULT NULL,
+  PRIMARY KEY (\`Id\`)
 ) ENGINE=InnoDB;
 INSERT INTO \`tblproductoscantidades\` VALUES (31,9001,29.95,NULL,9.00,12,2,20,1);
 
@@ -99,7 +128,10 @@ CREATE TABLE \`tblbbpa\` (
   \`Descripcion\` varchar(120) DEFAULT NULL,
   \`XICV\` decimal(10,2) DEFAULT NULL,
   \`XIC\` decimal(10,2) DEFAULT NULL,
-  \`XI\` decimal(10,2) DEFAULT NULL
+  \`XI\` decimal(10,2) DEFAULT NULL,
+  PRIMARY KEY (\`Id\`),
+  KEY \`Codigo\` (\`Codigo\`),
+  KEY \`NroCliente\` (\`NroCliente\`)
 ) ENGINE=InnoDB;
 INSERT INTO \`tblbbpa\` VALUES (40,1001,143,'B',0,10,7,'HIDRA','Bono Hidratación',NULL,NULL,NULL);
 INSERT INTO \`tblbbpa\` VALUES (41,1002,143,'A',0,0,0,NULL,'ABONO',425000,NULL,NULL);
@@ -118,9 +150,68 @@ CREATE TABLE \`tblreservas\` (
   \`Oficial2\` varchar(10) DEFAULT NULL,
   \`Status\` varchar(20) DEFAULT NULL,
   \`Comentario\` varchar(255) DEFAULT NULL,
-  \`NroPack\` int DEFAULT NULL
+  \`NroPack\` int DEFAULT NULL,
+  PRIMARY KEY (\`Id\`)
 ) ENGINE=InnoDB;
 INSERT INTO \`tblreservas\` VALUES (50,143,'Clara Ruiz Calcerrada','670312806','HIDRA','2026-04-20','10:45',60,'CABINA 1','LUCY',NULL,'CONFIRMADA','Primera sesión',1001);
+INSERT INTO \`tblreservas\` VALUES (51,1,'COMIDA','',NULL,'2026-04-20','12:00',30,'CABINA 2','LUCY',NULL,'BLOQUEADA','Descanso',NULL);
+
+CREATE TABLE \`tblreservasnotas\` (
+  \`Id\` int NOT NULL,
+  \`Fecha\` date DEFAULT NULL,
+  \`Oficial\` varchar(10) DEFAULT NULL,
+  \`Nota\` varchar(255) DEFAULT NULL,
+  \`Activo\` tinyint DEFAULT NULL,
+  \`NroEstacion\` int DEFAULT NULL,
+  \`Agenda\` varchar(20) DEFAULT NULL,
+  PRIMARY KEY (\`Id\`)
+) ENGINE=InnoDB;
+INSERT INTO \`tblreservasnotas\` VALUES (60,'2026-04-20','LUCY','Preparar cabina facial',1,2,'Principal');
+
+CREATE TABLE \`tblconsentimientos\` (
+  \`Id\` int NOT NULL,
+  \`NroCliente\` int DEFAULT NULL,
+  \`Salud\` text,
+  \`Medicacion\` text,
+  PRIMARY KEY (\`Id\`)
+) ENGINE=InnoDB;
+INSERT INTO \`tblconsentimientos\` VALUES (70,143,'Sin patologías relevantes','Vitamina D');
+
+CREATE TABLE \`tblfirmas\` (
+  \`Id\` int NOT NULL,
+  \`NroCliente\` int DEFAULT NULL,
+  \`Doc\` varchar(40) DEFAULT NULL,
+  \`Archivo\` varchar(80) DEFAULT NULL,
+  \`NroServicio\` int DEFAULT NULL,
+  \`Firma\` longtext,
+  PRIMARY KEY (\`Id\`)
+) ENGINE=InnoDB;
+INSERT INTO \`tblfirmas\` VALUES (80,143,'Consentimiento facial','firma.png',20,'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn2z3sAAAAASUVORK5CYII=');
+
+CREATE TABLE \`tblfotos\` (
+  \`Id\` int NOT NULL,
+  PRIMARY KEY (\`Id\`)
+) ENGINE=InnoDB;
+INSERT INTO \`tblfotos\` VALUES (1);
+INSERT INTO \`tblfotos\` VALUES (2);
+
+CREATE TABLE \`tblantesydespues\` (
+  \`Id\` int NOT NULL,
+  PRIMARY KEY (\`Id\`)
+) ENGINE=InnoDB;
+INSERT INTO \`tblantesydespues\` VALUES (1);
+
+CREATE TABLE \`tblgalerias\` (
+  \`Id\` int NOT NULL,
+  PRIMARY KEY (\`Id\`)
+) ENGINE=InnoDB;
+INSERT INTO \`tblgalerias\` VALUES (1);
+
+CREATE TABLE \`tblventaslegacy\` (
+  \`Id\` int NOT NULL,
+  PRIMARY KEY (\`Id\`)
+) ENGINE=InnoDB;
+INSERT INTO \`tblventaslegacy\` VALUES (1);
 `
 
 describe('legacy SQL analyzer', () => {
@@ -137,7 +228,13 @@ describe('legacy SQL analyzer', () => {
         bonoTemplates: 1,
         clientBonos: 1,
         accountBalances: 1,
-        appointments: 1
+        appointments: 1,
+        agendaBlocks: 1,
+        agendaNotes: 1,
+        consents: 1,
+        signatures: 1,
+        photoReferencesSkipped: 4,
+        unsupportedPopulatedTables: 1
       })
     )
 
@@ -151,8 +248,15 @@ describe('legacy SQL analyzer', () => {
     expect(analysis.clients[0]).toEqual(
       expect.objectContaining({
         legacyClientNumber: '143',
-        fullName: 'Clara Ruiz Calcerrada',
+        barcode: 'CB-143',
+        firstName: 'Clara',
+        lastName: 'Ruiz Calcerrada',
         email: 'clara@example.com',
+        giftVoucher: 'Regalo',
+        webKey: 'web-143',
+        globalUpdated: true,
+        rejectPostal: true,
+        rejectEmail: true,
         isActive: true
       })
     )
@@ -163,7 +267,8 @@ describe('legacy SQL analyzer', () => {
         name: 'Hidratación facial',
         durationMinutes: 60,
         price: 55,
-        isPack: true
+        isPack: true,
+        requiresProduct: true
       })
     )
 
@@ -196,7 +301,7 @@ describe('legacy SQL analyzer', () => {
       expect.objectContaining({
         clientNumber: '143',
         amount: 42.5,
-        selected: false,
+        selected: true,
         kind: 'ABONO'
       })
     )
@@ -213,11 +318,69 @@ describe('legacy SQL analyzer', () => {
       })
     )
 
+    expect(analysis.agendaBlocks[0]).toEqual(
+      expect.objectContaining({
+        date: '2026-04-20',
+        startTime: '12:00',
+        legacyProfessionalCode: 'LUCY',
+        selected: true
+      })
+    )
+
+    expect(analysis.agendaNotes[0]).toEqual(
+      expect.objectContaining({
+        dayKey: '2026-04-20',
+        legacyProfessionalCode: 'LUCY',
+        text: 'Preparar cabina facial'
+      })
+    )
+
+    expect(analysis.consents[0]).toEqual(
+      expect.objectContaining({
+        clientNumber: '143',
+        health: 'Sin patologías relevantes',
+        medication: 'Vitamina D'
+      })
+    )
+
+    expect(analysis.signatures[0]).toEqual(
+      expect.objectContaining({
+        clientNumber: '143',
+        docType: 'Consentimiento facial',
+        selected: true
+      })
+    )
+
+    expect(analysis.photoReferencesSkipped).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ tableName: 'tblfotos', rowCount: 2 }),
+        expect.objectContaining({ tableName: 'tblantesydespues', rowCount: 1 }),
+        expect.objectContaining({ tableName: 'tblgalerias', rowCount: 1 })
+      ])
+    )
+
+    expect(analysis.unsupportedPopulatedTables).toEqual([
+      expect.objectContaining({
+        tableName: 'tblventaslegacy',
+        rowCount: 1
+      })
+    ])
+
     expect(analysis.warnings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           code: 'account_balances_derived',
           step: 'accountBalances',
+          count: 1
+        }),
+        expect.objectContaining({
+          code: 'photo_references_skipped',
+          step: 'assets',
+          count: 4
+        }),
+        expect.objectContaining({
+          code: 'unsupported_populated_tables',
+          step: 'unsupported',
           count: 1
         })
       ])

@@ -1,5 +1,10 @@
 import { Request, Response } from 'express'
 import type { AuthRequest } from '../middleware/auth.middleware'
+import {
+  importSqlAnalysisToDatabase,
+  SqlImportConflictError,
+  SqlImportValidationError
+} from '../services/sqlImport.service'
 import { analyzeLegacySqlDump } from '../utils/sql-import'
 import { appendSqlEvent, getSqlEventLogFilePath, listSqlEvents } from '../utils/sql-event-log'
 
@@ -37,6 +42,50 @@ export const createSqlEvent = async (req: AuthRequest, res: Response) => {
 
     return res.status(500).json({
       error: 'No se pudo registrar el evento SQL'
+    })
+  }
+}
+
+export const importSqlDump = async (req: AuthRequest, res: Response) => {
+  try {
+    const result = await importSqlAnalysisToDatabase(req.body)
+
+    await appendSqlEvent({
+      sessionId: req.body.sessionId,
+      userId: req.user?.id ?? null,
+      type: 'import_committed',
+      step: 'summary',
+      message: `Restauración SQL completada para ${req.body.sourceName}`,
+      payload: {
+        created: result.created,
+        omitted: result.omitted,
+        warnings: result.warnings,
+        unsupported: result.unsupported
+      }
+    })
+
+    return res.json(result)
+  } catch (error) {
+    console.error('Import SQL dump error:', error)
+
+    if (error instanceof SqlImportValidationError || error instanceof SqlImportConflictError) {
+      await appendSqlEvent({
+        sessionId: req.body?.sessionId || 'unknown-session',
+        userId: req.user?.id ?? null,
+        type: 'import_failed',
+        step: 'summary',
+        message: error.message,
+        payload: error.details
+      }).catch(() => undefined)
+
+      return res.status(error.statusCode).json({
+        error: error.message,
+        details: error.details
+      })
+    }
+
+    return res.status(500).json({
+      error: 'No se pudo completar la restauración SQL'
     })
   }
 }

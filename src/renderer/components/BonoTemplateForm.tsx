@@ -10,6 +10,7 @@ import {
 } from '../utils/appointmentCatalogs'
 
 interface BonoTemplateFormProps {
+  categories?: string[]
   onSuccess: (templates: BonoTemplateCatalogItem[]) => void
   onCancel: () => void
 }
@@ -63,7 +64,11 @@ const dedupeServices = (items: AppointmentServiceCatalogItem[]) => {
   )
 }
 
-export default function BonoTemplateForm({ onSuccess, onCancel }: BonoTemplateFormProps) {
+export default function BonoTemplateForm({
+  categories = [],
+  onSuccess,
+  onCancel
+}: BonoTemplateFormProps) {
   const [services, setServices] = useState<AppointmentServiceCatalogItem[]>([])
   const [loadingCatalog, setLoadingCatalog] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -111,6 +116,28 @@ export default function BonoTemplateForm({ onSuccess, onCancel }: BonoTemplateFo
     [services]
   )
 
+  const bonoCategoryOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [...categories, ...serviceCategoryOptions]
+            .map((category) => String(category || '').trim())
+            .filter(Boolean)
+        )
+      ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' })),
+    [categories, serviceCategoryOptions]
+  )
+
+  const filteredServices = useMemo(() => {
+    const selectedCategory = formData.category.trim()
+
+    if (!selectedCategory) {
+      return services
+    }
+
+    return services.filter((service) => String(service.category || '').trim() === selectedCategory)
+  }, [formData.category, services])
+
   const handleBaseServiceSelection = (serviceId: string) => {
     const nextService = services.find((service) => service.id === serviceId) || null
     const previousServiceCategory = String(selectedService?.category || '').trim()
@@ -132,6 +159,17 @@ export default function BonoTemplateForm({ onSuccess, onCancel }: BonoTemplateFo
 
     if (name === 'serviceId') {
       handleBaseServiceSelection(value)
+      return
+    }
+
+    if (name === 'category') {
+      const selectedServiceCategory = String(selectedService?.category || '').trim()
+
+      setFormData((current) => ({
+        ...current,
+        category: value,
+        serviceId: selectedServiceCategory && selectedServiceCategory !== value ? '' : current.serviceId
+      }))
       return
     }
 
@@ -224,7 +262,7 @@ export default function BonoTemplateForm({ onSuccess, onCancel }: BonoTemplateFo
               required
             >
               <option value="">Selecciona una categoría</option>
-              {serviceCategoryOptions.map((category) => (
+              {bonoCategoryOptions.map((category) => (
                 <option key={category} value={category}>
                   {category}
                 </option>
@@ -246,12 +284,17 @@ export default function BonoTemplateForm({ onSuccess, onCancel }: BonoTemplateFo
               <option value="">
                 {loadingCatalog ? 'Cargando tratamientos...' : 'Selecciona un tratamiento'}
               </option>
-              {services.map((service) => (
+              {filteredServices.map((service) => (
                 <option key={service.id} value={service.id}>
                   {buildServiceDisplayLabel(service)}
                 </option>
               ))}
             </select>
+            {formData.category.trim() && !loadingCatalog && filteredServices.length === 0 ? (
+              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                No hay tratamientos activos en esta categoría.
+              </p>
+            ) : null}
           </div>
         </div>
 

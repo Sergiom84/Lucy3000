@@ -86,6 +86,94 @@ const pendingPaymentStatusLabel: Record<PendingPaymentRow['status'], string> = {
   CANCELLED: 'Cancelado'
 }
 
+const appointmentStatusLabel: Record<string, string> = {
+  SCHEDULED: 'Programada',
+  CONFIRMED: 'Confirmada',
+  IN_PROGRESS: 'En curso',
+  COMPLETED: 'Finalizada',
+  CANCELLED: 'Cancelada',
+  NO_SHOW: 'No acudió',
+  PENDING_REVIEW: 'Pendiente de revisar'
+}
+
+const getAppointmentStatusLabel = (status: unknown) => {
+  const normalizedStatus = String(status || '').toUpperCase()
+  return appointmentStatusLabel[normalizedStatus] || normalizedStatus || 'Sin estado'
+}
+
+const getAppointmentStatusBadgeClassName = (status: unknown) => {
+  const normalizedStatus = String(status || '').toUpperCase()
+
+  switch (normalizedStatus) {
+    case 'COMPLETED':
+      return 'badge-success'
+    case 'CONFIRMED':
+      return 'badge-primary'
+    case 'IN_PROGRESS':
+    case 'PENDING_REVIEW':
+      return 'badge-warning'
+    case 'CANCELLED':
+    case 'NO_SHOW':
+      return 'badge-danger'
+    case 'SCHEDULED':
+    default:
+      return 'badge-secondary'
+  }
+}
+
+const formatAppointmentCabin = (cabin: string | null | undefined) =>
+  String(cabin || '')
+    .replace('CABINA_', 'Cabina ')
+    .trim() || 'Sin cabina'
+
+const getAppointmentStartAt = (appointment: any) => {
+  const startAt = new Date(appointment?.date || new Date())
+  const [hour, minute] = String(appointment?.startTime || '00:00')
+    .split(':')
+    .map((value) => Number.parseInt(value, 10))
+
+  startAt.setHours(Number.isFinite(hour) ? hour : 0, Number.isFinite(minute) ? minute : 0, 0, 0)
+  return startAt
+}
+
+const getAppointmentDisplayStatus = (appointment: any) => {
+  const normalizedStatus = String(appointment?.status || '').toUpperCase()
+
+  if (appointment?.sale?.status === 'COMPLETED' && !['CANCELLED', 'NO_SHOW'].includes(normalizedStatus)) {
+    return 'COMPLETED'
+  }
+
+  if (!['CANCELLED', 'NO_SHOW', 'COMPLETED'].includes(normalizedStatus) && getAppointmentStartAt(appointment) < new Date()) {
+    return 'PENDING_REVIEW'
+  }
+
+  return normalizedStatus
+}
+
+const isChargeableAppointment = (appointment: any) => {
+  const status = getAppointmentDisplayStatus(appointment)
+  return !['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(status)
+}
+
+const isMutableAppointment = (appointment: any) => {
+  const status = getAppointmentDisplayStatus(appointment)
+  return !['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(status)
+}
+
+const getSaleDisplayStatus = (sale: any) => {
+  if (sale?.pendingPayment?.status === 'OPEN' || String(sale?.status || '').toUpperCase() === 'PENDING') {
+    return 'PENDING'
+  }
+
+  return 'COMPLETED'
+}
+
+const getSaleDisplayStatusLabel = (sale: any) =>
+  getSaleDisplayStatus(sale) === 'PENDING' ? 'Pendiente' : 'Cobrado'
+
+const getSaleDisplayStatusBadgeClassName = (sale: any) =>
+  getSaleDisplayStatus(sale) === 'PENDING' ? 'badge-warning' : 'badge-success'
+
 const getSaleTreatmentLabel = (sale: any) => {
   const labels = Array.isArray(sale?.items)
     ? sale.items
@@ -117,7 +205,7 @@ export default function ClientDetail() {
   const [client, setClient] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [showEditModal, setShowEditModal] = useState(false)
-  const [activeTab, setActiveTab] = useState<'overview' | 'appointments' | 'sales' | 'pending' | 'history' | 'bonos' | 'abonos' | 'quotes'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'appointments' | 'sales' | 'pending' | 'bonos' | 'abonos' | 'quotes'>('overview')
   const [clientQuotes, setClientQuotes] = useState<any[]>([])
   const [quotesLoading, setQuotesLoading] = useState(false)
   const [clientAssets, setClientAssets] = useState<ClientAssetsResponse | null>(null)
@@ -135,6 +223,7 @@ export default function ClientDetail() {
     notes: ''
   })
   const [showBonoPackModal, setShowBonoPackModal] = useState(false)
+  const [editingBonoPack, setEditingBonoPack] = useState<any | null>(null)
   const [showBonoAppointmentModal, setShowBonoAppointmentModal] = useState(false)
   const [selectedBonoForAppointment, setSelectedBonoForAppointment] = useState<any | null>(null)
   const [pendingSettlementTarget, setPendingSettlementTarget] = useState<PendingPaymentRow | null>(null)
@@ -245,8 +334,94 @@ export default function ClientDetail() {
     fetchClient()
   }
 
-  const handleBonoCreateSuccess = () => {
+  const handleUpdateAppointmentStatus = async (appointmentId: string, status: 'CANCELLED' | 'NO_SHOW') => {
+    const confirmationMessage =
+      status === 'CANCELLED'
+        ? '¿Cancelar esta cita?'
+        : '¿Marcar esta cita como "No acudió"?'
+
+    if (!confirm(confirmationMessage)) {
+      return
+    }
+
+    try {
+      await api.put(`/appointments/${appointmentId}`, { status })
+      toast.success(status === 'CANCELLED' ? 'Cita cancelada' : 'Cita marcada como no acudió')
+      await fetchClient()
+    } catch (error: any) {
+      console.error('Error updating appointment status:', error)
+      toast.error(error.response?.data?.error || 'No se pudo actualizar la cita')
+    }
+  }
+
+  const renderAppointmentActions = (appointment: any) => {
+    if (appointment.sale?.status === 'COMPLETED') {
+      return (
+        <div className="text-xs font-medium text-green-600 dark:text-green-400">
+          Cobrada · {salePaymentMethodLabel(appointment.sale)}
+        </div>
+      )
+    }
+
+    return (
+      <>
+        {isChargeableAppointment(appointment) && (
+          <button
+            onClick={() =>
+              navigate(`/sales?clientId=${client.id}&serviceId=${appointment.serviceId}&appointmentId=${appointment.id}`)
+            }
+            className="btn btn-secondary btn-sm"
+          >
+            Cobrar
+          </button>
+        )}
+
+        {isMutableAppointment(appointment) && (
+          <button
+            type="button"
+            onClick={() => void handleUpdateAppointmentStatus(appointment.id, 'NO_SHOW')}
+            className="btn btn-secondary btn-sm"
+          >
+            No acudió
+          </button>
+        )}
+
+        {isMutableAppointment(appointment) && (
+          <button
+            type="button"
+            onClick={() => void handleUpdateAppointmentStatus(appointment.id, 'CANCELLED')}
+            className="btn btn-secondary btn-sm"
+          >
+            Cancelar
+          </button>
+        )}
+      </>
+    )
+  }
+
+  const handleCloseBonoPackModal = () => {
+    setShowBonoPackModal(false)
+    setEditingBonoPack(null)
+  }
+
+  const handleBonoPackSuccess = () => {
     fetchClient()
+  }
+
+  const handleOpenBonoPackCreateModal = () => {
+    setEditingBonoPack(null)
+    setShowBonoPackModal(true)
+  }
+
+  const handleOpenBonoPackEditModal = (bonoPackId: string) => {
+    const selectedBono = clientBonoPacks.find((bonoPack: any) => bonoPack.id === bonoPackId) || null
+    if (!selectedBono) {
+      toast.error('No se encontró el bono seleccionado')
+      return
+    }
+
+    setEditingBonoPack(selectedBono)
+    setShowBonoPackModal(true)
   }
 
   const handleOpenBonoAppointmentModal = (bonoPackId: string) => {
@@ -268,16 +443,6 @@ export default function ClientDetail() {
   const handleBonoAppointmentSuccess = async () => {
     handleCloseBonoAppointmentModal()
     await fetchClient()
-  }
-
-  const handleOpenPendingSettlementModal = (pendingPayment: PendingPaymentRow) => {
-    setPendingSettlementTarget(pendingPayment)
-    setPendingSettlementDraft({
-      settledAt: pendingSettlementDateTimeInput(),
-      amount: pendingPayment.remainingAmount > 0 ? pendingPayment.remainingAmount.toFixed(2).replace('.', ',') : '',
-      paymentMethod: 'CASH'
-    })
-    setPendingSettlementModalOpen(true)
   }
 
   const handleClosePendingSettlementModal = () => {
@@ -602,40 +767,38 @@ export default function ClientDetail() {
     }
   }
 
+  const sortedAppointments = useMemo(() => {
+    const source = Array.isArray(client?.appointments) ? [...client.appointments] : []
+    return source.sort((a: any, b: any) => getAppointmentStartAt(a).getTime() - getAppointmentStartAt(b).getTime())
+  }, [client?.appointments])
+
   const upcomingAppointments = useMemo(() => {
     const now = new Date()
-    const source = Array.isArray(client?.appointments) ? client.appointments : []
 
-    return source
+    return sortedAppointments
       .filter((appointment: any) => {
-        const status = String(appointment.status || '').toUpperCase()
+        const status = getAppointmentDisplayStatus(appointment)
         if (status === 'CANCELLED' || status === 'NO_SHOW' || status === 'COMPLETED') {
           return false
         }
 
-        const startAt = new Date(appointment.date)
-        const [hour, minute] = String(appointment.startTime || '00:00')
-          .split(':')
-          .map((value) => Number.parseInt(value, 10))
-        startAt.setHours(Number.isFinite(hour) ? hour : 0, Number.isFinite(minute) ? minute : 0, 0, 0)
-
-        return startAt >= now
-      })
-      .sort((a: any, b: any) => {
-        const aStart = new Date(a.date)
-        const bStart = new Date(b.date)
-        const [aHour, aMinute] = String(a.startTime || '00:00')
-          .split(':')
-          .map((value) => Number.parseInt(value, 10))
-        const [bHour, bMinute] = String(b.startTime || '00:00')
-          .split(':')
-          .map((value) => Number.parseInt(value, 10))
-        aStart.setHours(Number.isFinite(aHour) ? aHour : 0, Number.isFinite(aMinute) ? aMinute : 0, 0, 0)
-        bStart.setHours(Number.isFinite(bHour) ? bHour : 0, Number.isFinite(bMinute) ? bMinute : 0, 0, 0)
-        return aStart.getTime() - bStart.getTime()
+        return getAppointmentStartAt(appointment) >= now
       })
       .slice(0, 3)
-  }, [client?.appointments])
+  }, [sortedAppointments])
+
+  const remainingAppointments = useMemo(() => {
+    const now = new Date()
+    const upcomingIds = new Set(upcomingAppointments.map((appointment: any) => appointment.id))
+    const futureAppointments = sortedAppointments.filter(
+      (appointment: any) => !upcomingIds.has(appointment.id) && getAppointmentStartAt(appointment) >= now
+    )
+    const pastAppointments = [...sortedAppointments]
+      .filter((appointment: any) => !upcomingIds.has(appointment.id) && getAppointmentStartAt(appointment) < now)
+      .sort((a: any, b: any) => getAppointmentStartAt(b).getTime() - getAppointmentStartAt(a).getTime())
+
+    return [...futureAppointments, ...pastAppointments]
+  }, [sortedAppointments, upcomingAppointments])
 
   const clientBonoPacks = useMemo(() => {
     if (!Array.isArray(client?.bonoPacks)) return []
@@ -706,8 +869,7 @@ export default function ClientDetail() {
   const tabs = [
     { id: 'overview', label: 'Resumen' },
     { id: 'appointments', label: 'Citas', count: client.appointments?.length || 0 },
-    { id: 'sales', label: 'Ventas', count: client.sales?.length || 0 },
-    { id: 'history', label: 'Historial', count: client.clientHistory?.length || 0 }
+    { id: 'sales', label: 'Ventas', count: client.sales?.length || 0 }
   ]
 
   return (
@@ -1071,7 +1233,7 @@ export default function ClientDetail() {
         {activeTab === 'appointments' && (
           <div className="card">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-              Historial de Citas
+              Citas
             </h3>
             <div className="mb-5 rounded-lg border border-blue-100 bg-blue-50 p-4 dark:border-blue-900 dark:bg-blue-950/20">
               <p className="text-sm font-semibold text-blue-900 dark:text-blue-200 mb-2">
@@ -1079,25 +1241,43 @@ export default function ClientDetail() {
               </p>
               {upcomingAppointments.length > 0 ? (
                 <div className="space-y-2">
-                  {upcomingAppointments.map((appointment: any, index: number) => (
-                    <div
-                      key={`upcoming-${appointment.id}`}
-                      className="flex items-center justify-between rounded-md bg-white/80 px-3 py-2 text-sm dark:bg-gray-900/40"
-                    >
-                      <div>
-                        <p className="font-medium text-gray-900 dark:text-white">
-                          {index === 0 ? 'Próxima:' : 'Siguiente:'} {appointment.service?.name || 'Servicio'}
-                        </p>
-                        <p className="text-xs text-gray-600 dark:text-gray-400">
-                          {appointment.startTime} - {appointment.endTime} ·{' '}
-                          {appointment.cabin?.replace('CABINA_', 'Cabina ') || 'Sin cabina'}
-                        </p>
+                  {upcomingAppointments.map((appointment: any, index: number) => {
+                    const displayStatus = getAppointmentDisplayStatus(appointment)
+
+                    return (
+                      <div
+                        key={`upcoming-${appointment.id}`}
+                        className="rounded-md bg-white/80 px-4 py-3 dark:bg-gray-900/40"
+                      >
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                          <div className="min-w-0 flex-1">
+                            <p className="font-medium text-gray-900 dark:text-white">
+                              {index === 0 ? 'Próxima:' : 'Siguiente:'} {appointment.service?.name || 'Servicio'}
+                            </p>
+                            <p className="text-xs text-gray-600 dark:text-gray-400">
+                              {formatAppointmentCabin(appointment.cabin)} · {appointment.user?.name || 'Sin profesional'}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-3 lg:justify-end">
+                            <p className="text-sm text-blue-900 dark:text-blue-200">
+                              {formatDate(appointment.date)}
+                              <span className="text-blue-300 dark:text-blue-700"> · </span>
+                              {appointment.startTime} - {appointment.endTime}
+                            </p>
+                            <span className={`badge ${getAppointmentStatusBadgeClassName(displayStatus)}`}>
+                              {getAppointmentStatusLabel(displayStatus)}
+                            </span>
+                            {renderAppointmentActions(appointment)}
+                          </div>
+                        </div>
+                        {appointment.notes && (
+                          <p className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                            {appointment.notes}
+                          </p>
+                        )}
                       </div>
-                      <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">
-                        {formatDate(appointment.date)}
-                      </span>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               ) : (
                 <p className="text-sm text-blue-800 dark:text-blue-300">
@@ -1105,68 +1285,62 @@ export default function ClientDetail() {
                 </p>
               )}
             </div>
-            {client.appointments && client.appointments.length > 0 ? (
-              <div className="space-y-3">
-                {client.appointments.map((appointment: any) => (
-                  <div
-                    key={appointment.id}
-                    className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                        <Calendar className="w-5 h-5 text-primary-600" />
-                        <div>
-                          <p className="text-sm font-medium text-gray-900 dark:text-white">
-                            {appointment.service.name}
-                          </p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">
-                            Con {appointment.user.name} · {appointment.cabin?.replace('CABINA_', 'Cabina ') || 'Sin cabina'}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm text-gray-900 dark:text-white">
-                          {formatDate(appointment.date)}
-                        </p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
-                          {appointment.startTime} - {appointment.endTime}
-                        </p>
-                        <span className={`badge mt-1 ${
-                          appointment.status === 'COMPLETED' ? 'badge-success' :
-                          appointment.status === 'CANCELLED' ? 'badge-danger' :
-                          appointment.status === 'CONFIRMED' ? 'badge-primary' :
-                          'badge-secondary'
-                        }`}>
-                          {appointment.status}
-                        </span>
-                        {appointment.sale?.status === 'COMPLETED' ? (
-                          <div className="mt-2 text-xs text-green-600">
-                            Cobrada · {salePaymentMethodLabel(appointment.sale)}
+            {remainingAppointments.length > 0 ? (
+              <>
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-gray-900 dark:text-white">Resto de citas</p>
+                </div>
+                <div className="space-y-3">
+                  {remainingAppointments.map((appointment: any) => {
+                    const displayStatus = getAppointmentDisplayStatus(appointment)
+
+                    return (
+                      <div
+                        key={appointment.id}
+                        className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 dark:border-gray-700 dark:bg-gray-800/60"
+                      >
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                          <div className="flex min-w-0 flex-1 items-center gap-3">
+                            <Calendar className="h-5 w-5 shrink-0 text-primary-600" />
+                            <div className="min-w-0 flex-1 lg:flex lg:items-center lg:gap-3">
+                              <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">
+                                {appointment.service.name}
+                              </p>
+                              <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+                                Con {appointment.user.name} · {formatAppointmentCabin(appointment.cabin)}
+                              </p>
+                            </div>
                           </div>
-                        ) : (
-                          <button
-                            onClick={() => navigate(`/sales?clientId=${client.id}&serviceId=${appointment.serviceId}&appointmentId=${appointment.id}`)}
-                            className="btn btn-secondary btn-sm mt-2"
-                          >
-                            <CreditCard className="w-3.5 h-3.5 mr-1" />
-                            Cobrar
-                          </button>
+
+                          <div className="flex flex-wrap items-center gap-3 lg:justify-end">
+                            <p className="text-sm text-gray-900 dark:text-white">
+                              {formatDate(appointment.date)}
+                              <span className="text-gray-400"> · </span>
+                              {appointment.startTime} - {appointment.endTime}
+                            </p>
+
+                            <span className={`badge ${getAppointmentStatusBadgeClassName(displayStatus)}`}>
+                              {getAppointmentStatusLabel(displayStatus)}
+                            </span>
+
+                            {renderAppointmentActions(appointment)}
+                          </div>
+                        </div>
+                        {appointment.notes && (
+                          <p className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                            {appointment.notes}
+                          </p>
                         )}
                       </div>
-                    </div>
-                    {appointment.notes && (
-                      <p className="text-xs text-gray-600 dark:text-gray-400 mt-2">
-                        {appointment.notes}
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
+                    )
+                  })}
+                </div>
+              </>
+            ) : upcomingAppointments.length === 0 ? (
               <p className="text-center py-8 text-gray-500 dark:text-gray-400">
                 No hay citas registradas
               </p>
-            )}
+            ) : null}
           </div>
         )}
 
@@ -1191,6 +1365,9 @@ export default function ClientDetail() {
                       </th>
                       <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
                         Tratamiento
+                      </th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                        Notas
                       </th>
                       <th className="text-right py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
                         Total
@@ -1221,22 +1398,22 @@ export default function ClientDetail() {
                         <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400">
                           <span className="block max-w-xs line-clamp-2">{getSaleTreatmentLabel(sale)}</span>
                         </td>
+                        <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400">
+                          <span className="block max-w-xs whitespace-pre-wrap break-words line-clamp-3">
+                            {sale.notes?.trim() || '—'}
+                          </span>
+                        </td>
                         <td className="py-3 px-4 text-sm text-right font-medium text-gray-900 dark:text-white">
                           {formatCurrency(Number(sale.total))}
                         </td>
                         <td className="py-3 px-4 text-center">
-                          <span className={`badge ${
-                            sale.status === 'COMPLETED' ? 'badge-success' :
-                            sale.status === 'CANCELLED' ? 'badge-danger' :
-                            'badge-secondary'
-                          }`}>
-                            {sale.status}
+                          <span className={`badge ${getSaleDisplayStatusBadgeClassName(sale)}`}>
+                            {getSaleDisplayStatusLabel(sale)}
                           </span>
                         </td>
                         <td className="py-3 px-4 text-right">
-                          {sale.status !== 'PENDING' ? (
+                          {getSaleDisplayStatus(sale) !== 'PENDING' ? (
                             <button onClick={() => handlePrintSale(sale.id)} className="btn btn-sm btn-secondary">
-                              <Printer className="w-4 h-4 mr-2" />
                               Ticket
                             </button>
                           ) : (
@@ -1452,10 +1629,10 @@ export default function ClientDetail() {
                           ) : pendingPayment.status === 'OPEN' && pendingPayment.sale?.id ? (
                             <button
                               type="button"
-                              onClick={() => handleOpenPendingSettlementModal(pendingPayment)}
+                              onClick={() => navigate(`/sales?pendingSaleId=${pendingPayment.sale?.id}`)}
                               className="inline-flex rounded-lg border border-sky-300 bg-white p-2 text-sky-700 transition hover:bg-sky-50 dark:border-sky-700 dark:bg-gray-900 dark:text-sky-200 dark:hover:bg-sky-950/20"
-                              title="Editar cobro pendiente"
-                              aria-label="Editar cobro pendiente"
+                              title="Cobrar pendiente"
+                              aria-label="Cobrar pendiente"
                             >
                               <Pencil className="h-4 w-4" />
                             </button>
@@ -1655,12 +1832,12 @@ export default function ClientDetail() {
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Bonos del cliente</h3>
                 <div className="flex items-center gap-2">
                   <span className="badge badge-secondary">{clientBonoPacks.length}</span>
-                  <button
-                    type="button"
-                    onClick={() => setShowBonoPackModal(true)}
-                    className="btn btn-primary btn-sm"
-                  >
-                    Nuevo bono
+                    <button
+                      type="button"
+                      onClick={handleOpenBonoPackCreateModal}
+                      className="btn btn-primary btn-sm"
+                    >
+                      Nuevo bono
                   </button>
                 </div>
               </div>
@@ -1673,6 +1850,7 @@ export default function ClientDetail() {
                       bonoPack={bonoPack}
                       onConsume={handleConsumeBonoSession}
                       onDelete={handleDeleteBono}
+                      onEdit={handleOpenBonoPackEditModal}
                       onScheduleAppointment={handleOpenBonoAppointmentModal}
                     />
                   ))}
@@ -1771,60 +1949,14 @@ export default function ClientDetail() {
           </div>
         )}
 
-        {activeTab === 'history' && (
-          <div className="card">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-              Historial de Servicios
-            </h3>
-            {client.clientHistory && client.clientHistory.length > 0 ? (
-              <div className="space-y-4">
-                {client.clientHistory.map((history: any) => (
-                  <div
-                    key={history.id}
-                    className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg"
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <p className="text-sm font-medium text-gray-900 dark:text-white">
-                          {history.service}
-                        </p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
-                          {formatDate(history.date)}
-                        </p>
-                      </div>
-                      <p className="text-sm font-bold text-primary-600">
-                        {formatCurrency(Number(history.amount))}
-                      </p>
-                    </div>
-                    {history.notes && (
-                      <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
-                        {history.notes}
-                      </p>
-                    )}
-                    {history.photoUrl && (
-                      <img
-                        src={normalizeDesktopAssetUrl(history.photoUrl) || history.photoUrl}
-                        alt="Servicio"
-                        className="mt-3 rounded-lg w-full max-w-xs"
-                      />
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-center py-8 text-gray-500 dark:text-gray-400">
-                No hay historial de servicios
-              </p>
-            )}
-          </div>
-        )}
       </div>
 
       <BonoPackModal
         isOpen={showBonoPackModal}
-        onClose={() => setShowBonoPackModal(false)}
+        onClose={handleCloseBonoPackModal}
         clientId={client.id}
-        onSuccess={handleBonoCreateSuccess}
+        onSuccess={handleBonoPackSuccess}
+        bonoPack={editingBonoPack}
       />
 
       <Modal

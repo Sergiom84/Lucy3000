@@ -5,7 +5,6 @@ import {
   Clock,
   Edit,
   Euro,
-  Package,
   Search,
   Trash2
 } from 'lucide-react'
@@ -20,6 +19,7 @@ import { buildSearchTokens, filterRankedItems } from '../utils/searchableOptions
 import {
   loadAppointmentLegendItems,
   type AppointmentLegendCatalogItem,
+  invalidateAppointmentLegendsCache,
   invalidateAppointmentServicesCache,
   invalidateBonoTemplatesCache
 } from '../utils/appointmentCatalogs'
@@ -52,6 +52,8 @@ const formatCategoryLabel = (value: string): string =>
     .join(' ')
 
 const formatPrice = (value: unknown) => formatCurrency(Number(value || 0)).replace('€', '').trim()
+const DEFAULT_SERVICE_CATEGORY = 'Sin categoría'
+const DEFAULT_BONO_CATEGORY = 'Bonos'
 
 export default function Services() {
   const { user } = useAuthStore()
@@ -67,6 +69,12 @@ export default function Services() {
   const [serviceShowCategories, setServiceShowCategories] = useState(true)
   const [serviceModalOpen, setServiceModalOpen] = useState(false)
   const [serviceImportModalOpen, setServiceImportModalOpen] = useState(false)
+  const [serviceCategoryModalOpen, setServiceCategoryModalOpen] = useState(false)
+  const [managingServiceCategory, setManagingServiceCategory] = useState<string | null>(null)
+  const [renameServiceCategoryValue, setRenameServiceCategoryValue] = useState('')
+  const [replacementServiceCategoryValue, setReplacementServiceCategoryValue] =
+    useState(DEFAULT_SERVICE_CATEGORY)
+  const [serviceCategorySaving, setServiceCategorySaving] = useState(false)
   const [editingService, setEditingService] = useState<any>(null)
   const isAdmin = user?.role === 'ADMIN'
 
@@ -75,6 +83,12 @@ export default function Services() {
   const [bonoShowCategories, setBonoShowCategories] = useState(false)
   const [bonoModalOpen, setBonoModalOpen] = useState(false)
   const [bonoImportModalOpen, setBonoImportModalOpen] = useState(false)
+  const [bonoCategoryModalOpen, setBonoCategoryModalOpen] = useState(false)
+  const [managingBonoCategory, setManagingBonoCategory] = useState<string | null>(null)
+  const [renameBonoCategoryValue, setRenameBonoCategoryValue] = useState('')
+  const [replacementBonoCategoryValue, setReplacementBonoCategoryValue] =
+    useState(DEFAULT_BONO_CATEGORY)
+  const [bonoCategorySaving, setBonoCategorySaving] = useState(false)
 
   useEffect(() => {
     void loadCatalogs()
@@ -122,14 +136,24 @@ export default function Services() {
     await loadServices()
   }
 
+  const refreshServiceCatalogContext = async () => {
+    invalidateAppointmentServicesCache()
+    invalidateAppointmentLegendsCache()
+    await Promise.all([loadServices(), loadAppointmentLegendPalette()])
+  }
+
+  const refreshBonoCatalogContext = async () => {
+    invalidateBonoTemplatesCache()
+    await loadBonoTemplates()
+  }
+
   const handleDelete = async (id: string) => {
     if (!confirm('¿Estás seguro de eliminar este tratamiento?')) return
 
     try {
       await api.delete(`/services/${id}`)
-      invalidateAppointmentServicesCache()
       toast.success('Tratamiento eliminado')
-      await refreshServices()
+      await refreshServiceCatalogContext()
     } catch (error) {
       toast.error('Error al eliminar tratamiento')
     }
@@ -145,15 +169,251 @@ export default function Services() {
     setEditingService(null)
   }
 
+  const handleOpenServiceCategoryModal = () => {
+    if (!serviceSelectedCategory) return
+
+    const suggestedReplacement =
+      serviceCategoryOptions.find((category) => category !== serviceSelectedCategory) ||
+      (serviceSelectedCategory !== DEFAULT_SERVICE_CATEGORY ? DEFAULT_SERVICE_CATEGORY : '')
+
+    setManagingServiceCategory(serviceSelectedCategory)
+    setRenameServiceCategoryValue(serviceSelectedCategory)
+    setReplacementServiceCategoryValue(suggestedReplacement)
+    setServiceCategoryModalOpen(true)
+  }
+
+  const handleCloseServiceCategoryModal = () => {
+    setServiceCategoryModalOpen(false)
+    setManagingServiceCategory(null)
+    setRenameServiceCategoryValue('')
+    setReplacementServiceCategoryValue(DEFAULT_SERVICE_CATEGORY)
+    setServiceCategorySaving(false)
+  }
+
   const handleFormSuccess = async () => {
     handleCloseModal()
-    await refreshServices()
+    await refreshServiceCatalogContext()
+  }
+
+  const handleRenameServiceCategory = async () => {
+    const currentCategory = String(managingServiceCategory || '').trim()
+    const nextCategory = renameServiceCategoryValue.trim()
+
+    if (!currentCategory) return
+
+    if (!nextCategory) {
+      toast.error('Indica el nuevo nombre de la familia')
+      return
+    }
+
+    if (nextCategory === currentCategory) {
+      toast.error('La familia debe tener un nombre distinto')
+      return
+    }
+
+    setServiceCategorySaving(true)
+    try {
+      await api.patch('/services/categories', {
+        currentCategory,
+        nextCategory
+      })
+      await refreshServiceCatalogContext()
+      setServiceSelectedCategory(nextCategory)
+      toast.success('Familia actualizada')
+      handleCloseServiceCategoryModal()
+    } catch (error: any) {
+      console.error('Rename service category error:', error)
+      toast.error(error.response?.data?.error || 'No se pudo actualizar la familia')
+      setServiceCategorySaving(false)
+    }
+  }
+
+  const handleDeleteServiceCategory = async () => {
+    const category = String(managingServiceCategory || '').trim()
+    const replacementCategory = replacementServiceCategoryValue.trim()
+
+    if (!category) return
+
+    if (!replacementCategory) {
+      toast.error('Indica a qué familia mover los tratamientos')
+      return
+    }
+
+    if (replacementCategory === category) {
+      toast.error('La familia de destino debe ser distinta')
+      return
+    }
+
+    setServiceCategorySaving(true)
+    try {
+      await api.delete('/services/categories', {
+        data: {
+          category,
+          replacementCategory
+        }
+      })
+      await refreshServiceCatalogContext()
+      setServiceSelectedCategory(replacementCategory)
+      toast.success('Familia eliminada')
+      handleCloseServiceCategoryModal()
+    } catch (error: any) {
+      console.error('Delete service category error:', error)
+      toast.error(error.response?.data?.error || 'No se pudo eliminar la familia')
+      setServiceCategorySaving(false)
+    }
+  }
+
+  const handleDeleteServiceCategoryWithServices = async () => {
+    const category = String(managingServiceCategory || '').trim()
+
+    if (!category) return
+
+    const confirmed = confirm(
+      `Se eliminará la familia "${formatCategoryLabel(category)}" y todos sus tratamientos. Esta acción no se puede deshacer.`
+    )
+
+    if (!confirmed) return
+
+    setServiceCategorySaving(true)
+    try {
+      await api.delete('/services/categories/with-services', {
+        data: {
+          category
+        }
+      })
+      await refreshServiceCatalogContext()
+      setServiceSelectedCategory(null)
+      toast.success('Familia y tratamientos eliminados')
+      handleCloseServiceCategoryModal()
+    } catch (error: any) {
+      console.error('Delete service category with services error:', error)
+      toast.error(error.response?.data?.error || 'No se pudo eliminar la familia con sus tratamientos')
+      setServiceCategorySaving(false)
+    }
   }
 
   const handleBonoTemplateSuccess = (templates: any[]) => {
     setBonoTemplates(templates)
     invalidateBonoTemplatesCache()
     setBonoModalOpen(false)
+  }
+
+  const handleOpenBonoCategoryModal = () => {
+    if (!bonoSelectedCategory) return
+
+    const suggestedReplacement =
+      bonoCategoryOptions.find((category) => category !== bonoSelectedCategory) ||
+      (bonoSelectedCategory !== DEFAULT_BONO_CATEGORY ? DEFAULT_BONO_CATEGORY : '')
+
+    setManagingBonoCategory(bonoSelectedCategory)
+    setRenameBonoCategoryValue(bonoSelectedCategory)
+    setReplacementBonoCategoryValue(suggestedReplacement)
+    setBonoCategoryModalOpen(true)
+  }
+
+  const handleCloseBonoCategoryModal = () => {
+    setBonoCategoryModalOpen(false)
+    setManagingBonoCategory(null)
+    setRenameBonoCategoryValue('')
+    setReplacementBonoCategoryValue(DEFAULT_BONO_CATEGORY)
+    setBonoCategorySaving(false)
+  }
+
+  const handleRenameBonoCategory = async () => {
+    const currentCategory = String(managingBonoCategory || '').trim()
+    const nextCategory = renameBonoCategoryValue.trim()
+
+    if (!currentCategory) return
+
+    if (!nextCategory) {
+      toast.error('Indica el nuevo nombre de la familia de bonos')
+      return
+    }
+
+    if (nextCategory === currentCategory) {
+      toast.error('La familia de bonos debe tener un nombre distinto')
+      return
+    }
+
+    setBonoCategorySaving(true)
+    try {
+      await api.patch('/bonos/templates/categories', {
+        currentCategory,
+        nextCategory
+      })
+      await refreshBonoCatalogContext()
+      setBonoSelectedCategory(nextCategory)
+      toast.success('Familia de bonos actualizada')
+      handleCloseBonoCategoryModal()
+    } catch (error: any) {
+      console.error('Rename bono category error:', error)
+      toast.error(error.response?.data?.error || 'No se pudo actualizar la familia de bonos')
+      setBonoCategorySaving(false)
+    }
+  }
+
+  const handleDeleteBonoCategory = async () => {
+    const category = String(managingBonoCategory || '').trim()
+    const replacementCategory = replacementBonoCategoryValue.trim()
+
+    if (!category) return
+
+    if (!replacementCategory) {
+      toast.error('Indica a qué familia mover los bonos')
+      return
+    }
+
+    if (replacementCategory === category) {
+      toast.error('La familia de destino debe ser distinta')
+      return
+    }
+
+    setBonoCategorySaving(true)
+    try {
+      await api.delete('/bonos/templates/categories', {
+        data: {
+          category,
+          replacementCategory
+        }
+      })
+      await refreshBonoCatalogContext()
+      setBonoSelectedCategory(replacementCategory)
+      toast.success('Familia de bonos eliminada')
+      handleCloseBonoCategoryModal()
+    } catch (error: any) {
+      console.error('Delete bono category error:', error)
+      toast.error(error.response?.data?.error || 'No se pudo eliminar la familia de bonos')
+      setBonoCategorySaving(false)
+    }
+  }
+
+  const handleDeleteBonoCategoryWithTemplates = async () => {
+    const category = String(managingBonoCategory || '').trim()
+
+    if (!category) return
+
+    const confirmed = confirm(
+      `Se eliminará la familia de bonos "${formatCategoryLabel(category)}" y todos sus bonos. Esta acción no se puede deshacer.`
+    )
+
+    if (!confirmed) return
+
+    setBonoCategorySaving(true)
+    try {
+      await api.delete('/bonos/templates/categories/with-templates', {
+        data: {
+          category
+        }
+      })
+      await refreshBonoCatalogContext()
+      setBonoSelectedCategory(null)
+      toast.success('Familia y bonos eliminados')
+      handleCloseBonoCategoryModal()
+    } catch (error: any) {
+      console.error('Delete bono category with templates error:', error)
+      toast.error(error.response?.data?.error || 'No se pudo eliminar la familia con sus bonos')
+      setBonoCategorySaving(false)
+    }
   }
 
   const activeServices = useMemo(
@@ -180,6 +440,28 @@ export default function Services() {
   const serviceCategoryOptions = useMemo(
     () => serviceCategoryCards.map((item) => item.category),
     [serviceCategoryCards]
+  )
+
+  const serviceReplacementCategoryOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [DEFAULT_SERVICE_CATEGORY, ...serviceCategoryOptions]
+            .map((category) => String(category || '').trim())
+            .filter((category) => category && category !== managingServiceCategory)
+        )
+      ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' })),
+    [serviceCategoryOptions, managingServiceCategory]
+  )
+
+  const managedServiceCategoryCount = useMemo(
+    () =>
+      managingServiceCategory
+        ? services.filter(
+            (service) => String(service.category || '').trim() === String(managingServiceCategory || '').trim()
+          ).length
+        : 0,
+    [services, managingServiceCategory]
   )
 
   const filteredServices = useMemo(() => {
@@ -254,7 +536,7 @@ export default function Services() {
 
   const bonoCategoryCards = useMemo(() => {
     const grouped = bonoTemplates.reduce<Record<string, number>>((acc, template) => {
-      const category = String(template.category || '').trim() || 'Bonos'
+      const category = String(template.category || '').trim() || DEFAULT_BONO_CATEGORY
       acc[category] = (acc[category] || 0) + 1
       return acc
     }, {})
@@ -268,9 +550,36 @@ export default function Services() {
       .sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' }))
   }, [bonoTemplates])
 
+  const bonoCategoryOptions = useMemo(
+    () => bonoCategoryCards.map((item) => item.category),
+    [bonoCategoryCards]
+  )
+
+  const bonoReplacementCategoryOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [DEFAULT_BONO_CATEGORY, ...bonoCategoryOptions]
+            .map((category) => String(category || '').trim())
+            .filter((category) => category && category !== managingBonoCategory)
+        )
+      ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' })),
+    [bonoCategoryOptions, managingBonoCategory]
+  )
+
+  const managedBonoCategoryCount = useMemo(
+    () =>
+      managingBonoCategory
+        ? bonoTemplates.filter(
+            (template) => String(template.category || DEFAULT_BONO_CATEGORY).trim() === String(managingBonoCategory).trim()
+          ).length
+        : 0,
+    [bonoTemplates, managingBonoCategory]
+  )
+
   const filteredBonos = useMemo(() => {
     const categoryFiltered = bonoSelectedCategory
-      ? bonoTemplates.filter((template) => String(template.category || 'Bonos') === bonoSelectedCategory)
+      ? bonoTemplates.filter((template) => String(template.category || DEFAULT_BONO_CATEGORY) === bonoSelectedCategory)
       : bonoTemplates
 
     return filterRankedItems(categoryFiltered, bonoSearch, (template) => ({
@@ -517,7 +826,18 @@ export default function Services() {
             <div className="card">
               <div className="mb-4 flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{serviceTableTitle}</h3>
-                <span className="badge badge-secondary">{filteredServices.length}</span>
+                <div className="flex items-center gap-2">
+                  {serviceSelectedCategory ? (
+                    <button
+                      type="button"
+                      onClick={handleOpenServiceCategoryModal}
+                      className="btn btn-secondary btn-sm"
+                    >
+                      Gestionar familia
+                    </button>
+                  ) : null}
+                  <span className="badge badge-secondary">{filteredServices.length}</span>
+                </div>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full">
@@ -632,6 +952,106 @@ export default function Services() {
             />
           </Modal>
 
+          <Modal
+            isOpen={serviceCategoryModalOpen}
+            onClose={handleCloseServiceCategoryModal}
+            title="Gestionar Familia"
+            maxWidth="md"
+          >
+            <div className="space-y-6">
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/40">
+                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Familia seleccionada</p>
+                <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">
+                  {managingServiceCategory ? formatCategoryLabel(managingServiceCategory) : '-'}
+                </p>
+              </div>
+
+              <div className="space-y-4 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+                <div>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-900 dark:text-white">
+                    Renombrar familia
+                  </h3>
+                </div>
+                <div>
+                  <label className="label">Nuevo nombre</label>
+                  <input
+                    type="text"
+                    value={renameServiceCategoryValue}
+                    onChange={(event) => setRenameServiceCategoryValue(event.target.value)}
+                    className="input"
+                    placeholder="Ej: Cejas y pestañas"
+                    maxLength={120}
+                    disabled={serviceCategorySaving}
+                  />
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => void handleRenameServiceCategory()}
+                    className="btn btn-primary"
+                    disabled={serviceCategorySaving}
+                  >
+                    Guardar familia
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-4 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+                <div>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-900 dark:text-white">
+                    Mover tratamientos
+                  </h3>
+                </div>
+                <div>
+                  <label className="label">Mover tratamientos a</label>
+                  <select
+                    value={replacementServiceCategoryValue}
+                    onChange={(event) => setReplacementServiceCategoryValue(event.target.value)}
+                    className="input"
+                    disabled={serviceCategorySaving}
+                  >
+                    <option value="">Selecciona una familia</option>
+                    {serviceReplacementCategoryOptions.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteServiceCategory()}
+                    className="btn btn-primary"
+                    disabled={serviceCategorySaving}
+                  >
+                    Mover tratamientos
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-4 rounded-xl border border-red-300 bg-red-50/40 p-4 dark:border-red-900 dark:bg-red-950/20">
+                <div>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-red-700 dark:text-red-300">
+                    Eliminar familia con tratamientos
+                  </h3>
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteServiceCategoryWithServices()}
+                    className="btn btn-danger"
+                    disabled={serviceCategorySaving || managedServiceCategoryCount === 0}
+                  >
+                    {managedServiceCategoryCount > 0
+                      ? `Eliminar todo (${managedServiceCategoryCount})`
+                      : 'Eliminar todo'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </Modal>
+
           {isAdmin ? (
             <Modal
               isOpen={serviceImportModalOpen}
@@ -716,10 +1136,7 @@ export default function Services() {
                         : 'border-gray-200 dark:border-gray-700 hover:border-primary-500'
                     }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <p className="text-base font-semibold text-gray-900 dark:text-white">{item.label}</p>
-                      <Package className="h-4 w-4 text-primary-600" />
-                    </div>
+                    <p className="text-base font-semibold text-gray-900 dark:text-white">{item.label}</p>
                     <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">{item.total} bonos</p>
                   </button>
                 ))}
@@ -732,7 +1149,18 @@ export default function Services() {
               <div>
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{bonoTableTitle}</h3>
               </div>
-              <span className="badge badge-secondary">{filteredBonos.length}</span>
+              <div className="flex items-center gap-2">
+                {bonoSelectedCategory ? (
+                  <button
+                    type="button"
+                    onClick={handleOpenBonoCategoryModal}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    Gestionar familia
+                  </button>
+                ) : null}
+                <span className="badge badge-secondary">{filteredBonos.length}</span>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -818,9 +1246,110 @@ export default function Services() {
             maxWidth="lg"
           >
             <BonoTemplateForm
+              categories={bonoCategoryOptions}
               onSuccess={handleBonoTemplateSuccess}
               onCancel={() => setBonoModalOpen(false)}
             />
+          </Modal>
+
+          <Modal
+            isOpen={bonoCategoryModalOpen}
+            onClose={handleCloseBonoCategoryModal}
+            title="Gestionar Familia"
+            maxWidth="md"
+          >
+            <div className="space-y-6">
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/40">
+                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Familia de bonos seleccionada</p>
+                <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">
+                  {managingBonoCategory ? formatCategoryLabel(managingBonoCategory) : '-'}
+                </p>
+              </div>
+
+              <div className="space-y-4 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+                <div>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-900 dark:text-white">
+                    Renombrar familia
+                  </h3>
+                </div>
+                <div>
+                  <label className="label">Nuevo nombre</label>
+                  <input
+                    type="text"
+                    value={renameBonoCategoryValue}
+                    onChange={(event) => setRenameBonoCategoryValue(event.target.value)}
+                    className="input"
+                    placeholder="Ej: Cera premium"
+                    maxLength={120}
+                    disabled={bonoCategorySaving}
+                  />
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => void handleRenameBonoCategory()}
+                    className="btn btn-primary"
+                    disabled={bonoCategorySaving}
+                  >
+                    Guardar familia
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-4 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+                <div>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-900 dark:text-white">
+                    Mover bonos
+                  </h3>
+                </div>
+                <div>
+                  <label className="label">Mover bonos a</label>
+                  <select
+                    value={replacementBonoCategoryValue}
+                    onChange={(event) => setReplacementBonoCategoryValue(event.target.value)}
+                    className="input"
+                    disabled={bonoCategorySaving}
+                  >
+                    <option value="">Selecciona una familia</option>
+                    {bonoReplacementCategoryOptions.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteBonoCategory()}
+                    className="btn btn-primary"
+                    disabled={bonoCategorySaving}
+                  >
+                    Mover bonos
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-4 rounded-xl border border-red-300 bg-red-50/40 p-4 dark:border-red-900 dark:bg-red-950/20">
+                <div>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-red-700 dark:text-red-300">
+                    Eliminar familia con bonos
+                  </h3>
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteBonoCategoryWithTemplates()}
+                    className="btn btn-danger"
+                    disabled={bonoCategorySaving || managedBonoCategoryCount === 0}
+                  >
+                    {managedBonoCategoryCount > 0
+                      ? `Eliminar todo (${managedBonoCategoryCount})`
+                      : 'Eliminar todo'}
+                  </button>
+                </div>
+              </div>
+            </div>
           </Modal>
 
           <Modal

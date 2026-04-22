@@ -7,10 +7,14 @@ import {
   importClientBonosFromSpreadsheet,
   importAccountBalanceFromSpreadsheet,
   createBonoTemplate,
+  renameBonoTemplateCategory,
+  deleteBonoTemplateCategory,
+  deleteBonoTemplateCategoryWithTemplates,
   createBonoPack,
   createBonoAppointment,
   consumeSession,
   deleteBonoPack,
+  updateBonoPack,
   updateAccountBalance,
   getAccountBalanceHistory,
   createAccountBalanceTopUp,
@@ -29,9 +33,14 @@ import {
   accountBalanceTopUpBodySchema,
   bonoPackIdParamSchema,
   clientIdParamSchema,
+  createBonoPackBodySchema,
   createBonoTemplateBodySchema,
   createBonoAppointmentBodySchema,
-  spreadsheetImportModeBodySchema
+  deleteBonoTemplateCategoryBodySchema,
+  deleteBonoTemplateCategoryWithTemplatesBodySchema,
+  renameBonoTemplateCategoryBodySchema,
+  spreadsheetImportModeBodySchema,
+  updateBonoPackBodySchema
 } from '../validators/bono.schemas'
 
 const router = Router()
@@ -40,6 +49,21 @@ router.use(authMiddleware)
 
 router.get('/templates', getBonoTemplates)
 router.post('/templates', validateRequest({ body: createBonoTemplateBodySchema }), createBonoTemplate)
+router.patch(
+  '/templates/categories',
+  validateRequest({ body: renameBonoTemplateCategoryBodySchema }),
+  renameBonoTemplateCategory
+)
+router.delete(
+  '/templates/categories',
+  validateRequest({ body: deleteBonoTemplateCategoryBodySchema }),
+  deleteBonoTemplateCategory
+)
+router.delete(
+  '/templates/categories/with-templates',
+  validateRequest({ body: deleteBonoTemplateCategoryWithTemplatesBodySchema }),
+  deleteBonoTemplateCategoryWithTemplates
+)
 router.get('/account-balance/history', getGlobalAccountBalanceHistory)
 router.post(
   '/import-templates',
@@ -56,7 +80,12 @@ router.post(
   importClientBonosFromSpreadsheet
 )
 router.get('/client/:clientId', validateRequest({ params: clientIdParamSchema }), getClientBonos)
-router.post('/', createBonoPack)
+router.post('/', validateRequest({ body: createBonoPackBodySchema }), createBonoPack)
+router.put(
+  '/:bonoPackId',
+  validateRequest({ params: bonoPackIdParamSchema, body: updateBonoPackBodySchema }),
+  updateBonoPack
+)
 router.post(
   '/:bonoPackId/appointments',
   validateRequest({ params: bonoPackIdParamSchema, body: createBonoAppointmentBodySchema }),

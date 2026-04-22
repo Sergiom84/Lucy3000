@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   agendaDayNotesQuerySchema,
   appointmentImportBodySchema,
+  chargeAppointmentWithBonoBodySchema,
   createAgendaDayNoteBodySchema,
   createAppointmentBodySchema,
   toggleAgendaDayNoteBodySchema
@@ -153,5 +154,28 @@ describe('appointment schemas', () => {
     })
 
     expect(result.success).toBe(false)
+  })
+
+  it('accepts charge bono payloads with multiple sessions', () => {
+    const result = chargeAppointmentWithBonoBodySchema.safeParse({
+      bonoPackId: '53f246c7-7f24-4edd-ba4e-741ce457b872',
+      sessionsToConsume: 3
+    })
+
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects invalid charge bono quantities', () => {
+    const zero = chargeAppointmentWithBonoBodySchema.safeParse({
+      bonoPackId: '53f246c7-7f24-4edd-ba4e-741ce457b872',
+      sessionsToConsume: 0
+    })
+    const decimal = chargeAppointmentWithBonoBodySchema.safeParse({
+      bonoPackId: '53f246c7-7f24-4edd-ba4e-741ce457b872',
+      sessionsToConsume: 1.5
+    })
+
+    expect(zero.success).toBe(false)
+    expect(decimal.success).toBe(false)
   })
 })

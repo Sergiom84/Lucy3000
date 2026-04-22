@@ -3,15 +3,28 @@ import { useNavigate } from 'react-router-dom'
 import { Calendar as BigCalendar, View } from 'react-big-calendar'
 import moment from 'moment'
 import 'react-big-calendar/lib/css/react-big-calendar.css'
-import { ChevronLeft, ChevronRight, CreditCard, UserX } from 'lucide-react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import api from '../utils/api'
 import {
   loadAppointmentLegendItems,
   loadAppointmentLegendCategories,
+  loadBonoTemplates,
   preloadAppointmentFormCatalogs,
   type AppointmentLegendCatalogItem
 } from '../utils/appointmentCatalogs'
 import { getAppointmentColorTheme } from '../utils/appointmentColors'
+import {
+  hasConsumedAppointmentBono,
+  hasNonChargeableAppointmentStatus,
+  isAppointmentInactiveForCalendar,
+  requiresAppointmentCharge
+} from '../utils/appointmentBilling'
+import {
+  getAppointmentBonoCandidates,
+  getConsumedAppointmentBono,
+  type AppointmentBonoCandidate,
+  type AppointmentConsumedBono
+} from '../utils/appointmentBonos'
 import {
   BUSINESS_END_MINUTES,
   BUSINESS_START_MINUTES,
@@ -55,7 +68,6 @@ const professionalLabels: Record<string, string> = {
   CHEMA: 'Chema',
   OTROS: 'Otros'
 }
-const INACTIVE_STATUSES = new Set(['COMPLETED', 'CANCELLED', 'NO_SHOW'])
 
 const cabinLabels: Record<string, string> = {
   LUCY: 'Lucy',
@@ -64,8 +76,18 @@ const cabinLabels: Record<string, string> = {
   CABINA_2: 'Cabina 2'
 }
 
+const saleStatusLabels: Record<string, string> = {
+  PENDING: 'pendiente',
+  CANCELLED: 'cancelada',
+  REFUNDED: 'devuelta',
+  COMPLETED: 'completada'
+}
+
 const formatProfessionalLabel = (professional: string | null | undefined) =>
   professionalLabels[String(professional || '')] || String(professional || '')
+
+const formatSaleStatusLabel = (status: string | null | undefined) =>
+  saleStatusLabels[String(status || '').toUpperCase()] || 'registrada'
 
 const getSelectionTimeValue = (value: Date) => {
   return getTimeInputValueFromDate(value)
@@ -158,6 +180,13 @@ export default function Appointments() {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [legendItems, setLegendItems] = useState<AppointmentLegendCatalogItem[]>([])
   const [legendCategories, setLegendCategories] = useState<string[]>([])
+  const [appointmentBonosLoading, setAppointmentBonosLoading] = useState(false)
+  const [appointmentBonoCandidates, setAppointmentBonoCandidates] = useState<AppointmentBonoCandidate[]>([])
+  const [consumedAppointmentBono, setConsumedAppointmentBono] = useState<AppointmentConsumedBono | null>(null)
+  const [selectedAppointmentBonoId, setSelectedAppointmentBonoId] = useState('')
+  const [showChargeBonoModal, setShowChargeBonoModal] = useState(false)
+  const [bonoSessionsToConsume, setBonoSessionsToConsume] = useState(1)
+  const [chargeBonoSubmitting, setChargeBonoSubmitting] = useState(false)
   const isAdmin = user?.role === 'ADMIN'
 
   useEffect(() => {
@@ -169,6 +198,60 @@ export default function Appointments() {
     void fetchAppointmentLegends()
     void fetchAppointmentLegendCategories()
   }, [])
+
+  useEffect(() => {
+    if (!editingAppointment?.id || !editingAppointment.clientId || editingAppointment.sale) {
+      setAppointmentBonosLoading(false)
+      setAppointmentBonoCandidates([])
+      setConsumedAppointmentBono(null)
+      setSelectedAppointmentBonoId('')
+      return
+    }
+
+    let cancelled = false
+    const loadAppointmentBonos = async () => {
+      try {
+        setAppointmentBonosLoading(true)
+        const [response, bonoTemplates] = await Promise.all([
+          api.get(`/bonos/client/${editingAppointment.clientId}`),
+          loadBonoTemplates().catch(() => [])
+        ])
+        if (cancelled) return
+
+        const bonoPacks = Array.isArray(response.data) ? response.data : []
+        const nextConsumedBono = getConsumedAppointmentBono(editingAppointment, bonoPacks)
+        const nextCandidates = getAppointmentBonoCandidates(editingAppointment, bonoPacks, {
+          bonoTemplates
+        })
+
+        setConsumedAppointmentBono(nextConsumedBono)
+        setAppointmentBonoCandidates(nextCandidates)
+        setSelectedAppointmentBonoId((currentValue) => {
+          if (nextCandidates.length === 0) return ''
+          if (currentValue && nextCandidates.some((bonoPack) => bonoPack.id === currentValue)) {
+            return currentValue
+          }
+          return nextCandidates[0].id
+        })
+      } catch (error) {
+        if (!cancelled) {
+          setAppointmentBonoCandidates([])
+          setConsumedAppointmentBono(null)
+          setSelectedAppointmentBonoId('')
+        }
+      } finally {
+        if (!cancelled) {
+          setAppointmentBonosLoading(false)
+        }
+      }
+    }
+
+    void loadAppointmentBonos()
+
+    return () => {
+      cancelled = true
+    }
+  }, [editingAppointment])
 
   const fetchAppointments = async () => {
     try {
@@ -290,6 +373,9 @@ export default function Appointments() {
 
   const handleCloseModal = () => {
     setShowModal(false)
+    setShowChargeBonoModal(false)
+    setBonoSessionsToConsume(1)
+    setChargeBonoSubmitting(false)
     setEditingAppointment(null)
     setSelectedDate(undefined)
     setPreselectedStartTime(undefined)
@@ -358,6 +444,16 @@ export default function Appointments() {
   }
 
   const goToCharge = (appointment: any) => {
+    if (appointment.sale?.id) {
+      navigate(
+        appointment.sale.status === 'PENDING'
+          ? `/sales?pendingSaleId=${appointment.sale.id}`
+          : `/sales?view=history&openSaleId=${appointment.sale.id}`
+      )
+      setShowModal(false)
+      return
+    }
+
     const params = new URLSearchParams({
       serviceId: appointment.serviceId,
       appointmentId: appointment.id
@@ -366,6 +462,72 @@ export default function Appointments() {
       params.set('clientId', appointment.clientId)
     }
     navigate(`/sales?${params.toString()}`)
+    setShowModal(false)
+  }
+
+  const handleChargeWithBono = async () => {
+    if (!editingAppointment?.id) return
+
+    const selectedBonoCandidate =
+      appointmentBonoCandidates.find((bonoPack) => bonoPack.id === selectedAppointmentBonoId) ||
+      (appointmentBonoCandidates.length === 1 ? appointmentBonoCandidates[0] : null)
+
+    if (!selectedBonoCandidate) {
+      toast.error('Selecciona un bono para esta cita')
+      return
+    }
+
+    setSelectedAppointmentBonoId(selectedBonoCandidate.id)
+    setBonoSessionsToConsume(1)
+    setShowChargeBonoModal(true)
+  }
+
+  const handleConfirmChargeWithBono = async () => {
+    if (!editingAppointment?.id) return
+
+    const bonoPackId =
+      selectedAppointmentBonoId ||
+      (appointmentBonoCandidates.length === 1 ? appointmentBonoCandidates[0].id : '')
+
+    const selectedBonoCandidate =
+      appointmentBonoCandidates.find((bonoPack) => bonoPack.id === bonoPackId) ||
+      (appointmentBonoCandidates.length === 1 ? appointmentBonoCandidates[0] : null)
+
+    if (!selectedBonoCandidate) {
+      toast.error('Selecciona un bono para esta cita')
+      return
+    }
+
+    const sessionsToConsume = Math.max(1, Math.min(bonoSessionsToConsume, selectedBonoCandidate.chargeableSessions))
+
+    try {
+      setChargeBonoSubmitting(true)
+      const response = await api.post(`/appointments/${editingAppointment.id}/charge-bono`, {
+        bonoPackId: bonoPackId || undefined,
+        sessionsToConsume
+      })
+      const chargedSessions =
+        Number(response.data?.bonoChargeSummary?.sessionsConsumed) > 0
+          ? Number(response.data?.bonoChargeSummary?.sessionsConsumed)
+          : sessionsToConsume
+      const chargedBonoName =
+        response.data?.bonoChargeSummary?.bonoPackName ||
+        response.data?.bonoSessions?.[0]?.bonoPack?.name ||
+        appointmentBonoCandidates.find((bonoPack) => bonoPack.id === bonoPackId)?.name ||
+        'el bono seleccionado'
+      toast.success(
+        chargedSessions === 1
+          ? `Bono descontado: ${chargedBonoName}`
+          : `${chargedSessions} sesiones descontadas de ${chargedBonoName}`
+      )
+      setShowChargeBonoModal(false)
+      handleCloseModal()
+      fetchAppointments()
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'No se pudo descontar el bono')
+    } finally {
+      setChargeBonoSubmitting(false)
+    }
   }
 
   const events = useMemo(
@@ -414,6 +576,10 @@ export default function Appointments() {
     [agendaBlocks, appointments]
   )
 
+  const selectedAppointmentBonoCandidate =
+    appointmentBonoCandidates.find((bonoPack) => bonoPack.id === selectedAppointmentBonoId) ||
+    (appointmentBonoCandidates.length === 1 ? appointmentBonoCandidates[0] : null)
+
   const getThemeForAppointment = (appointment: any) =>
     getAppointmentColorTheme(
       legendItems,
@@ -437,7 +603,7 @@ export default function Appointments() {
     }
 
     const theme = getThemeForAppointment(event.appointment)
-    const isInactive = INACTIVE_STATUSES.has(String(event.appointment.status || '').toUpperCase())
+    const isInactive = isAppointmentInactiveForCalendar(event.appointment)
 
     return {
       style: {
@@ -461,7 +627,7 @@ export default function Appointments() {
 
   const activeCabinsToday = new Set(todayAppointments.map((appointment) => appointment.cabin)).size
   const remainingTodayAppointments = todayAppointments.filter(
-    (appointment) => !['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(appointment.status)
+    (appointment) => !isAppointmentInactiveForCalendar(appointment)
   ).length
 
   const currentDateMoment = useMemo(() => moment(currentDate), [currentDate])
@@ -738,28 +904,110 @@ export default function Appointments() {
                 <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-900 dark:bg-green-950/20 dark:text-green-200">
                   Cita cobrada en {editingAppointment.sale.saleNumber} por {salePaymentMethodLabel(editingAppointment.sale)}.
                 </div>
+              ) : editingAppointment.sale ? (
+                <div className="space-y-2">
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+                    {editingAppointment.sale.status === 'PENDING'
+                      ? `Esta cita ya tiene la venta ${editingAppointment.sale.saleNumber} pendiente. Continúa el cobro desde esa venta.`
+                      : `Esta cita ya tiene la venta ${editingAppointment.sale.saleNumber} ${formatSaleStatusLabel(
+                          editingAppointment.sale.status
+                        )}. Revísala desde historial antes de crear otra.`}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button onClick={() => goToCharge(editingAppointment)} className="btn btn-primary">
+                      {editingAppointment.sale.status === 'PENDING' ? 'Cobrar pendiente' : 'Ver venta'}
+                    </button>
+                  </div>
+                </div>
+              ) : consumedAppointmentBono || hasConsumedAppointmentBono(editingAppointment) ? (
+                <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-900 dark:bg-green-950/20 dark:text-green-200">
+                  Cita descontada con bono {consumedAppointmentBono?.name || editingAppointment.bonoSessions?.[0]?.bonoPack?.name}
+                  {consumedAppointmentBono?.consumedCount
+                    ? consumedAppointmentBono.consumedCount === 1
+                      ? ` · sesión #${consumedAppointmentBono.sessionNumber}`
+                      : ` · ${consumedAppointmentBono.consumedCount} sesiones`
+                    : Array.isArray(editingAppointment.bonoSessions) && editingAppointment.bonoSessions.length > 0
+                      ? editingAppointment.bonoSessions.length === 1
+                        ? ` · sesión #${editingAppointment.bonoSessions[0]?.sessionNumber || ''}`
+                        : ` · ${editingAppointment.bonoSessions.length} sesiones`
+                      : ''}
+                  .
+                </div>
               ) : (
-                <button onClick={() => goToCharge(editingAppointment)} className="btn btn-primary">
-                  <CreditCard className="w-4 h-4 mr-2" />
-                  Cobrar ahora
-                </button>
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {requiresAppointmentCharge(editingAppointment) &&
+                    !editingAppointment.sale &&
+                    appointmentBonoCandidates.length > 0 ? (
+                      <button onClick={() => void handleChargeWithBono()} className="btn btn-primary">
+                        Descontar bono
+                      </button>
+                    ) : requiresAppointmentCharge(editingAppointment) ? (
+                      <button onClick={() => goToCharge(editingAppointment)} className="btn btn-primary">
+                        {editingAppointment.sale?.status === 'PENDING'
+                          ? 'Continuar cobro'
+                          : editingAppointment.sale
+                            ? 'Ver venta'
+                            : 'Cobrar'}
+                      </button>
+                    ) : null}
+                    {!hasNonChargeableAppointmentStatus(editingAppointment) && (
+                      <button
+                        onClick={() => handleMarkNoShow(editingAppointment.id)}
+                        className="btn btn-secondary text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-900/30 text-sm"
+                      >
+                        No acudio
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleDeleteAppointment(editingAppointment.id)}
+                      className="btn btn-secondary text-red-600 hover:bg-red-50 dark:hover:bg-red-900 text-sm"
+                    >
+                      Eliminar cita
+                    </button>
+                  </div>
+                  {appointmentBonosLoading ? (
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Buscando bonos compatibles...</p>
+                  ) : appointmentBonoCandidates.length > 0 && !editingAppointment.sale ? (
+                    <div className="rounded-lg border border-blue-200 bg-blue-50/70 px-3 py-2 text-sm text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-100">
+                      {appointmentBonoCandidates.length > 1 ? (
+                        <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                          <span className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">
+                            Bono para esta cita
+                          </span>
+                          <select
+                            value={selectedAppointmentBonoId}
+                            onChange={(event) => setSelectedAppointmentBonoId(event.target.value)}
+                            className="input h-10 min-w-0 border-blue-200 bg-white text-sm dark:border-blue-800 dark:bg-gray-900"
+                          >
+                            {appointmentBonoCandidates.map((bonoPack) => (
+                              <option key={bonoPack.id} value={bonoPack.id}>
+                                {bonoPack.name}
+                                {bonoPack.serviceName ? ` · ${bonoPack.serviceName}` : ''}
+                                {bonoPack.isReservedForAppointment && bonoPack.reservedSessionNumber
+                                  ? ` · reservada sesión ${bonoPack.reservedSessionNumber}`
+                                  : ''}
+                                {bonoPack.chargeableSessions > 1 ? ` · ${bonoPack.chargeableSessions} disponibles` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : (
+                        <p>
+                          Se descontará {appointmentBonoCandidates[0].name}
+                          {appointmentBonoCandidates[0].reservedSessionNumber
+                            ? ` · sesión ${appointmentBonoCandidates[0].reservedSessionNumber}`
+                            : ''}
+                          {appointmentBonoCandidates[0].chargeableSessions > 1
+                            ? ` · hasta ${appointmentBonoCandidates[0].chargeableSessions} sesiones`
+                            : ''}
+                          .
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
               )}
-
-              <div className="flex gap-2">
-                <button
-                  onClick={() => handleMarkNoShow(editingAppointment.id)}
-                  className="btn btn-secondary text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-900/30 text-sm"
-                >
-                  <UserX className="w-4 h-4 mr-2" />
-                  No acudio
-                </button>
-                <button
-                  onClick={() => handleDeleteAppointment(editingAppointment.id)}
-                  className="btn btn-secondary text-red-600 hover:bg-red-50 dark:hover:bg-red-900 text-sm"
-                >
-                  Eliminar Cita
-                </button>
-              </div>
             </div>
           )}
 
@@ -772,6 +1020,74 @@ export default function Appointments() {
             preselectedEndTime={preselectedEndTime}
             initialCabin={initialCabin}
           />
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={showChargeBonoModal}
+        onClose={() => {
+          if (chargeBonoSubmitting) return
+          setShowChargeBonoModal(false)
+          setBonoSessionsToConsume(1)
+        }}
+        title="Descontar bono"
+        maxWidth="sm"
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg border border-blue-200 bg-blue-50/70 px-4 py-3 text-sm text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-100">
+            {selectedAppointmentBonoCandidate ? (
+              <>
+                <p className="font-medium">{selectedAppointmentBonoCandidate.name}</p>
+                <p className="mt-1">¿Cuántos bonos a descontar?</p>
+                <p className="mt-1 text-xs text-blue-700 dark:text-blue-300">
+                  Máximo disponible para esta cita: {selectedAppointmentBonoCandidate.chargeableSessions}
+                </p>
+              </>
+            ) : (
+              <p>No hay bono seleccionado para esta cita.</p>
+            )}
+          </div>
+
+          <div>
+            <label htmlFor="bonoSessionsToConsume" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Sesiones a descontar
+            </label>
+            <input
+              id="bonoSessionsToConsume"
+              type="number"
+              min={1}
+              max={selectedAppointmentBonoCandidate?.chargeableSessions || 1}
+              value={bonoSessionsToConsume}
+              onChange={(event) => {
+                const nextValue = Number.parseInt(event.target.value || '1', 10)
+                const maxValue = selectedAppointmentBonoCandidate?.chargeableSessions || 1
+                setBonoSessionsToConsume(Math.max(1, Math.min(Number.isFinite(nextValue) ? nextValue : 1, maxValue)))
+              }}
+              className="input mt-2"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setShowChargeBonoModal(false)
+                setBonoSessionsToConsume(1)
+              }}
+              disabled={chargeBonoSubmitting}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => void handleConfirmChargeWithBono()}
+              disabled={!selectedAppointmentBonoCandidate || chargeBonoSubmitting}
+            >
+              {chargeBonoSubmitting ? 'Descontando...' : 'Descontar bono'}
+            </button>
+          </div>
         </div>
       </Modal>
 

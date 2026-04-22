@@ -84,7 +84,10 @@ export default function Clients() {
   const [billingLoading, setBillingLoading] = useState(false)
   const [showCalendarDock, setShowCalendarDock] = useState(false)
   const [highlightedClientId, setHighlightedClientId] = useState<string | null>(null)
+  const [selectedCalendarClientName, setSelectedCalendarClientName] = useState<string | null>(null)
+  const [showPendingOnly, setShowPendingOnly] = useState(false)
   const isAdmin = user?.role === 'ADMIN'
+  const compactFilters = showCalendarDock
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -98,14 +101,15 @@ export default function Clients() {
   }, [search])
 
   useEffect(() => {
-    void fetchClients(currentPage, debouncedSearch, sortBy, sortDirection)
-  }, [currentPage, debouncedSearch, sortBy, sortDirection])
+    void fetchClients(currentPage, debouncedSearch, sortBy, sortDirection, showPendingOnly)
+  }, [currentPage, debouncedSearch, sortBy, sortDirection, showPendingOnly])
 
   const fetchClients = async (
     page = currentPage,
     searchTerm = debouncedSearch,
     requestedSortBy = sortBy,
-    requestedSortDirection = sortDirection
+    requestedSortDirection = sortDirection,
+    pendingOnly = showPendingOnly
   ) => {
     setLoading(true)
     try {
@@ -115,7 +119,8 @@ export default function Clients() {
         page: String(page),
         limit: String(PAGE_SIZE),
         sortBy: requestedSortBy,
-        sortDirection: requestedSortDirection
+        sortDirection: requestedSortDirection,
+        pendingOnly: String(pendingOnly)
       })
 
       if (searchTerm) {
@@ -208,8 +213,11 @@ export default function Clients() {
     void fetchClients(currentPage, debouncedSearch)
   }
 
-  const handleViewClientCalendar = (clientId: string) => {
-    setHighlightedClientId(clientId)
+  const handleViewClientCalendar = (client: any) => {
+    const clientName = `${client.firstName || ''} ${client.lastName || ''}`.trim() || 'Cliente'
+    setShowPendingOnly(false)
+    setHighlightedClientId(client.id)
+    setSelectedCalendarClientName(clientName)
     setShowCalendarDock(true)
   }
 
@@ -218,7 +226,8 @@ export default function Clients() {
       const params = new URLSearchParams({
         includeCounts: 'false',
         sortBy,
-        sortDirection
+        sortDirection,
+        pendingOnly: String(showPendingOnly)
       })
 
       if (debouncedSearch) {
@@ -244,10 +253,31 @@ export default function Clients() {
   const handleCloseCalendarDock = () => {
     setShowCalendarDock(false)
     setHighlightedClientId(null)
+    setSelectedCalendarClientName(null)
+  }
+
+  const handleTogglePendingOnly = () => {
+    if (showCalendarDock) return
+    setCurrentPage(1)
+    setShowPendingOnly((current) => !current)
   }
 
   const showingFrom = pagination.total === 0 ? 0 : (pagination.page - 1) * pagination.limit + 1
   const showingTo = pagination.total === 0 ? 0 : Math.min(pagination.page * pagination.limit, pagination.total)
+  const emptyStateMessage = showPendingOnly
+    ? debouncedSearch
+      ? 'No se encontraron clientes pendientes para esta búsqueda'
+      : 'No hay clientes con pagos pendientes'
+    : debouncedSearch
+      ? 'No se encontraron clientes para esta búsqueda'
+      : 'No hay clientes registrados'
+  const pendingCardClassName = `card text-left transition-all ${
+    showCalendarDock
+      ? 'cursor-default border-l-4 border-l-rose-300 bg-rose-50/70 shadow-[inset_6px_0_18px_-12px_rgba(251,113,133,0.85)] dark:border-l-rose-400 dark:bg-rose-950/20'
+      : showPendingOnly
+        ? 'cursor-pointer border-l-4 border-l-rose-500 border-rose-200 bg-rose-50/80 shadow-[inset_6px_0_18px_-12px_rgba(244,63,94,0.95),0_8px_24px_-12px_rgba(244,63,94,0.28)] hover:border-rose-300 hover:shadow-[inset_6px_0_18px_-12px_rgba(244,63,94,0.95),0_12px_28px_-16px_rgba(244,63,94,0.32)] dark:border-l-rose-400 dark:border-rose-900 dark:bg-rose-950/20'
+        : 'cursor-pointer border-l-4 border-l-rose-300 bg-rose-50/70 shadow-[inset_6px_0_18px_-12px_rgba(251,113,133,0.85)] hover:border-rose-200 hover:shadow-[inset_6px_0_18px_-12px_rgba(251,113,133,0.92),0_8px_24px_-12px_rgba(251,113,133,0.24)] dark:border-l-rose-400 dark:bg-rose-950/20'
+  }`
 
   if (loading && !hasLoadedOnce) {
     return (
@@ -262,7 +292,7 @@ export default function Clients() {
       <div
         className={`grid gap-6 transition-all duration-300 ${
           showCalendarDock
-            ? 'xl:grid-cols-[minmax(0,1fr)_42rem] 2xl:grid-cols-[minmax(0,1fr)_48rem]'
+            ? 'grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_44rem]'
             : 'grid-cols-1'
         }`}
       >
@@ -274,7 +304,15 @@ export default function Clients() {
 
             <div className="flex flex-wrap items-center gap-3">
               <button
-                onClick={() => setShowCalendarDock((current) => !current)}
+                onClick={() => {
+                  if (showCalendarDock) {
+                    handleCloseCalendarDock()
+                    return
+                  }
+
+                  setShowPendingOnly(false)
+                  setShowCalendarDock(true)
+                }}
                 className="btn btn-secondary"
               >
                 {showCalendarDock ? 'Ocultar agenda' : 'Mostrar agenda'}
@@ -311,22 +349,34 @@ export default function Clients() {
           </div>
 
           <div className="card">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-end">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
+            <div
+              className={`flex flex-col gap-4 ${
+                compactFilters ? '' : 'xl:flex-row xl:items-end'
+              }`}
+            >
+              <div className={`relative ${compactFilters ? 'w-full' : 'flex-1'}`}>
+                <Search
+                  className={`absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 ${
+                    compactFilters ? 'text-primary-500' : 'text-gray-400'
+                  }`}
+                />
                 <input
                   type="text"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Buscar por nombre, email o teléfono..."
-                  className="input pl-10"
+                  className={`input h-12 pl-12 ${compactFilters ? 'text-base' : ''}`}
                 />
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2 xl:w-auto">
-                <div className="min-w-[180px]">
+              <div
+                className={`grid gap-3 ${
+                  compactFilters ? 'w-full sm:max-w-[24rem] sm:grid-cols-2' : 'sm:grid-cols-2 xl:w-auto'
+                }`}
+              >
+                <div className={compactFilters ? 'min-w-0' : 'min-w-[180px]'}>
                   <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    Ordenar por
+                    {compactFilters ? 'Orden' : 'Ordenar por'}
                   </label>
                   <select
                     value={sortBy}
@@ -338,7 +388,7 @@ export default function Clients() {
                       setSortDirection(nextSortDirection)
                       setCurrentPage(1)
                     }}
-                    className="input"
+                    className={`input ${compactFilters ? 'h-11 text-sm' : ''}`}
                   >
                     {CLIENT_SORT_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -348,7 +398,7 @@ export default function Clients() {
                   </select>
                 </div>
 
-                <div className="min-w-[160px]">
+                <div className={compactFilters ? 'min-w-0' : 'min-w-[160px]'}>
                   <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     Sentido
                   </label>
@@ -358,7 +408,7 @@ export default function Clients() {
                       setSortDirection(e.target.value as ClientSortDirection)
                       setCurrentPage(1)
                     }}
-                    className="input"
+                    className={`input ${compactFilters ? 'h-11 text-sm' : ''}`}
                   >
                     <option value="desc">Descendente</option>
                     <option value="asc">Ascendente</option>
@@ -379,13 +429,44 @@ export default function Clients() {
               <p className="text-sm text-gray-600 dark:text-gray-400">Total Clientes</p>
               <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{summary.total}</p>
             </div>
-            <div className="card">
+            <button
+              type="button"
+              onClick={handleTogglePendingOnly}
+              disabled={showCalendarDock}
+              className={pendingCardClassName}
+              title={
+                showCalendarDock
+                  ? 'Disponible solo en la vista completa'
+                  : showPendingOnly
+                    ? 'Mostrar todos los clientes'
+                    : 'Mostrar clientes pendientes de pago'
+              }
+            >
               <p className="text-sm text-gray-600 dark:text-gray-400">Pendiente</p>
               <p className="mt-1 text-2xl font-bold text-red-600">{summary.debtAlerts}</p>
-            </div>
+              {!showCalendarDock ? (
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  {showPendingOnly ? 'Mostrando solo clientes pendientes' : 'Pulsa para ver pendientes'}
+                </p>
+              ) : null}
+            </button>
           </div>
 
           <div className="card">
+            {showPendingOnly && !showCalendarDock ? (
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 pb-4 dark:border-gray-700">
+                <p className="text-sm font-medium text-gray-900 dark:text-white">
+                  Mostrando solo clientes con pagos pendientes
+                </p>
+                <button
+                  type="button"
+                  onClick={handleTogglePendingOnly}
+                  className="btn btn-secondary btn-sm"
+                >
+                  Mostrar todos
+                </button>
+              </div>
+            ) : null}
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -423,7 +504,7 @@ export default function Clients() {
                   {clients.length === 0 ? (
                     <tr>
                       <td colSpan={9} className="py-8 text-center text-gray-500 dark:text-gray-400">
-                        {debouncedSearch ? 'No se encontraron clientes para esta búsqueda' : 'No hay clientes registrados'}
+                        {emptyStateMessage}
                       </td>
                     </tr>
                   ) : (
@@ -435,14 +516,30 @@ export default function Clients() {
                         }`}
                       >
                         <td className="px-4 py-3">
-                          <div>
-                            <p className="text-sm font-medium text-gray-900 dark:text-white">
-                              {client.firstName} {client.lastName}
-                            </p>
-                            <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                              <span>{client._count?.appointments ?? 0} citas • {client._count?.sales ?? 0} ventas</span>
+                          {showCalendarDock ? (
+                            <button
+                              type="button"
+                              onClick={() => handleViewClientCalendar(client)}
+                              className="block w-full rounded-lg p-2 text-left transition hover:bg-cyan-50 dark:hover:bg-cyan-900/20"
+                              title="Filtrar agenda por este cliente"
+                            >
+                              <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                {client.firstName} {client.lastName}
+                              </p>
+                              <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                                <span>{client._count?.appointments ?? 0} citas • {client._count?.sales ?? 0} ventas</span>
+                              </div>
+                            </button>
+                          ) : (
+                            <div>
+                              <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                {client.firstName} {client.lastName}
+                              </p>
+                              <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                                <span>{client._count?.appointments ?? 0} citas • {client._count?.sales ?? 0} ventas</span>
+                              </div>
                             </div>
-                          </div>
+                          )}
                         </td>
 
                         <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
@@ -532,7 +629,7 @@ export default function Clients() {
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-end space-x-2">
                             <button
-                              onClick={() => handleViewClientCalendar(client.id)}
+                              onClick={() => handleViewClientCalendar(client)}
                               className="rounded p-1 hover:bg-gray-200 dark:hover:bg-gray-600"
                               title="Ver citas en calendario"
                             >
@@ -603,6 +700,7 @@ export default function Clients() {
             <ClientCalendarDock
               onClose={handleCloseCalendarDock}
               selectedClientId={highlightedClientId}
+              selectedClientName={selectedCalendarClientName}
             />
           </Suspense>
         )}

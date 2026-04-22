@@ -1,26 +1,28 @@
 # Google Calendar Setup
 
-Estado actualizado: 2026-04-16
+Estado actualizado: 2026-04-21
 
 ## Qué integra Lucy3000
 
-La integración sincroniza citas con Google Calendar:
+La integración actual sincroniza con Google Calendar:
+- citas;
+- bloqueos de agenda.
 
-- crea eventos al crear citas;
-- actualiza eventos cuando cambia la cita;
-- elimina eventos cuando la cita se borra;
-- puede enviar invitaciones al cliente si existe email y la opción está activada.
+Según el caso, puede:
+- crear eventos;
+- actualizarlos;
+- eliminarlos;
+- enviar invitaciones al cliente cuando existe email y la opción está activada.
 
-Lucy3000 no usa SMTP para esto. Las invitaciones las envía Google Calendar cuando el cliente se añade como invitado.
+Las invitaciones las gestiona Google Calendar, no Lucy3000 por SMTP.
 
 ## Requisitos
+- usuario `ADMIN`;
+- variables de entorno OAuth configuradas;
+- backend local accesible en la callback;
+- instalación con acceso real a internet.
 
-- cuenta de Google con acceso a Calendar;
-- usuario `ADMIN` en Lucy3000;
-- variables de entorno configuradas;
-- backend local accesible en la URL usada como callback.
-
-## Variables de entorno
+## Variables necesarias
 
 ```env
 GOOGLE_CALENDAR_CLIENT_ID="tu-client-id"
@@ -28,94 +30,103 @@ GOOGLE_CALENDAR_CLIENT_SECRET="tu-client-secret"
 GOOGLE_CALENDAR_REDIRECT_URI="http://localhost:3001/api/calendar/callback"
 ```
 
-La `REDIRECT_URI` debe coincidir exactamente con la configurada en Google Cloud.
+La callback debe coincidir exactamente con la configurada en Google Cloud.
+
+## Dónde poner el `.env`
+
+En empaquetado, Lucy3000 puede leer `.env` desde:
+- la carpeta de datos local del usuario;
+- la carpeta del `.exe`;
+- `resources/`.
+
+Ruta recomendada para soporte por instalación:
+- `userData\.env`
+
+La pantalla `Settings` ya muestra:
+- si faltan variables;
+- qué variables faltan;
+- la redirect URI esperada;
+- la ruta recomendada donde colocar el `.env`.
 
 ## Configuración en Google Cloud
 
-1. Crea o reutiliza un proyecto.
-2. Activa `Google Calendar API`.
-3. Configura la pantalla de consentimiento OAuth.
-4. Crea un cliente OAuth.
-5. Añade la URI de callback exacta.
-6. Copia `client_id` y `client_secret`.
+1. Crear o reutilizar proyecto.
+2. Activar Google Calendar API.
+3. Configurar pantalla de consentimiento OAuth.
+4. Crear cliente OAuth.
+5. Registrar la callback exacta.
+6. Copiar `client_id` y `client_secret`.
 
-## Preparación de la base
+## Flujo dentro de Lucy3000
 
-Si estás levantando el proyecto desde código fuente:
-
-```bash
-npm run prisma:migrate
-```
-
-La integración necesita la tabla `google_calendar_config` y los campos de sincronización en `appointments`.
-
-## Activación en Lucy3000
-
-1. Inicia sesión como `ADMIN`.
-2. Ve a `Settings`.
-3. En la sección `Google Calendar`, pulsa `Conectar Google Calendar`.
-4. Completa la autorización.
-5. Guarda la configuración:
+1. Iniciar sesión como `ADMIN`.
+2. Abrir `Settings`.
+3. Ir a `Google Calendar`.
+4. Pulsar `Conectar Google Calendar`.
+5. Completar autorización en la ventana emergente.
+6. Guardar configuración:
    - `Sincronizar citas con Google Calendar`
    - `Enviar invitaciones y actualizaciones al cliente`
-   - `calendarId` (`primary` es el valor recomendado para empezar)
+   - `calendarId`
 
-## Comportamiento funcional
+## Configuración funcional
 
-### Crear cita
+### `enabled`
+Si está activo, Lucy3000 intentará mantener sincronizadas citas y bloqueos.
 
-- si la integración está activa, se crea el evento;
-- si hay email y están activadas invitaciones, Google envía la invitación;
-- si no hay email, el evento se crea solo en el calendario del negocio.
+### `sendClientInvites`
+Si la cita tiene email de cliente, Google enviará alta, cambios o cancelación del evento.
 
-### Actualizar cita
+### `calendarId`
+- usa `primary` para empezar;
+- también puedes usar el ID de un calendario concreto.
 
-- se parchea el evento vinculado;
-- si el cliente es invitado, Google gestiona la actualización.
+## Sincronización manual
 
-### Borrar cita
+Desde `Settings` existe un botón de sincronización manual.
+Ese flujo lanza una sincronización completa de agenda con alcance admin, útil para:
+- enviar agenda existente tras conectar por primera vez;
+- reintentar sincronización después de fallos;
+- regenerar estados locales de sync.
 
-- se intenta eliminar el evento remoto;
-- si existía invitado, Google puede notificar la cancelación.
+## Desconexión
 
-## Reglas operativas
+Al desconectar:
+- se revoca el token si Google lo permite;
+- se borra la configuración local;
+- se limpian los metadatos locales de sincronización en citas y bloqueos.
 
-- La integración es global para la app, no por equipo.
-- La impresora de tickets se configura por dispositivo; Calendar no.
-- Desactivar la sincronización corta cambios nuevos, pero no borra eventos previos.
-- Desconectar la cuenta rompe el vínculo local con eventos ya sincronizados.
+No debes asumir que eso borra eventos remotos ya creados en Google.
 
 ## Troubleshooting
 
-### Error generando URL de autorización
-
+### No aparece la URL de autorización
 Revisa:
-
 - `GOOGLE_CALENDAR_CLIENT_ID`
 - `GOOGLE_CALENDAR_CLIENT_SECRET`
 - `GOOGLE_CALENDAR_REDIRECT_URI`
 
-### La autorización no vuelve correctamente
-
+### La callback falla
 Revisa:
+- coincidencia exacta de la redirect URI;
+- que el backend local esté levantado;
+- que el popup o navegador no esté bloqueando la redirección.
 
-- callback exacta en Google Cloud;
-- backend local levantado;
-- popup o navegador no bloqueando la redirección.
-
-### Las citas no se sincronizan
-
+### Las citas o bloqueos no sincronizan
 Revisa:
-
-- que la integración esté conectada;
+- que la cuenta esté conectada;
 - que `enabled` esté activo;
-- que el `calendarId` sea correcto;
-- los logs del backend para ver errores de sincronización.
+- que `calendarId` sea correcto;
+- logs del backend;
+- si Google ha revocado el refresh token.
 
-## Recomendación
+### El token quedó inválido
+El servicio limpia la configuración local cuando detecta `invalid_grant`.
+La acción correcta es volver a conectar la cuenta desde `Settings`.
+
+## Recomendación operativa
 
 Empieza con:
-
-- una sola cuenta de Google del negocio;
+- una sola cuenta del negocio;
 - `calendarId=primary`;
-- invitaciones activadas solo cuando el flujo ya esté verificado con una cuenta real.
+- invitaciones activadas solo después de verificar el flujo con una cuenta real de cliente.

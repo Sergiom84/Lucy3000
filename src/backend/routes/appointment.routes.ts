@@ -10,6 +10,7 @@ import {
   getAppointmentLegendCategories,
   createAppointmentLegend,
   deleteAppointmentLegend,
+  chargeAppointmentWithBono,
   exportAppointments,
   importAppointmentsFromExcel
 } from '../controllers/appointment.controller'
@@ -37,6 +38,7 @@ import {
   agendaDayNotesQuerySchema,
   agendaBlocksQuerySchema,
   appointmentDateParamSchema,
+  chargeAppointmentWithBonoBodySchema,
   appointmentImportBodySchema,
   appointmentIdParamSchema,
   appointmentLegendIdParamSchema,
@@ -92,6 +94,11 @@ router.post(
   validateSpreadsheetUpload(),
   validateRequest({ body: appointmentImportBodySchema }),
   importAppointmentsFromExcel
+)
+router.post(
+  '/:id/charge-bono',
+  validateRequest({ params: appointmentIdParamSchema, body: chargeAppointmentWithBonoBodySchema }),
+  chargeAppointmentWithBono
 )
 router.get('/:id', validateRequest({ params: appointmentIdParamSchema }), getAppointmentById)
 router.post('/', validateRequest({ body: createAppointmentBodySchema }), createAppointment)

@@ -12,10 +12,12 @@ export const prismaMock: any = {
     findMany: vi.fn(),
     findUnique: vi.fn(),
     create: vi.fn(),
+    createMany: vi.fn(),
     update: vi.fn()
   },
 
   sale: {
+    count: vi.fn(),
     findFirst: vi.fn(),
     findMany: vi.fn(),
     findUnique: vi.fn(),
@@ -40,6 +42,7 @@ export const prismaMock: any = {
     findMany: vi.fn(),
     count: vi.fn(),
     create: vi.fn(),
+    createMany: vi.fn(),
     delete: vi.fn(),
     update: vi.fn()
   },
@@ -50,21 +53,27 @@ export const prismaMock: any = {
   },
 
   bonoPack: {
+    count: vi.fn(),
     findMany: vi.fn(),
     findUnique: vi.fn(),
     create: vi.fn(),
+    createMany: vi.fn(),
     update: vi.fn(),
     delete: vi.fn()
   },
 
   bonoSession: {
+    createMany: vi.fn(),
+    deleteMany: vi.fn(),
     update: vi.fn(),
     updateMany: vi.fn()
   },
 
   accountBalanceMovement: {
+    count: vi.fn(),
     findMany: vi.fn(),
-    create: vi.fn()
+    create: vi.fn(),
+    createMany: vi.fn()
   },
 
   appointment: {
@@ -73,9 +82,14 @@ export const prismaMock: any = {
     findMany: vi.fn(),
     findUnique: vi.fn(),
     create: vi.fn(),
+    createMany: vi.fn(),
     update: vi.fn(),
     updateMany: vi.fn(),
     delete: vi.fn()
+  },
+
+  appointmentService: {
+    createMany: vi.fn()
   },
 
   agendaBlock: {
@@ -83,15 +97,18 @@ export const prismaMock: any = {
     findMany: vi.fn(),
     findUnique: vi.fn(),
     create: vi.fn(),
+    createMany: vi.fn(),
     update: vi.fn(),
     updateMany: vi.fn(),
     delete: vi.fn()
   },
 
   agendaDayNote: {
+    count: vi.fn(),
     findMany: vi.fn(),
     findUnique: vi.fn(),
     create: vi.fn(),
+    createMany: vi.fn(),
     update: vi.fn(),
     delete: vi.fn()
   },
@@ -105,11 +122,15 @@ export const prismaMock: any = {
   },
 
   service: {
+    count: vi.fn(),
     findMany: vi.fn(),
     findFirst: vi.fn(),
     findUnique: vi.fn(),
     create: vi.fn(),
+    createMany: vi.fn(),
     update: vi.fn(),
+    updateMany: vi.fn(),
+    deleteMany: vi.fn(),
     delete: vi.fn()
   },
 
@@ -117,15 +138,20 @@ export const prismaMock: any = {
     findMany: vi.fn(),
     findUnique: vi.fn(),
     create: vi.fn(),
+    update: vi.fn(),
     delete: vi.fn()
   },
 
   product: {
+    count: vi.fn(),
     findFirst: vi.fn(),
     findMany: vi.fn(),
     findUnique: vi.fn(),
     create: vi.fn(),
+    createMany: vi.fn(),
     update: vi.fn(),
+    updateMany: vi.fn(),
+    deleteMany: vi.fn(),
     delete: vi.fn()
   },
 
@@ -150,6 +176,11 @@ export const prismaMock: any = {
     delete: vi.fn()
   },
 
+  cashCount: {
+    findMany: vi.fn(),
+    create: vi.fn()
+  },
+
   notification: {
     findFirst: vi.fn(),
     findMany: vi.fn(),
@@ -169,6 +200,7 @@ export const prismaMock: any = {
   },
 
   quote: {
+    count: vi.fn(),
     findFirst: vi.fn(),
     findMany: vi.fn(),
     findUnique: vi.fn(),

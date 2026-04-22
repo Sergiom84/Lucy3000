@@ -5,6 +5,7 @@ import {
   handleCallback,
   getConfig,
   updateConfig,
+  syncCalendar,
   disconnect
 } from '../controllers/calendar.controller'
 import { validateRequest } from '../middleware/validation.middleware'
@@ -25,6 +26,9 @@ router.get('/config', getConfig)
 
 // Actualizar configuración
 router.put('/config', validateRequest({ body: updateCalendarConfigBodySchema }), updateConfig)
+
+// Sincronización manual completa
+router.post('/sync', syncCalendar)
 
 // Desconectar Google Calendar
 router.post('/disconnect', disconnect)

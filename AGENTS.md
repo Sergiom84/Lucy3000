@@ -2,149 +2,237 @@
 
 ## Contexto del proyecto
 Lucy3000 es una app de escritorio para gestión de estética.
-Combina Electron (main/preload), React + Vite (renderer) y un backend Express con Prisma sobre SQLite local en el runtime actual. Las referencias a Supabase quedan como histórico o para flujos de backup/restore puntuales.
+La topología real actual es Electron + React/Vite + Express + Prisma + SQLite local.
+Supabase sigue apareciendo en scripts y documentación histórica, pero no es la base operativa del runtime distribuido.
 
-## Estado actual y fuentes de verdad
-Usa estas fuentes en este orden para decidir cómo trabajar:
-1. `ROADMAP.md` para estado real, prioridades y deuda técnica activa.
-2. `README.md` para onboarding general y comandos base.
-3. `BACKUP_RESTORE.md` para flujos de recuperación de base de datos.
-4. `ARCHITECTURE.md` para mapa técnico del sistema.
+## Fuentes de verdad
+Cuando una instrucción o documento entre en conflicto, usa este orden:
+1. `ROADMAP.md`
+2. `README.md`
+3. `BACKUP_RESTORE.md`
+4. `ARCHITECTURE.md`
+5. `package.json`, `prisma/schema.prisma`, `src/backend/app.ts`, `src/main/main.ts`
+
+Si algo documentado contradice al código, manda el código.
 
 ## Stack técnico
 - Runtime: Node.js 18+.
-- Frontend: React 18, TypeScript, Vite, Tailwind, Zustand, Axios.
 - Desktop: Electron + `vite-plugin-electron`.
+- Frontend: React 18, TypeScript, Vite, Tailwind, Zustand, Axios.
 - Backend: Express + TypeScript + Zod.
-- Datos: Prisma ORM + SQLite local por defecto. Supabase solo aparece en documentación histórica o flujos remotos específicos.
-- Tests: Vitest + Supertest (enfocados en backend).
+- Datos: Prisma ORM + SQLite.
+- Tests: Vitest + Supertest, con suites en backend, `src/main` y utilidades de renderer.
 
 ## Estructura importante
-- `src/main/main.ts`: proceso principal de Electron.
-- `src/preload.ts`: bridge seguro (`contextBridge`) entre renderer y main.
-- `src/renderer/*`: UI React (pages/components/stores/utils).
-- `src/backend/server.ts`: arranque HTTP.
+- `src/main/main.ts`: proceso principal de Electron, arranque del backend empaquetado, logs, backups, impresión, reseteo local y assets de cliente.
+- `src/main/backup.ts`: snapshots y restore del runtime local.
+- `src/preload.ts`: bridge seguro con `contextBridge`.
+- `src/renderer/App.tsx`: routing principal; usa `HashRouter` en `file://` y `BrowserRouter` en dev.
+- `src/renderer/pages/*`: pantallas de negocio.
+- `src/renderer/utils/api.ts`: cliente HTTP oficial para la API.
 - `src/backend/app.ts`: middlewares, rutas API y fallback SPA.
-- `src/backend/routes/*`: definición de endpoints.
+- `src/backend/server.ts`: arranque HTTP.
+- `src/backend/routes/*`: endpoints.
 - `src/backend/controllers/*`: lógica de negocio.
-- `src/backend/validators/*`: esquemas Zod (request validation).
-- `src/backend/middleware/*`: auth y validación reusable.
-- `prisma/schema.prisma`: modelo de datos principal.
+- `src/backend/services/*`: Google Calendar, recordatorios, import SQL, sincronización de agenda.
+- `src/backend/validators/*`: contratos Zod.
+- `src/backend/db.ts`: cliente Prisma y compatibility guards SQLite.
+- `src/shared/*`: utilidades compartidas de tickets y matching.
+- `prisma/schema.prisma`: modelo persistente real.
 - `prisma/migrations/*`: migraciones versionadas.
-- `scripts/*`: utilidades operativas (dev, backup, restore, rebuild).
 
-## Comandos operativos
-- `npm run dev`: flujo local completo.
-- `npm run dev:backend`: backend en watch con `ts-node` + `nodemon`.
-- `npm run dev:electron`: frontend/electron por Vite.
-- `npm run build`: compila backend + app Electron empaquetable.
-- `npm run build:backend`: transpila solo backend a `dist/backend`.
-- `npm run test`: ejecuta todos los tests.
-- `npm run test:unit`: tests unitarios backend.
-- `npm run test:smoke`: smoke tests API.
-- `npm run prisma:generate`: genera cliente Prisma.
-- `npm run prisma:migrate`: crea/aplica migración de desarrollo.
-- `npm run prisma:studio`: inspección/edición manual de datos.
-- `npm run backup:analyze`: auditoría de backup.
-- `npm run backup:restore`: restauración desde backup.
-- `npm run db:rebuild`: reconstrucción de BD Supabase histórica (script avanzado).
+## Scripts oficiales de npm
+- `npm run dev`
+- `npm run dev:backend`
+- `npm run dev:electron`
+- `npm run build`
+- `npm run build:backend`
+- `npm run build:prepare-db`
+- `npm run test`
+- `npm run test:unit`
+- `npm run test:smoke`
+- `npm run prisma:generate`
+- `npm run prisma:migrate`
+- `npm run prisma:studio`
+
+No hay scripts `npm run backup:*` ni `npm run db:rebuild` en `package.json`.
+
+## Scripts operativos fuera de npm
+Se ejecutan directamente desde PowerShell:
+- `scripts/analyze-backup.ps1`
+- `scripts/restore-backup.ps1`
+- `scripts/rebuild-supabase-db.ps1`
+- `scripts/pull-schema-no-docker.ps1`
+- `scripts/dev-backend.ps1`
+- `scripts/kill-dev-ports.ps1`
+- `scripts/prepare-packaged-db.js`
 
 ## Flujo local recomendado
-1. Instalar dependencias: `npm install`.
-2. Configurar variables (`.env` y opcional `.env.development`).
-3. Ejecutar `npm run prisma:generate`.
-4. Ejecutar `npm run prisma:migrate`.
-5. Levantar con `npm run dev`.
-6. Si la base está vacía, crear el primer admin desde la pantalla de login.
+1. `npm install`
+2. Crear `.env` a partir de `.env.example`
+3. Revisar `DATABASE_URL`, `JWT_SECRET`, `PORT`, `NODE_ENV`
+4. `npm run prisma:generate`
+5. `npm run prisma:migrate`
+6. `npm run dev`
+7. Si no existe ningún usuario, crear el primer `ADMIN` desde login
 
 ## Entorno y secretos
-- Archivo base: `.env`.
-- Override local no productivo: `.env.development`.
-- Carga efectiva: primero `.env`, luego `.env.development` (override) en `src/backend/config/loadEnv.ts`.
+- El backend carga `.env` y, fuera de producción, después `.env.development`.
+- En empaquetado, Electron puede leer `.env` junto al `.exe`, en `resources/` o en `userData`.
 - Variables críticas:
   - `DATABASE_URL`
   - `JWT_SECRET`
   - `PORT`
   - `NODE_ENV`
-- Variables Supabase para cliente/API, solo si trabajas con un flujo remoto o histórico:
-  - `SUPABASE_URL`
-  - `SUPABASE_ANON_KEY`
-  - `SUPABASE_SERVICE_KEY`
+- Variables opcionales vigentes:
+  - `VITE_API_URL`
+  - `GOOGLE_CALENDAR_CLIENT_ID`
+  - `GOOGLE_CALENDAR_CLIENT_SECRET`
+  - `GOOGLE_CALENDAR_REDIRECT_URI`
+  - `WHATSAPP_*`
+  - `SUPABASE_*` solo para flujos históricos, restore o soporte puntual
 
-## Particularidades importantes de desarrollo
-- `npm run dev` ejecuta `predev`, que mata procesos en puertos `3001`, `5173`, `5174` (`scripts/kill-dev-ports.ps1`).
-- Si falta `DATABASE_URL`, `scripts/dev-backend.ps1` intenta obtener credenciales temporales desde proyecto Supabase linkeado (`npx supabase db dump --dry-run --linked`).
-- Si falta `JWT_SECRET` en dev backend script, usa fallback local de desarrollo.
-- La app renderer usa `VITE_API_URL` o fallback `http://localhost:3001/api` (`src/renderer/utils/api.ts`).
+Nota importante sobre SQLite en desarrollo:
+`DATABASE_URL="file:./prisma/lucy3000.db"` se resuelve relativo a `prisma/schema.prisma`, así que el fichero acaba en `prisma/prisma/lucy3000.db`.
+
+## Estado funcional observado en código
+- Login con bootstrap del primer administrador:
+  - `GET /api/auth/bootstrap-status`
+  - `POST /api/auth/bootstrap-admin`
+- Roles disponibles: `ADMIN`, `MANAGER`, `EMPLOYEE`.
+- Páginas activas en renderer:
+  - `Dashboard`
+  - `Clients`
+  - `ClientDetail`
+  - `Appointments`
+  - `Services`
+  - `Products`
+  - `Sales`
+  - `Cash`
+  - `Ranking`
+  - `Settings`
+  - `Accounts` solo admin
+  - `Reports` solo admin
+  - `Sql` solo admin
+- `Settings` centraliza:
+  - impresora de tickets;
+  - Google Calendar;
+  - backups;
+  - logs y carpeta de datos local;
+  - reseteo de instalación local;
+  - importadores `.xlsx`.
+- Hay un asistente SQL admin para analizar e importar `01dat.sql`, pero no sustituye al flujo diario ni cubre ventas, caja ni referencias legacy de fotos.
 
 ## Convenciones de backend
 Para endpoints nuevos o cambios de contrato:
-1. Definir/actualizar esquema Zod en `src/backend/validators`.
-2. Aplicar `validateRequest(...)` en la ruta (`src/backend/routes/*`).
-3. Proteger con `authMiddleware` y `adminMiddleware` cuando aplique.
-4. Implementar lógica en controller con `try/catch` y códigos HTTP claros.
-5. Añadir/actualizar tests unitarios y smoke según impacto.
+1. Definir o ajustar esquema Zod en `src/backend/validators`.
+2. Aplicar `validateRequest(...)` en la ruta.
+3. Aplicar `authMiddleware` y `adminMiddleware` cuando corresponda.
+4. Mantener códigos HTTP y mensajes claros.
+5. Añadir o actualizar tests relevantes.
 
-Reglas actuales de seguridad:
-- `POST /api/auth/login` es público.
-- `POST /api/auth/register` requiere auth + rol ADMIN.
-- La mayoría de módulos de negocio usan `router.use(authMiddleware)`.
+Estado actual de seguridad:
+- Públicos:
+  - `POST /api/auth/login`
+  - `GET /api/auth/bootstrap-status`
+  - `POST /api/auth/bootstrap-admin`
+  - `GET /api/calendar/callback`
+- Solo admin en backend:
+  - `POST /api/auth/register`
+  - `/api/users/*`
+  - `/api/calendar/*` salvo callback
+  - `/api/sql/*`
+- Muchos módulos de negocio siguen protegidos solo por autenticación, no por rol fino.
 
 ## Convenciones de frontend
-- Consumir backend solo mediante `api` (`src/renderer/utils/api.ts`), no crear clientes HTTP paralelos.
-- El token JWT se gestiona desde `authStore` (persistido con Zustand).
-- Mantener consistencia visual con utilidades Tailwind globales (`btn`, `card`, `input`, `badge`) de `src/renderer/styles/index.css`.
-- Si cambia payload de API, actualizar tipos/uso en páginas y componentes afectados.
-- En nuevas pantallas, formularios, cards o modales, no añadir textos explicativos debajo de los títulos salvo que exista una necesidad funcional validada o instrucción explícita.
-- En botones nuevos, no usar emojis ni iconos decorativos junto al texto. Por defecto, el label del botón debe ir solo en texto, salvo instrucción explícita.
+- Consumir backend solo mediante `src/renderer/utils/api.ts`.
+- El token JWT se gestiona en `authStore`.
+- Mantener consistencia con utilidades globales de `src/renderer/styles/index.css`.
+- Si cambia un payload de API, actualizar frontend, validadores y tests.
+- En nuevas pantallas o modales, no añadir texto explicativo bajo títulos salvo necesidad funcional clara.
+- En botones nuevos, evitar iconografía decorativa junto al texto salvo instrucción explícita.
 
 ## Testing
-- Framework: Vitest (`vitest.config.ts`, entorno Node).
-- Patrón backend tests: mock de Prisma con `vi.mock('../../../src/backend/db', ...)`.
-- Helpers de test en `tests/backend/helpers` y mocks en `tests/backend/mocks`.
-- Recomendación mínima por cambio backend:
-  - Lógica de controller: test unitario.
-  - Validación/ruteo crítico: smoke test.
+- Framework: Vitest.
+- Hay suites en:
+  - `tests/backend/unit`
+  - `tests/backend/smoke`
+  - `tests/main`
+  - `tests/renderer/unit`
+- Patrón frecuente en backend: mock de Prisma con `vi.mock('../../../src/backend/db', ...)`.
+- Recomendación mínima:
+  - cambio en controller o servicio: test unitario;
+  - cambio de contrato o ruteo crítico: smoke test;
+  - cambio en bridge Electron o utilidades de renderer: test específico si existe suite cercana.
 
 ## Prisma y base de datos
-- No editar `dist/*` ni usar SQL manual si el cambio es de modelo persistente; preferir flujo Prisma.
+- No editar `dist/*`, `release/*` ni generar SQL manual para cambios persistentes normales.
 - Flujo estándar:
-  1. Editar `prisma/schema.prisma`.
-  2. Ejecutar `npm run prisma:generate`.
-  3. Ejecutar `npm run prisma:migrate`.
-  4. Verificar que se crea carpeta en `prisma/migrations`.
-- Evitar modificar migraciones históricas ya aplicadas salvo instrucción explícita.
+  1. editar `prisma/schema.prisma`;
+  2. `npm run prisma:generate`;
+  3. `npm run prisma:migrate`;
+  4. comprobar carpeta nueva en `prisma/migrations`.
+- El esquema actual ya incluye, entre otros:
+  - `AppointmentService`
+  - `AppointmentLegend`
+  - `AgendaBlock`
+  - `AgendaDayNote`
+  - `DashboardReminder`
+  - `PendingPayment`
+  - `PendingPaymentCollection`
+  - `CashCount`
+  - `GoogleCalendarConfig`
+  - campos legacy de importación en bonos y saldo
 
-## Backup, restore y reconstrucción
-- Scripts clave:
-  - `scripts/analyze-backup.ps1`
-  - `scripts/restore-backup.ps1`
-  - `scripts/rebuild-supabase-db.ps1`
-  - `scripts/pull-schema-no-docker.ps1`
-- Estos scripts están orientados a Windows/PowerShell y tooling PostgreSQL local (`tools/postgresql-17/...`) o PATH.
+## Compatibility migrations SQLite
+`src/backend/db.ts` mantiene guards para instalaciones antiguas.
+Hoy cubren, entre otros:
+- `users.username`
+- `account_balance_movements.paymentMethod`
+- refs legacy en `account_balance_movements`
+- `bonoTemplateId` y refs legacy en `bono_packs`
+- soporte de clienta invitada en `appointments`
+- `appointment_services`
+- `appointment_legends`
+- `agenda_blocks`
+- `agenda_day_notes`
+- `dashboard_reminders`
+- `pending_payments`
+- `pending_payment_collections`
 
-## Deployment
-- El canal oficial es el instalador local generado por `npm run build`.
-- El backend empaquetado arranca dentro de la app de escritorio.
-- Healthcheck interno esperado: `/health`.
+No deben seguir creciendo sin una decisión explícita: lo normal es migrar por Prisma.
+
+## Backup, restore y recuperación
+- El flujo operativo diario es el backup de escritorio desde `Settings`, no scripts externos.
+- El runtime local soporta:
+  - backup manual completo;
+  - restore desde snapshot completo o `.db`;
+  - listado de backups;
+  - carpeta configurable;
+  - auto-backup semanal simple.
+- La restauración SQL admin es un flujo aparte.
+- Los scripts PowerShell heredados de PostgreSQL/Supabase siguen existiendo solo para soporte histórico.
 
 ## Qué no tocar sin necesidad
-- No editar manualmente artefactos generados:
+- No editar manualmente:
   - `dist/`
   - `release/`
   - `node_modules/`
-- No versionar secretos ni archivos de entorno reales (`.env*`).
-- No romper compatibilidad de scripts PowerShell sin validar alternativa equivalente.
+- No versionar secretos ni `.env*` reales.
+- No romper scripts PowerShell sin dejar alternativa equivalente.
+- No usar `.claude/worktrees/*` como fuente de verdad; son copias auxiliares, no el proyecto activo.
 
-## Riesgos y deuda conocidos (prioridades activas)
-- Falta extender validaciones Zod a todos los módulos.
-- Falta cobertura de tests para módulos restantes (`clients`, `appointments`, `services`, `reports`, `notifications`).
-- Falta endurecer permisos por rol en rutas sensibles fuera de auth básica.
-- Hay documentación histórica desalineada en algunos puntos; validar con código y `ROADMAP.md`.
+## Riesgos y deuda activa
+- Endurecimiento de permisos por rol todavía incompleto.
+- Las compatibility migrations SQLite han crecido y deben consolidarse.
+- El asistente SQL tiene alcance deliberadamente parcial.
+- El auto-backup guarda `cronExpression`, pero la ejecución real sigue siendo un `setInterval` semanal.
+- Hay documentación histórica en carpetas auxiliares que puede no coincidir con el root actual.
 
 ## Checklist mínimo antes de cerrar cambios
-1. El cambio compila y no rompe `npm run build:backend` (o `npm run build` si afecta desktop/build).
-2. Tests relevantes pasan (`npm run test:unit` y/o `npm run test:smoke`).
-3. Si cambió contrato API, se actualizaron frontend + validators + tests.
-4. Si cambió modelo de datos, hay migración Prisma versionada.
-5. No se incluyeron secretos, dumps ni artefactos compilados por error.
+1. El cambio sigue siendo coherente con `README.md`, `ROADMAP.md`, `BACKUP_RESTORE.md` y `ARCHITECTURE.md`.
+2. Si toca backend, validar `npm run build:backend`.
+3. Si toca desktop o empaquetado, validar `npm run build`.
+4. Si cambia contrato API, actualizar validator + ruta/controller + frontend + tests.
+5. Si cambia modelo de datos, dejar migración Prisma versionada.
+6. No incluir secretos, dumps ni artefactos generados.

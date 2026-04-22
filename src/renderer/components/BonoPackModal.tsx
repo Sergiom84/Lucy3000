@@ -11,6 +11,16 @@ interface BonoPackModalProps {
   onClose: () => void
   clientId: string
   onSuccess: () => void
+  bonoPack?: {
+    id: string
+    name: string
+    service?: { id: string; name: string; category?: string | null } | null
+    bonoTemplateId?: string | null
+    totalSessions: number
+    price: number | string
+    expiryDate?: string | null
+    notes?: string | null
+  } | null
 }
 
 type BonoSearchOption = {
@@ -24,7 +34,7 @@ type BonoSearchOption = {
   service?: any
 }
 
-export default function BonoPackModal({ isOpen, onClose, clientId, onSuccess }: BonoPackModalProps) {
+export default function BonoPackModal({ isOpen, onClose, clientId, onSuccess, bonoPack = null }: BonoPackModalProps) {
   const [loading, setLoading] = useState(false)
   const [services, setServices] = useState<any[]>([])
   const [templates, setTemplates] = useState<any[]>([])
@@ -34,6 +44,7 @@ export default function BonoPackModal({ isOpen, onClose, clientId, onSuccess }: 
   const [formData, setFormData] = useState({
     name: '',
     serviceId: '',
+    bonoTemplateId: '',
     totalSessions: '5',
     price: '',
     expiryDate: '',
@@ -51,11 +62,19 @@ export default function BonoPackModal({ isOpen, onClose, clientId, onSuccess }: 
         .finally(() => {
           setCatalogLoading(false)
         })
-      setFormData({ name: '', serviceId: '', totalSessions: '5', price: '', expiryDate: '', notes: '' })
-      setBonoSearchQuery('')
+      setFormData({
+        name: bonoPack?.name || '',
+        serviceId: bonoPack?.service?.id || '',
+        bonoTemplateId: bonoPack?.bonoTemplateId || '',
+        totalSessions: bonoPack ? String(bonoPack.totalSessions || 1) : '5',
+        price: bonoPack ? Number(bonoPack.price || 0).toFixed(2).replace('.', ',') : '',
+        expiryDate: bonoPack?.expiryDate ? String(bonoPack.expiryDate).slice(0, 10) : '',
+        notes: bonoPack?.notes || ''
+      })
+      setBonoSearchQuery(bonoPack?.name || '')
       setIsBonoDropdownOpen(false)
     }
-  }, [isOpen])
+  }, [isOpen, bonoPack])
 
   const selectedService = useMemo(
     () => services.find((service) => service.id === formData.serviceId) || null,
@@ -104,6 +123,7 @@ export default function BonoPackModal({ isOpen, onClose, clientId, onSuccess }: 
     setFormData((prev) => ({
       ...prev,
       serviceId: service.id,
+      bonoTemplateId: '',
       name: `Bono ${serviceName}`,
       price: prev.price.trim()
         ? prev.price
@@ -119,6 +139,7 @@ export default function BonoPackModal({ isOpen, onClose, clientId, onSuccess }: 
     setFormData((prev) => ({
       ...prev,
       serviceId: template.serviceId || '',
+      bonoTemplateId: template.id || '',
       name: `${template.description} - ${template.serviceName}`,
       totalSessions: String(template.totalSessions || 1),
       price: Number(template.price || 0).toFixed(2).replace('.', ',')
@@ -131,6 +152,7 @@ export default function BonoPackModal({ isOpen, onClose, clientId, onSuccess }: 
     setFormData((prev) => ({
       ...prev,
       serviceId: '',
+      bonoTemplateId: '',
       name: value
     }))
   }
@@ -154,28 +176,44 @@ export default function BonoPackModal({ isOpen, onClose, clientId, onSuccess }: 
 
     setLoading(true)
     try {
-      await api.post('/bonos', {
+      const payload = {
         clientId,
         name: formData.name.trim(),
         serviceId: formData.serviceId || null,
+        bonoTemplateId: formData.bonoTemplateId || null,
         totalSessions,
         price: formData.price ? parseFloat(formData.price.replace(',', '.')) : 0,
         expiryDate: formData.expiryDate || null,
         notes: formData.notes.trim() || null
-      })
-      toast.success('Bono creado exitosamente')
+      }
+
+      if (bonoPack?.id) {
+        await api.put(`/bonos/${bonoPack.id}`, {
+          name: payload.name,
+          serviceId: payload.serviceId,
+          bonoTemplateId: payload.bonoTemplateId,
+          totalSessions: payload.totalSessions,
+          price: payload.price,
+          expiryDate: payload.expiryDate,
+          notes: payload.notes
+        })
+      } else {
+        await api.post('/bonos', payload)
+      }
+
+      toast.success(bonoPack?.id ? 'Bono actualizado exitosamente' : 'Bono creado exitosamente')
       onSuccess()
       onClose()
     } catch (error: any) {
-      console.error('Error creating bono:', error)
-      toast.error(error.response?.data?.error || 'Error al crear el bono')
+      console.error('Error saving bono:', error)
+      toast.error(error.response?.data?.error || (bonoPack?.id ? 'Error al actualizar el bono' : 'Error al crear el bono'))
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Nuevo Bono" maxWidth="md">
+    <Modal isOpen={isOpen} onClose={onClose} title={bonoPack?.id ? 'Editar Bono' : 'Nuevo Bono'} maxWidth="md">
       <form onSubmit={handleSubmit} className="space-y-4">
         <div
           className="relative"
@@ -304,7 +342,7 @@ export default function BonoPackModal({ isOpen, onClose, clientId, onSuccess }: 
           </button>
           <button type="submit" className="btn btn-primary" disabled={loading}>
             <Save className="w-4 h-4 mr-2" />
-            {loading ? 'Creando...' : 'Crear Bono'}
+            {loading ? (bonoPack?.id ? 'Guardando...' : 'Creando...') : bonoPack?.id ? 'Guardar cambios' : 'Crear Bono'}
           </button>
         </div>
       </form>

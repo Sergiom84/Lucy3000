@@ -1,93 +1,100 @@
 # Deployment y Distribución Local
 
-Estado actualizado: 2026-04-16
+Estado actualizado: 2026-04-21
 
 ## Alcance
 
-Este documento cubre el canal oficial de entrega de Lucy3000:
-
+Este documento cubre el canal oficial de entrega actual:
 - build local del producto;
 - empaquetado del instalador;
-- distribución del `.exe`;
-- comportamiento del runtime local una vez instalado.
+- comportamiento del runtime instalado.
 
-No existe despliegue remoto como canal oficial de esta versión.
+El canal operativo documentado sigue siendo escritorio local, con foco práctico en Windows.
 
 ## Pipeline de build
 
-El build principal es:
+El comando principal es:
 
 ```bash
 npm run build
 ```
 
-Ese comando ejecuta:
-
+Ese pipeline ejecuta:
 1. `npm run build:prepare-db`
 2. `tsc`
 3. `vite build`
 4. `npm run build:backend`
 5. `electron-builder`
 
-## Qué produce el build
+## Qué produce
 
 Salida principal:
+- instalador en `release/`;
+- frontend compilado en `dist/`;
+- backend compilado en `dist/backend/`.
 
-- instalador Windows en `release/`;
-- backend compilado en `dist/backend`;
-- SPA compilada en `dist/`.
-
-La preparación de base de datos:
-
-- deja la base empaquetada lista para usarse como semilla técnica;
-- no crea un usuario admin por defecto;
-- mantiene solo datos de soporte necesarios para arrancar.
+`build:prepare-db` deja lista la base empaquetada que se copiará al runtime local cuando haga falta.
+Esa base no debe llevar un administrador precargado.
 
 ## Comportamiento del runtime instalado
 
 En el primer arranque del `.exe`:
+1. Electron resuelve la carpeta de datos local del usuario.
+2. Busca `lucy3000.db`.
+3. Si no existe, copia la base empaquetada.
+4. Si no existe `jwt-secret.txt`, genera uno.
+5. Arranca el backend empaquetado.
+6. Espera respuesta de `/health`.
+7. Carga la SPA empaquetada.
 
-1. Electron busca la base SQLite del usuario.
-2. Si no existe, copia la base semilla empaquetada.
-3. Si no existe un `JWT_SECRET`, genera uno local.
-4. Arranca el backend empaquetado.
-5. Espera a `/health`.
-6. Abre la interfaz React.
+Si el runtime queda sin usuarios:
+- login entra en modo bootstrap;
+- el primer `ADMIN` se crea desde la propia interfaz.
 
-Cuando la base está vacía, la pantalla de login entra en modo bootstrap y permite crear el primer `ADMIN`.
+## Variables de entorno en empaquetado
 
-## Variables de entorno en el empaquetado
+El runtime empaquetado puede leer `.env` desde:
+- la carpeta del ejecutable;
+- `resources/`;
+- la carpeta de datos local del usuario.
 
-El runtime puede leer `.env` desde ubicaciones de ejecución relevantes. En escritorio interesa sobre todo:
+En producción, la ruta más operativa para ajustes por instalación suele ser `userData`.
 
-- `.env` junto al ejecutable;
-- `.env` en recursos de la app;
-- `.env` en el directorio de trabajo cuando aplique.
-
-En entornos no productivos, `.env.development` puede sobreescribir `.env`.
-
-Variables mínimas útiles:
+Variables críticas:
 
 ```env
 DATABASE_URL="file:./prisma/lucy3000.db"
-JWT_SECRET="cambia-este-valor"
+JWT_SECRET="opcional-en-empaquetado"
 PORT=3001
 NODE_ENV=production
 ```
 
-En un build empaquetado normal, la app puede generar el `JWT_SECRET` si no lo encuentra.
+Notas:
+- en empaquetado, `JWT_SECRET` puede generarse automáticamente;
+- Google Calendar requiere además `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET` y `GOOGLE_CALENDAR_REDIRECT_URI`.
 
-## Checklist previo a distribución
+## Runtime supportable desde la propia app
 
-### Verificación técnica
+La instalación ya permite:
+- abrir carpeta de datos;
+- abrir carpeta de logs;
+- restaurar backups;
+- configurar backups;
+- restablecer instalación local;
+- configurar impresora de tickets;
+- gestionar Google Calendar.
 
-- `npm run test`
+Eso reduce la necesidad de intervención manual sobre ficheros internos.
+
+## Checklist previo a distribuir
+
+### Técnico
+- `npm run build:backend`
 - `npm run build`
 - revisar que no se empaquetan secretos reales
-- revisar que no se incluyen dumps o artefactos accidentales
+- revisar que la base empaquetada no contiene usuarios de demo
 
-### Verificación funcional mínima
-
+### Funcional mínimo
 - instalación limpia;
 - arranque limpio;
 - bootstrap del primer admin;
@@ -96,50 +103,35 @@ En un build empaquetado normal, la app puede generar el `JWT_SECRET` si no lo en
 - alta de servicio;
 - creación de cita;
 - venta;
-- importación `.xlsx`;
 - backup manual;
 - restore manual;
-- impresión de ticket si el hardware objetivo existe.
-
-## Entrega del instalador
-
-Canal esperado:
-
-- entregar el `.exe` generado en `release/`;
-- acompañarlo solo de la documentación operativa necesaria;
-- no entregar bases de datos con usuarios reales;
-- no entregar `.env` con secretos reales embebidos.
+- impresión si el hardware objetivo aplica.
 
 ## Troubleshooting
 
-### El instalador compila pero la app no abre
-
+### La app no arranca
 - revisar logs del proceso principal;
-- confirmar que el backend empaquetado responde a `/health`;
-- revisar permisos de escritura en el directorio de datos del usuario.
+- comprobar que el puerto local del backend no esté ocupado;
+- confirmar permisos de escritura sobre la carpeta de datos local.
 
-### La app abre pero no deja iniciar sesión
+### La app arranca pero login “no cuadra”
+- puede que exista una instalación local anterior con otra base;
+- abre la carpeta de datos desde la propia app o desde el menú de ayuda;
+- si la instalación debe empezar de cero, usa “Restablecer instalación local”.
 
-- comprobar si la base está vacía y el login debería mostrar bootstrap;
-- revisar `JWT_SECRET`;
-- revisar que la base local no esté corrupta.
+### Google Calendar no conecta
+- comprobar el `.env` efectivo de esa instalación;
+- validar `GOOGLE_CALENDAR_REDIRECT_URI`;
+- revisar la pantalla `Settings`, que ya informa variables ausentes.
 
-### Fallos de base de datos
-
-- confirmar que `DATABASE_URL` resuelve a un fichero SQLite escribible;
-- revisar migraciones;
-- usar backup/restore antes de intervenir manualmente.
-
-### Problemas de impresión
-
-- revisar configuración de impresora en `Settings`;
-- validar que el equipo objetivo tenga acceso real a la impresora;
-- si se usa impresora de red, revisar host y puerto.
+### Restore problemático
+- usar primero el flujo de backup/restore propio de la app;
+- evitar reemplazar la base SQLite manualmente salvo soporte controlado;
+- recordar que restore de `.db` y restore de carpeta completa no son equivalentes.
 
 ## Fuera de alcance
 
 Este documento no cubre:
-
 - despliegues remotos como canal oficial;
-- topologías multiusuario remotas;
-- migraciones del producto a otra base de datos.
+- uso multiusuario sobre servidor remoto;
+- automatizaciones de infraestructura fuera del instalador.

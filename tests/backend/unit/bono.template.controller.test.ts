@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createBonoTemplate,
-  importBonoTemplatesFromExcel
+  deleteBonoTemplateCategory,
+  deleteBonoTemplateCategoryWithTemplates,
+  importBonoTemplatesFromExcel,
+  renameBonoTemplateCategory
 } from '../../../src/backend/controllers/bono.controller'
 import { createMockRequest, createMockResponse } from '../helpers/http'
 import { createWorkbookBuffer } from '../helpers/spreadsheet'
@@ -102,6 +105,146 @@ describe('bono.template.controller', () => {
       error: 'Ya existe un bono con ese tratamiento, descripción y número de sesiones'
     })
     expect(prismaMock.setting.upsert).not.toHaveBeenCalled()
+  })
+
+  it('renames a bonus family across the template catalog', async () => {
+    prismaMock.setting.findUnique.mockResolvedValue({
+      key: 'bono_templates_catalog',
+      value: JSON.stringify([
+        {
+          id: 'template-1',
+          category: 'Corporal',
+          description: 'Bono de 4 sesiones',
+          serviceId: 'service-1',
+          serviceName: 'Maderoterapia',
+          serviceLookup: 'MAD-01',
+          totalSessions: 4,
+          price: 220,
+          isActive: true,
+          createdAt: '2026-01-10T10:00:00.000Z'
+        }
+      ])
+    })
+    prismaMock.setting.upsert.mockResolvedValue(undefined)
+
+    const req = createMockRequest({
+      body: {
+        currentCategory: 'Corporal',
+        nextCategory: 'Corporal Premium'
+      }
+    })
+    const res = createMockResponse()
+
+    await renameBonoTemplateCategory(req as any, res)
+
+    const storedCatalog = JSON.parse(prismaMock.setting.upsert.mock.calls[0][0].update.value)
+    expect(storedCatalog[0]).toEqual(
+      expect.objectContaining({
+        category: 'Corporal Premium'
+      })
+    )
+    expect(res.json).toHaveBeenCalledWith({
+      message: 'Familia de bonos actualizada correctamente',
+      category: 'Corporal Premium',
+      affectedTemplates: 1
+    })
+  })
+
+  it('deletes a bonus family by moving its templates to another category', async () => {
+    prismaMock.setting.findUnique.mockResolvedValue({
+      key: 'bono_templates_catalog',
+      value: JSON.stringify([
+        {
+          id: 'template-1',
+          category: 'Corporal',
+          description: 'Bono de 4 sesiones',
+          serviceId: 'service-1',
+          serviceName: 'Maderoterapia',
+          serviceLookup: 'MAD-01',
+          totalSessions: 4,
+          price: 220,
+          isActive: true,
+          createdAt: '2026-01-10T10:00:00.000Z'
+        }
+      ])
+    })
+    prismaMock.setting.upsert.mockResolvedValue(undefined)
+
+    const req = createMockRequest({
+      body: {
+        category: 'Corporal',
+        replacementCategory: 'Bonos'
+      }
+    })
+    const res = createMockResponse()
+
+    await deleteBonoTemplateCategory(req as any, res)
+
+    const storedCatalog = JSON.parse(prismaMock.setting.upsert.mock.calls[0][0].update.value)
+    expect(storedCatalog[0]).toEqual(
+      expect.objectContaining({
+        category: 'Bonos'
+      })
+    )
+    expect(res.json).toHaveBeenCalledWith({
+      message: 'Familia de bonos eliminada correctamente',
+      category: 'Bonos',
+      affectedTemplates: 1
+    })
+  })
+
+  it('deletes a bonus family together with all its templates', async () => {
+    prismaMock.setting.findUnique.mockResolvedValue({
+      key: 'bono_templates_catalog',
+      value: JSON.stringify([
+        {
+          id: 'template-1',
+          category: 'Corporal',
+          description: 'Bono de 4 sesiones',
+          serviceId: 'service-1',
+          serviceName: 'Maderoterapia',
+          serviceLookup: 'MAD-01',
+          totalSessions: 4,
+          price: 220,
+          isActive: true,
+          createdAt: '2026-01-10T10:00:00.000Z'
+        },
+        {
+          id: 'template-2',
+          category: 'Facial',
+          description: 'Bono de 2 sesiones',
+          serviceId: 'service-2',
+          serviceName: 'Limpieza facial',
+          serviceLookup: 'LIMP-01',
+          totalSessions: 2,
+          price: 90,
+          isActive: true,
+          createdAt: '2026-01-12T10:00:00.000Z'
+        }
+      ])
+    })
+    prismaMock.setting.upsert.mockResolvedValue(undefined)
+
+    const req = createMockRequest({
+      body: {
+        category: 'Corporal'
+      }
+    })
+    const res = createMockResponse()
+
+    await deleteBonoTemplateCategoryWithTemplates(req as any, res)
+
+    const storedCatalog = JSON.parse(prismaMock.setting.upsert.mock.calls[0][0].update.value)
+    expect(storedCatalog).toHaveLength(1)
+    expect(storedCatalog[0]).toEqual(
+      expect.objectContaining({
+        category: 'Facial'
+      })
+    )
+    expect(res.json).toHaveBeenCalledWith({
+      message: 'Familia y bonos eliminados correctamente',
+      affectedTemplates: 1
+    })
   })
 
   it('merges imported bonus templates with the existing catalog', async () => {

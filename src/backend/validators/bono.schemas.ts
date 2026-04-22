@@ -35,6 +35,32 @@ export const accountBalanceHistoryQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional()
 })
 
+const bonoPackBodyShape = {
+  name: z.string().trim().min(1, 'El nombre del bono es obligatorio').max(200, 'El nombre del bono es demasiado largo'),
+  serviceId: z.string().uuid('Tratamiento asociado no válido').nullable().optional(),
+  bonoTemplateId: z.string().uuid('Invalid bonoTemplateId').nullable().optional(),
+  totalSessions: z
+    .coerce
+    .number()
+    .int('Las sesiones deben ser un entero')
+    .min(1, 'Las sesiones deben ser al menos 1')
+    .max(200, 'Las sesiones son demasiadas'),
+  price: z.coerce.number().finite().min(0, 'El precio no puede ser negativo').optional().default(0),
+  expiryDate: z.coerce.date().nullable().optional(),
+  notes: optionalNullableTextSchema(1000)
+} satisfies z.ZodRawShape
+
+export const createBonoPackBodySchema = z
+  .object({
+    clientId: z.string().uuid('Invalid clientId'),
+    ...bonoPackBodyShape
+  })
+  .strict()
+
+export const updateBonoPackBodySchema = z
+  .object(bonoPackBodyShape)
+  .strict()
+
 export const spreadsheetImportModeBodySchema = z
   .object({
     mode: z.enum(['preview', 'commit']).optional(),
@@ -80,6 +106,40 @@ export const createBonoTemplateBodySchema = z
       .max(200, 'Las sesiones son demasiadas'),
     price: z.coerce.number().finite().min(0, 'El precio no puede ser negativo'),
     isActive: z.boolean().optional().default(true)
+  })
+  .strict()
+
+const bonoTemplateCategoryNameSchema = z
+  .string()
+  .trim()
+  .min(1, 'La categoría es obligatoria')
+  .max(120, 'La categoría es demasiado larga')
+
+export const renameBonoTemplateCategoryBodySchema = z
+  .object({
+    currentCategory: bonoTemplateCategoryNameSchema,
+    nextCategory: bonoTemplateCategoryNameSchema
+  })
+  .strict()
+  .refine((payload) => payload.currentCategory !== payload.nextCategory, {
+    message: 'La nueva categoría debe ser distinta',
+    path: ['nextCategory']
+  })
+
+export const deleteBonoTemplateCategoryBodySchema = z
+  .object({
+    category: bonoTemplateCategoryNameSchema,
+    replacementCategory: bonoTemplateCategoryNameSchema
+  })
+  .strict()
+  .refine((payload) => payload.category !== payload.replacementCategory, {
+    message: 'La categoría de destino debe ser distinta',
+    path: ['replacementCategory']
+  })
+
+export const deleteBonoTemplateCategoryWithTemplatesBodySchema = z
+  .object({
+    category: bonoTemplateCategoryNameSchema
   })
   .strict()
 

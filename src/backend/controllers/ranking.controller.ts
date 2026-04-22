@@ -90,7 +90,7 @@ export const getClientRanking = async (_req: Request, res: Response) => {
 
       const firstService = completedStat?._min.date ? new Date(completedStat._min.date) : null
       const lastService = completedStat?._max.date ? new Date(completedStat._max.date) : null
-      const effectiveLastVisit = lastService ?? (client.lastVisit ? new Date(client.lastVisit) : null)
+      const effectiveLastVisit = lastService ?? null
 
       let visitRatio: number | null = null
       if (completedCount >= 2 && firstService && lastService) {

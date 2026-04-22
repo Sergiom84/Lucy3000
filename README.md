@@ -1,82 +1,53 @@
 # Lucy3000
 
-Aplicación de escritorio para gestión de estética construida con Electron, React, Express, Prisma y SQLite.
-
-Canal oficial de producto actual:
-
-- instalación local mediante `.exe`;
-- backend embebido dentro de la app de escritorio;
-- persistencia local SQLite por instalación.
-
-Quedan fuera del canal oficial de release:
-
-- backend remoto como topología recomendada;
-- Supabase como dependencia activa del runtime.
-
-Las referencias a Supabase o despliegues remotos se conservan solo como histórico, soporte o recuperación puntual.
+Aplicación de escritorio para gestión de estética con backend local embebido.
 
 ## Estado actual
+- Topología oficial: Electron + React/Vite + Express + Prisma + SQLite local.
+- Canal oficial de entrega: instalador de escritorio generado con `npm run build`.
+- Supabase queda como soporte histórico o flujos puntuales de recuperación, no como dependencia operativa del runtime actual.
+- El primer administrador ya no viene precargado: se crea por bootstrap desde login.
 
-Baseline verificado en esta pasada:
-
-- `npm run test` pasa.
-- `npm run build` pasa y genera instalador.
-- `npm audit --omit=dev` queda en `0 vulnerabilities`.
-- El producto ya no distribuye credenciales conocidas ni un admin precargado.
-- El primer administrador se crea mediante bootstrap desde la pantalla de login.
-- Las importaciones soportadas oficialmente son solo `.xlsx`.
-
-La fuente de verdad del estado funcional y la deuda activa es [ROADMAP.md](ROADMAP.md).
-
-## Qué hace la aplicación
-
-- Dashboard con métricas operativas.
-- Gestión de clientes con historial, saldo a cuenta, ranking, fotos, consentimientos y documentos.
-- Agenda de citas con calendario y soporte de clienta invitada.
-- Servicios, productos e inventario.
-- Ventas, tickets y caja.
-- Bonos, packs, sesiones y abonos.
-- Presupuestos.
-- Notificaciones y reportes.
-- Backups locales desde la propia app.
+## Qué hace hoy la app
+- Dashboard operativo.
+- Gestión de clientes con historial, saldo, ranking y assets locales.
+- Agenda de citas con:
+  - citas normales o de clienta invitada;
+  - leyendas de color;
+  - múltiples servicios por cita;
+  - bloqueos de agenda;
+  - notas diarias.
+- Servicios y productos con categorías e importación `.xlsx`.
+- Ventas, cobros pendientes, caja y arqueos.
+- Bonos, packs, sesiones y saldo a cuenta.
+- Usuarios y cuentas internas.
+- Reportes y presupuestos.
+- Backups locales y restore desde escritorio.
 - Integración opcional con Google Calendar.
+- Asistente admin para analizar e importar un `01dat.sql` legacy.
 
-## Arquitectura resumida
+## Autenticación y roles
+- Login normal: `POST /api/auth/login`
+- Bootstrap inicial:
+  - `GET /api/auth/bootstrap-status`
+  - `POST /api/auth/bootstrap-admin`
+- Roles observados en código:
+  - `ADMIN`
+  - `MANAGER`
+  - `EMPLOYEE`
+- Páginas admin-only en renderer:
+  - `Reports`
+  - `Accounts`
+  - `Sql`
 
-- `src/main/main.ts`: proceso principal de Electron, arranque del backend empaquetado, backups, impresión y assets locales.
-- `src/preload.ts`: bridge seguro con `contextBridge`.
-- `src/renderer/*`: SPA React con Zustand, Axios y lazy loading en rutas pesadas.
-- `src/backend/*`: API Express con validación Zod, controladores y Prisma.
-- `prisma/schema.prisma`: modelo de datos principal.
-- `prisma/migrations/*`: migraciones versionadas.
-
-La app de escritorio empaqueta frontend y backend. En producción local, Electron arranca el backend internamente y la UI React consume esa API local.
-
-## Bootstrap del primer administrador
-
-La distribución ya no incluye usuario demo ni seed de credenciales.
-
-Si la base de datos está vacía:
-
-- `GET /api/auth/bootstrap-status` devuelve `{ "required": true }`;
-- la pantalla de login muestra el formulario de creación del primer admin;
-- `POST /api/auth/bootstrap-admin` crea ese usuario `ADMIN` y devuelve el payload de autenticación.
-
-Cuando ya existe al menos un usuario:
-
-- `bootstrap-admin` devuelve `409`;
-- `POST /api/auth/register` sigue siendo un alta administrada y requiere un `ADMIN` autenticado.
-
-## Arranque local en desarrollo
+## Desarrollo local
 
 ### Requisitos
-
 - Node.js 18 o superior.
 - npm.
 - Windows es el entorno de referencia para scripts operativos y build del instalador.
 
-### Configuración mínima
-
+### Arranque
 1. Instala dependencias:
 
 ```bash
@@ -94,24 +65,25 @@ PORT=3001
 NODE_ENV=development
 ```
 
-4. Si necesitas overrides locales no productivos, usa `.env.development`. El backend carga primero `.env` y después `.env.development`.
-
-5. Genera Prisma y aplica migraciones:
+4. Genera Prisma y aplica migraciones:
 
 ```bash
 npm run prisma:generate
 npm run prisma:migrate
 ```
 
-6. Arranca la app:
+5. Arranca la app:
 
 ```bash
 npm run dev
 ```
 
-7. Si no hay usuarios, crea el primer admin desde la pantalla de login.
+6. Si no existe ningún usuario, crea el primer `ADMIN` desde login.
 
-## Scripts principales
+Nota:
+la URL SQLite anterior se resuelve relativa a `prisma/schema.prisma`, así que el fichero termina en `prisma/prisma/lucy3000.db`.
+
+## Scripts npm
 
 ```bash
 npm run dev
@@ -119,90 +91,83 @@ npm run dev:backend
 npm run dev:electron
 npm run build
 npm run build:backend
+npm run build:prepare-db
 npm run test
 npm run test:unit
 npm run test:smoke
 npm run prisma:generate
 npm run prisma:migrate
 npm run prisma:studio
-npm run backup:analyze
-npm run backup:restore
-npm run db:rebuild
 ```
+
+## Scripts operativos fuera de npm
+Se ejecutan directamente desde `scripts/`:
+- `scripts/analyze-backup.ps1`
+- `scripts/restore-backup.ps1`
+- `scripts/rebuild-supabase-db.ps1`
+- `scripts/pull-schema-no-docker.ps1`
+- `scripts/dev-backend.ps1`
+- `scripts/kill-dev-ports.ps1`
 
 ## Variables de entorno
 
-Variables críticas:
-
+### Críticas
 - `DATABASE_URL`
 - `JWT_SECRET`
 - `PORT`
 - `NODE_ENV`
 
-Variables opcionales según integración:
-
-- `VITE_API_URL` para desarrollo específico;
+### Opcionales
+- `VITE_API_URL`
 - `GOOGLE_CALENDAR_CLIENT_ID`
 - `GOOGLE_CALENDAR_CLIENT_SECRET`
 - `GOOGLE_CALENDAR_REDIRECT_URI`
 - `WHATSAPP_*`
-- `SUPABASE_*` solo para histórico o reconstrucción puntual
+- `SUPABASE_*` solo para soporte histórico o recuperación
 
-## Importaciones Excel
+## Arquitectura resumida
+- `src/main/main.ts`: proceso principal de Electron, backend empaquetado, backups, logs, impresión y carpeta de datos local.
+- `src/preload.ts`: bridge seguro con `contextBridge`.
+- `src/renderer/*`: SPA React con lazy loading de rutas pesadas.
+- `src/backend/*`: API Express con validación Zod.
+- `prisma/schema.prisma`: modelo de datos real.
+- `prisma/migrations/*`: migraciones versionadas.
 
-Los importadores oficiales de:
+## Importaciones y restauración
+- Flujo operativo diario:
+  - importadores `.xlsx` desde `Settings`;
+  - backups locales desde `Settings`.
+- Flujo legado aparte:
+  - asistente SQL admin para `01dat.sql`;
+  - scripts PowerShell históricos de PostgreSQL/Supabase.
 
-- clientes;
-- servicios;
-- productos;
-- catálogo de bonos;
+El asistente SQL no cubre ventas, caja ni referencias legacy de fotos.
 
-aceptan únicamente archivos `.xlsx`. La validación se hace tanto en frontend como en backend, con control de extensión, MIME y tamaño.
-
-## Convenciones UI
-
-Para nuevas pantallas o cambios visuales, mantener estas reglas por defecto:
-
-- no añadir textos explicativos justo debajo de títulos de secciones, cards, modales o bloques, salvo requisito funcional claro o petición explícita;
-- no usar emojis ni iconos decorativos dentro de botones nuevos; el texto del botón debe ir limpio, salvo que se pida expresamente otra cosa.
-
-## Build y distribución local
+## Build y distribución
 
 ```bash
 npm run build
 ```
 
-Esto:
-
-- prepara la base empaquetada sin crear un admin por defecto;
-- compila renderer y backend;
-- genera el instalador en `release/`.
+Ese pipeline:
+1. prepara la base empaquetada;
+2. compila renderer y backend;
+3. genera el instalador en `release/`.
 
 En producción de escritorio, Electron:
-
-- copia una base SQLite inicial a la carpeta de usuario si todavía no existe;
-- genera un `JWT_SECRET` local si no existe;
+- crea o reutiliza la base SQLite en la carpeta local del usuario;
+- genera `jwt-secret.txt` si no existe;
 - arranca el backend empaquetado;
-- abre la SPA local en la ventana de la app.
+- espera a `/health`;
+- carga la SPA empaquetada.
 
-La guía de distribución local está en [DEPLOYMENT.md](DEPLOYMENT.md).
-
-## Documentación operativa
-
-- [ROADMAP.md](ROADMAP.md): estado real, deuda y prioridades.
+## Documentación relacionada
+- [ROADMAP.md](ROADMAP.md): prioridades y deuda activa.
 - [ARCHITECTURE.md](ARCHITECTURE.md): topología y módulos.
-- [DEPLOYMENT.md](DEPLOYMENT.md): build, empaquetado y distribución local del `.exe`.
-- [BACKUP_RESTORE.md](BACKUP_RESTORE.md): backups locales y restauración histórica.
+- [BACKUP_RESTORE.md](BACKUP_RESTORE.md): backups locales, restore y flujos legacy.
+- [DEPLOYMENT.md](DEPLOYMENT.md): build y distribución del instalador.
 - [GOOGLE_CALENDAR_SETUP.md](GOOGLE_CALENDAR_SETUP.md): integración opcional con Google Calendar.
+- [AGENTS.md](AGENTS.md): instrucciones operativas para agentes y mantenimiento técnico.
 
-## Contribución
-
-Si vas a tocar código o docs:
-
-- mantén alineados contrato API, validadores, frontend y tests;
-- usa `npm run test` y `npm run build` como puerta mínima antes de cerrar cambios;
-- no documentes como hecho nada que no haya sido verificado en código o ejecución real.
-
-## Licencia
-
-MIT.
+## Regla práctica
+Si un markdown y el código discrepan, usa el código como referencia final y corrige la documentación antes de cerrar el cambio.

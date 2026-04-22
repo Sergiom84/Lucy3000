@@ -1,4 +1,4 @@
-import { CalendarPlus, Trash2 } from 'lucide-react'
+import { Trash2 } from 'lucide-react'
 import { formatCurrency, formatDate, formatDateTime } from '../utils/format'
 
 interface BonoSession {
@@ -31,6 +31,7 @@ interface BonoCardProps {
   }
   onConsume: (bonoPackId: string) => void
   onDelete: (bonoPackId: string) => void
+  onEdit: (bonoPackId: string) => void
   onScheduleAppointment: (bonoPackId: string) => void
 }
 
@@ -51,7 +52,7 @@ const toAppointmentDateTime = (appointment: { date: string; startTime: string })
 
 const getCabinLabel = (cabin: string) => cabin.replace('CABINA_', 'Cabina ')
 
-export default function BonoCard({ bonoPack, onConsume, onDelete, onScheduleAppointment }: BonoCardProps) {
+export default function BonoCard({ bonoPack, onConsume, onDelete, onEdit, onScheduleAppointment }: BonoCardProps) {
   const consumed = bonoPack.sessions.filter(s => s.status === 'CONSUMED').length
   const remainingSessions = Math.max(bonoPack.totalSessions - consumed, 0)
   const badge = statusBadge[bonoPack.status] || statusBadge.ACTIVE
@@ -162,8 +163,14 @@ export default function BonoCard({ bonoPack, onConsume, onDelete, onScheduleAppo
                 : 'Crear cita desde este bono'
             }
           >
-            <CalendarPlus className="w-4 h-4 mr-1" />
             Añadir cita
+          </button>
+          <button
+            onClick={() => onEdit(bonoPack.id)}
+            className="btn btn-secondary btn-sm"
+            title="Editar bono"
+          >
+            Editar bono
           </button>
           <button
             onClick={() => onConsume(bonoPack.id)}

@@ -7,6 +7,7 @@ import { whatsappService } from './whatsapp.service'
 const WHATSAPP_SENT_NOTIFICATION_TYPE = 'WHATSAPP_REMINDER_SENT'
 const APPOINTMENT_REMINDER_STATUSES: string[] = ['SCHEDULED', 'CONFIRMED']
 const DEFAULT_INTERVAL_MINUTES = 30
+const DEFAULT_REMINDER_DAYS_BEFORE = 4
 
 const appointmentReminderInclude = {
   client: {
@@ -48,10 +49,32 @@ const parseIntervalMinutes = (): number => {
   return Math.min(360, raw)
 }
 
-export const getTomorrowUtcRange = (now: Date = new Date()) => {
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0, 0))
-  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 2, 0, 0, 0, 0))
+const parseReminderDaysBefore = (): number => {
+  const raw = Number.parseInt(
+    String(process.env.WHATSAPP_REMINDER_DAYS_BEFORE ?? DEFAULT_REMINDER_DAYS_BEFORE),
+    10
+  )
+
+  if (!Number.isFinite(raw) || raw < 1) {
+    return DEFAULT_REMINDER_DAYS_BEFORE
+  }
+
+  return Math.min(30, raw)
+}
+
+export const getReminderUtcRange = (now: Date = new Date(), daysBefore = DEFAULT_REMINDER_DAYS_BEFORE) => {
+  const safeDaysBefore = Math.max(1, Math.floor(daysBefore))
+  const start = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + safeDaysBefore, 0, 0, 0, 0)
+  )
+  const end = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + safeDaysBefore + 1, 0, 0, 0, 0)
+  )
   return { start, end }
+}
+
+export const getTomorrowUtcRange = (now: Date = new Date()) => {
+  return getReminderUtcRange(now, 1)
 }
 
 class AppointmentReminderService {
@@ -68,7 +91,10 @@ class AppointmentReminderService {
     if (this.timer) return
 
     const intervalMinutes = parseIntervalMinutes()
-    console.log(`[WhatsApp reminders] Started. Interval: ${intervalMinutes} minutes`)
+    const reminderDaysBefore = parseReminderDaysBefore()
+    console.log(
+      `[WhatsApp reminders] Started. Interval: ${intervalMinutes} minutes. Lead time: ${reminderDaysBefore} day(s)`
+    )
 
     void this.runCycle()
 
@@ -88,7 +114,7 @@ class AppointmentReminderService {
     this.isRunning = true
 
     try {
-      await this.sendTomorrowReminders()
+      await this.sendScheduledReminders()
     } catch (error) {
       console.error('[WhatsApp reminders] Cycle failed:', error)
     } finally {
@@ -96,7 +122,7 @@ class AppointmentReminderService {
     }
   }
 
-  private async sendTomorrowReminders() {
+  private async sendScheduledReminders() {
     if (!whatsappService.isConfigured()) {
       if (!this.hasWarnedMissingConfiguration) {
         console.warn(
@@ -109,7 +135,8 @@ class AppointmentReminderService {
 
     this.hasWarnedMissingConfiguration = false
 
-    const { start, end } = getTomorrowUtcRange()
+    const reminderDaysBefore = parseReminderDaysBefore()
+    const { start, end } = getReminderUtcRange(new Date(), reminderDaysBefore)
     const appointments = await prisma.appointment.findMany({
       where: {
         reminder: true,

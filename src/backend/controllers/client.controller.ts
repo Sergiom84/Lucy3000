@@ -2,6 +2,9 @@ import { Request, Response } from 'express'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../db'
 import type { AuthRequest } from '../middleware/auth.middleware'
+import { googleCalendarService } from '../services/googleCalendar.service'
+import { isActiveAppointmentStatus } from '../utils/appointment-validation'
+import { logWarn } from '../utils/logger'
 import { loadWorkbookFromBuffer, worksheetToObjects } from '../utils/spreadsheet'
 import { syncDebtNotification } from '../utils/clientDebt'
 import { notifyAdminsAboutResourceCreation } from '../utils/notifications'
@@ -12,6 +15,47 @@ const buildSearchTerms = (value: string) =>
     .split(/\s+/)
     .map((term) => term.trim())
     .filter(Boolean)
+
+const reconcileCancelledAppointmentsFromGoogle = async (
+  appointments: Array<{ id: string; status: string; googleCalendarEventId?: string | null }>
+) => {
+  const candidates = appointments.filter(
+    (appointment) => isActiveAppointmentStatus(appointment.status) && Boolean(appointment.googleCalendarEventId)
+  )
+
+  if (candidates.length === 0) {
+    return false
+  }
+
+  let changed = false
+
+  for (const appointment of candidates) {
+    const remoteState = await googleCalendarService.getAppointmentEventState(appointment.googleCalendarEventId || null)
+
+    if (remoteState === 'CANCELLED' || remoteState === 'MISSING') {
+      await prisma.appointment.update({
+        where: { id: appointment.id },
+        data: {
+          status: 'CANCELLED',
+          googleCalendarEventId: remoteState === 'MISSING' ? null : appointment.googleCalendarEventId || null,
+          googleCalendarSyncStatus: 'SYNCED',
+          googleCalendarSyncError: null,
+          googleCalendarSyncedAt: new Date()
+        }
+      })
+      changed = true
+      continue
+    }
+
+    if (remoteState === 'ERROR') {
+      logWarn('Unable to reconcile appointment status from Google Calendar', {
+        appointmentId: appointment.id
+      })
+    }
+  }
+
+  return changed
+}
 
 type ClientSortBy = 'lastVisit' | 'name' | 'clientNumber' | 'totalSpent' | 'pendingAmount'
 type ClientSortDirection = 'asc' | 'desc'
@@ -86,6 +130,19 @@ const latestCompletedAppointmentDateSql = Prisma.sql`
   MAX(CASE WHEN a."status" = 'COMPLETED' THEN a."date" END)
 `
 
+const buildClientLastVisitOrderSql = (sortDirection: ClientSortDirection) =>
+  sortDirection === 'asc'
+    ? Prisma.sql`
+        CASE WHEN ${latestCompletedAppointmentDateSql} IS NULL THEN 1 ELSE 0 END ASC,
+        ${latestCompletedAppointmentDateSql} ASC,
+        c."createdAt" DESC
+      `
+    : Prisma.sql`
+        CASE WHEN ${latestCompletedAppointmentDateSql} IS NULL THEN 1 ELSE 0 END ASC,
+        ${latestCompletedAppointmentDateSql} DESC,
+        c."createdAt" DESC
+      `
+
 const buildClientOrderSql = (sortBy: ClientSortBy, sortDirection: ClientSortDirection) => {
   switch (sortBy) {
     case 'name':
@@ -102,9 +159,7 @@ const buildClientOrderSql = (sortBy: ClientSortBy, sortDirection: ClientSortDire
         : Prisma.sql`COALESCE(c."pendingAmount", 0) DESC, ${buildClientNameOrderSql('asc')}`
     case 'lastVisit':
     default:
-      return sortDirection === 'asc'
-        ? Prisma.sql`COALESCE(${latestCompletedAppointmentDateSql}, c."lastVisit", c."createdAt") ASC, c."createdAt" DESC`
-        : Prisma.sql`COALESCE(${latestCompletedAppointmentDateSql}, c."lastVisit", c."createdAt") DESC, c."createdAt" DESC`
+      return buildClientLastVisitOrderSql(sortDirection)
   }
 }
 
@@ -126,6 +181,7 @@ const buildClientSearchSql = (term: string) => {
 const getOrderedClientIds = async ({
   searchTerms,
   isActive,
+  pendingOnly,
   sortBy,
   sortDirection,
   skip,
@@ -133,6 +189,7 @@ const getOrderedClientIds = async ({
 }: {
   searchTerms: string[]
   isActive?: boolean
+  pendingOnly?: boolean
   sortBy: ClientSortBy
   sortDirection: ClientSortDirection
   skip?: number
@@ -146,6 +203,10 @@ const getOrderedClientIds = async ({
 
   if (typeof isActive === 'boolean') {
     whereClauses.push(Prisma.sql`c."isActive" = ${isActive}`)
+  }
+
+  if (pendingOnly) {
+    whereClauses.push(Prisma.sql`COALESCE(c."pendingAmount", 0) > 0`)
   }
 
   const whereSql =
@@ -215,7 +276,7 @@ const loadClientsByOrderedIds = async ({
       client.id,
       {
         ...client,
-        effectiveLastVisit: appointmentActivityByClient.get(client.id) ?? client.lastVisit ?? null
+        effectiveLastVisit: appointmentActivityByClient.get(client.id) ?? null
       }
     ])
   )
@@ -385,7 +446,7 @@ const normalizeClientPayload = (payload: Record<string, any>, requireIdentityFie
 
 export const getClients = async (req: Request, res: Response) => {
   try {
-    const { search, isActive, paginated, page, limit, includeCounts, sortBy, sortDirection } = req.query
+    const { search, isActive, pendingOnly, paginated, page, limit, includeCounts, sortBy, sortDirection } = req.query
     const normalizedSearch = typeof search === 'string' ? search.trim() : ''
     const searchTerms = normalizedSearch ? buildSearchTerms(normalizedSearch) : []
     const shouldPaginate = typeof paginated === 'boolean' ? paginated : paginated === 'true'
@@ -395,11 +456,15 @@ export const getClients = async (req: Request, res: Response) => {
     const normalizedSortDirection = normalizeClientSortDirection(normalizedSortBy, sortDirection)
     const isActiveFilter =
       isActive !== undefined ? (typeof isActive === 'boolean' ? isActive : isActive === 'true') : undefined
+    const pendingOnlyFilter =
+      pendingOnly !== undefined
+        ? (typeof pendingOnly === 'boolean' ? pendingOnly : pendingOnly === 'true')
+        : false
 
-    const where: Prisma.ClientWhereInput = {}
+    const baseWhere: Prisma.ClientWhereInput = {}
 
     if (normalizedSearch) {
-      where.AND = searchTerms.map((term) => ({
+      baseWhere.AND = searchTerms.map((term) => ({
         OR: [
           { firstName: { contains: term } },
           { lastName: { contains: term } },
@@ -414,8 +479,14 @@ export const getClients = async (req: Request, res: Response) => {
     }
 
     if (isActiveFilter !== undefined) {
-      where.isActive = isActiveFilter
+      baseWhere.isActive = isActiveFilter
     }
+
+    const listWhere: Prisma.ClientWhereInput = pendingOnlyFilter
+      ? {
+          AND: [baseWhere, { pendingAmount: { gt: 0 } }]
+        }
+      : baseWhere
 
     const include: Prisma.ClientInclude = {
       linkedClient: {
@@ -446,21 +517,23 @@ export const getClients = async (req: Request, res: Response) => {
         : 50
       const skip = (pageNumber - 1) * pageSize
 
-      const [total, activeCount, debtAlertCount, orderedClientIds] = await Promise.all([
-        prisma.client.count({ where }),
+      const [total, summaryTotal, activeCount, debtAlertCount, orderedClientIds] = await Promise.all([
+        prisma.client.count({ where: listWhere }),
+        prisma.client.count({ where: baseWhere }),
         prisma.client.count({
           where: {
-            AND: [where, { isActive: true }]
+            AND: [baseWhere, { isActive: true }]
           }
         }),
         prisma.client.count({
           where: {
-            AND: [where, { pendingAmount: { gt: 0 } }]
+            AND: [baseWhere, { pendingAmount: { gt: 0 } }]
           }
         }),
         getOrderedClientIds({
           searchTerms,
           isActive: isActiveFilter,
+          pendingOnly: pendingOnlyFilter,
           sortBy: normalizedSortBy,
           sortDirection: normalizedSortDirection,
           skip,
@@ -483,7 +556,7 @@ export const getClients = async (req: Request, res: Response) => {
           totalPages
         },
         summary: {
-          total,
+          total: summaryTotal,
           active: activeCount,
           debtAlerts: debtAlertCount
         }
@@ -493,6 +566,7 @@ export const getClients = async (req: Request, res: Response) => {
     const orderedClientIds = await getOrderedClientIds({
       searchTerms,
       isActive: isActiveFilter,
+      pendingOnly: pendingOnlyFilter,
       sortBy: normalizedSortBy,
       sortDirection: normalizedSortDirection
     })
@@ -511,131 +585,152 @@ export const getClients = async (req: Request, res: Response) => {
 export const getClientById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params
-
-    const client = await prisma.client.findUnique({
-      where: { id },
-      include: {
-        appointments: {
-          include: {
-            service: true,
-            user: {
-              select: { name: true }
-            }
+    const clientDetailInclude = {
+      appointments: {
+        include: {
+          service: true,
+          user: {
+            select: { name: true }
           },
-          orderBy: { date: 'desc' },
-          take: 50
+          sale: {
+            select: {
+              id: true,
+              status: true,
+              paymentMethod: true
+            }
+          }
         },
-        sales: {
-          include: {
-            items: true,
-            pendingPayment: {
-              include: {
-                collections: {
-                  orderBy: [{ operationDate: 'desc' }, { createdAt: 'desc' }],
-                  select: {
-                    id: true,
-                    amount: true,
-                    paymentMethod: true,
-                    showInOfficialCash: true,
-                    operationDate: true,
-                    createdAt: true
-                  }
+        orderBy: { date: 'desc' as const },
+        take: 50
+      },
+      sales: {
+        include: {
+          items: true,
+          pendingPayment: {
+            include: {
+              collections: {
+                orderBy: [{ operationDate: 'desc' as const }, { createdAt: 'desc' as const }],
+                select: {
+                  id: true,
+                  amount: true,
+                  paymentMethod: true,
+                  showInOfficialCash: true,
+                  operationDate: true,
+                  createdAt: true
                 }
               }
             }
-          },
-          orderBy: { date: 'desc' },
-          take: 10
+          }
         },
-        pendingPayments: {
-          include: {
-            collections: {
-              orderBy: [{ operationDate: 'desc' }, { createdAt: 'desc' }],
-              select: {
-                id: true,
-                amount: true,
-                paymentMethod: true,
-                showInOfficialCash: true,
-                operationDate: true,
-                createdAt: true
-              }
-            },
-            sale: {
-              select: {
-                id: true,
-                saleNumber: true,
-                date: true,
-                total: true,
-                status: true,
-                paymentMethod: true,
-                notes: true,
-                items: {
-                  select: {
-                    description: true,
-                    quantity: true,
-                    product: {
-                      select: {
-                        name: true
-                      }
-                    },
-                    service: {
-                      select: {
-                        name: true
-                      }
+        orderBy: { date: 'desc' as const },
+        take: 10
+      },
+      pendingPayments: {
+        include: {
+          collections: {
+            orderBy: [{ operationDate: 'desc' as const }, { createdAt: 'desc' as const }],
+            select: {
+              id: true,
+              amount: true,
+              paymentMethod: true,
+              showInOfficialCash: true,
+              operationDate: true,
+              createdAt: true
+            }
+          },
+          sale: {
+            select: {
+              id: true,
+              saleNumber: true,
+              date: true,
+              total: true,
+              status: true,
+              paymentMethod: true,
+              notes: true,
+              items: {
+                select: {
+                  description: true,
+                  quantity: true,
+                  product: {
+                    select: {
+                      name: true
+                    }
+                  },
+                  service: {
+                    select: {
+                      name: true
                     }
                   }
                 }
               }
             }
-          },
-          orderBy: [{ createdAt: 'desc' }]
+          }
         },
-        clientHistory: {
-          orderBy: { date: 'desc' }
-        },
-        bonoPacks: {
-          where: { clientId: id },
-          include: {
-            service: { select: { id: true, name: true } },
-            sessions: {
-              orderBy: { sessionNumber: 'asc' },
-              include: {
-                appointment: {
-                  select: {
-                    id: true,
-                    date: true,
-                    startTime: true,
-                    endTime: true,
-                    status: true,
-                    cabin: true
-                  }
+        orderBy: [{ createdAt: 'desc' as const }]
+      },
+      clientHistory: {
+        orderBy: { date: 'desc' as const }
+      },
+      bonoPacks: {
+        where: { clientId: id },
+        include: {
+          service: { select: { id: true, name: true } },
+          sessions: {
+            orderBy: { sessionNumber: 'asc' as const },
+            include: {
+              appointment: {
+                select: {
+                  id: true,
+                  date: true,
+                  startTime: true,
+                  endTime: true,
+                  status: true,
+                  cabin: true
                 }
               }
             }
-          },
-          orderBy: { purchaseDate: 'desc' }
-        },
-        linkedClient: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            externalCode: true
           }
         },
-        relatedClients: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            relationshipType: true
-          }
+        orderBy: { purchaseDate: 'desc' as const }
+      },
+      linkedClient: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          externalCode: true
+        }
+      },
+      relatedClients: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          relationshipType: true
         }
       }
+    } satisfies Prisma.ClientInclude
+
+    let client = await prisma.client.findUnique({
+      where: { id },
+      include: clientDetailInclude
     })
 
     if (!client) {
       return res.status(404).json({ error: 'Client not found' })
+    }
+
+    const refreshedFromGoogle = await reconcileCancelledAppointmentsFromGoogle(client.appointments)
+
+    if (refreshedFromGoogle) {
+      client = await prisma.client.findUnique({
+        where: { id },
+        include: clientDetailInclude
+      })
+
+      if (!client) {
+        return res.status(404).json({ error: 'Client not found' })
+      }
     }
 
     res.json(client)

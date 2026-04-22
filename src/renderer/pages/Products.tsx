@@ -19,6 +19,8 @@ const formatFamilyLabel = (value: string): string =>
     .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
     .join(' ')
 
+const DEFAULT_PRODUCT_CATEGORY = 'Sin categoría'
+
 type ViewMode = 'all' | 'lowStock' | null
 
 function LazyPanelLoader() {
@@ -34,6 +36,11 @@ export default function Products() {
   const [viewMode, setViewMode] = useState<ViewMode>(null)
   const [showFamilies, setShowFamilies] = useState(true)
   const [showModal, setShowModal] = useState(false)
+  const [showCategoryModal, setShowCategoryModal] = useState(false)
+  const [managingCategory, setManagingCategory] = useState<string | null>(null)
+  const [renameCategoryValue, setRenameCategoryValue] = useState('')
+  const [replacementCategoryValue, setReplacementCategoryValue] = useState(DEFAULT_PRODUCT_CATEGORY)
+  const [categorySaving, setCategorySaving] = useState(false)
   const [editingProduct, setEditingProduct] = useState<any>(null)
   const [showStockModal, setShowStockModal] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState<any>(null)
@@ -56,14 +63,18 @@ export default function Products() {
     }
   }
 
+  const refreshProductCatalogContext = async () => {
+    invalidateActiveProductsCache()
+    await fetchProducts()
+  }
+
   const handleDelete = async (id: string) => {
     if (!confirm('¿Estás seguro de eliminar este producto?')) return
 
     try {
       await api.delete(`/products/${id}`)
-      invalidateActiveProductsCache()
       toast.success('Producto eliminado')
-      fetchProducts()
+      await refreshProductCatalogContext()
     } catch (error) {
       toast.error('Error al eliminar producto')
     }
@@ -81,7 +92,125 @@ export default function Products() {
 
   const handleFormSuccess = () => {
     handleCloseModal()
-    fetchProducts()
+    void refreshProductCatalogContext()
+  }
+
+  const handleOpenCategoryModal = () => {
+    if (!selectedFamily) return
+
+    const suggestedReplacement =
+      familyOptions.find((family) => family !== selectedFamily) ||
+      (selectedFamily !== DEFAULT_PRODUCT_CATEGORY ? DEFAULT_PRODUCT_CATEGORY : '')
+
+    setManagingCategory(selectedFamily)
+    setRenameCategoryValue(selectedFamily)
+    setReplacementCategoryValue(suggestedReplacement)
+    setShowCategoryModal(true)
+  }
+
+  const handleCloseCategoryModal = () => {
+    setShowCategoryModal(false)
+    setManagingCategory(null)
+    setRenameCategoryValue('')
+    setReplacementCategoryValue(DEFAULT_PRODUCT_CATEGORY)
+    setCategorySaving(false)
+  }
+
+  const handleRenameCategory = async () => {
+    const currentCategory = String(managingCategory || '').trim()
+    const nextCategory = renameCategoryValue.trim()
+
+    if (!currentCategory) return
+
+    if (!nextCategory) {
+      toast.error('Indica el nuevo nombre de la familia')
+      return
+    }
+
+    if (nextCategory === currentCategory) {
+      toast.error('La familia debe tener un nombre distinto')
+      return
+    }
+
+    setCategorySaving(true)
+    try {
+      await api.patch('/products/categories', {
+        currentCategory,
+        nextCategory
+      })
+      await refreshProductCatalogContext()
+      setSelectedFamily(nextCategory)
+      toast.success('Familia actualizada')
+      handleCloseCategoryModal()
+    } catch (error: any) {
+      console.error('Rename product category error:', error)
+      toast.error(error.response?.data?.error || 'No se pudo actualizar la familia')
+      setCategorySaving(false)
+    }
+  }
+
+  const handleDeleteCategory = async () => {
+    const category = String(managingCategory || '').trim()
+    const replacementCategory = replacementCategoryValue.trim()
+
+    if (!category) return
+
+    if (!replacementCategory) {
+      toast.error('Indica a qué familia mover los productos')
+      return
+    }
+
+    if (replacementCategory === category) {
+      toast.error('La familia de destino debe ser distinta')
+      return
+    }
+
+    setCategorySaving(true)
+    try {
+      await api.delete('/products/categories', {
+        data: {
+          category,
+          replacementCategory
+        }
+      })
+      await refreshProductCatalogContext()
+      setSelectedFamily(replacementCategory)
+      toast.success('Familia eliminada')
+      handleCloseCategoryModal()
+    } catch (error: any) {
+      console.error('Delete product category error:', error)
+      toast.error(error.response?.data?.error || 'No se pudo eliminar la familia')
+      setCategorySaving(false)
+    }
+  }
+
+  const handleDeleteCategoryWithProducts = async () => {
+    const category = String(managingCategory || '').trim()
+
+    if (!category) return
+
+    const confirmed = confirm(
+      `Se eliminará la familia "${formatFamilyLabel(category)}" y todos sus productos. Esta acción no se puede deshacer.`
+    )
+
+    if (!confirmed) return
+
+    setCategorySaving(true)
+    try {
+      await api.delete('/products/categories/with-products', {
+        data: {
+          category
+        }
+      })
+      await refreshProductCatalogContext()
+      setSelectedFamily(null)
+      toast.success('Familia y productos eliminados')
+      handleCloseCategoryModal()
+    } catch (error: any) {
+      console.error('Delete product category with products error:', error)
+      toast.error(error.response?.data?.error || 'No se pudo eliminar la familia con sus productos')
+      setCategorySaving(false)
+    }
   }
 
   const handleStockMovement = (product: any) => {
@@ -101,7 +230,7 @@ export default function Products() {
 
   const familyCards = useMemo(() => {
     const grouped = products.reduce<Record<string, number>>((acc, product) => {
-      const family = String(product.category || '').trim() || 'Sin categoría'
+      const family = String(product.category || '').trim() || DEFAULT_PRODUCT_CATEGORY
       acc[family] = (acc[family] || 0) + 1
       return acc
     }, {})
@@ -114,6 +243,33 @@ export default function Products() {
       }))
       .sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' }))
   }, [products])
+
+  const familyOptions = useMemo(
+    () => familyCards.map((item) => item.family),
+    [familyCards]
+  )
+
+  const replacementFamilyOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [DEFAULT_PRODUCT_CATEGORY, ...familyOptions]
+            .map((family) => String(family || '').trim())
+            .filter((family) => family && family !== managingCategory)
+        )
+      ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' })),
+    [familyOptions, managingCategory]
+  )
+
+  const managedCategoryCount = useMemo(
+    () =>
+      managingCategory
+        ? products.filter(
+            (product) => String(product.category || DEFAULT_PRODUCT_CATEGORY).trim() === String(managingCategory).trim()
+          ).length
+        : 0,
+    [products, managingCategory]
+  )
 
   const filteredProducts = useMemo(() => {
     // If search has text, filter all products by search (+ optional family filter)
@@ -373,7 +529,18 @@ export default function Products() {
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
               {tableTitle}
             </h3>
-            <span className="badge badge-secondary">{filteredProducts.length}</span>
+            <div className="flex items-center gap-2">
+              {selectedFamily ? (
+                <button
+                  type="button"
+                  onClick={handleOpenCategoryModal}
+                  className="btn btn-secondary btn-sm"
+                >
+                  Gestionar familia
+                </button>
+              ) : null}
+              <span className="badge badge-secondary">{filteredProducts.length}</span>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -497,6 +664,106 @@ export default function Products() {
           onSuccess={handleFormSuccess}
           onCancel={handleCloseModal}
         />
+      </Modal>
+
+      <Modal
+        isOpen={showCategoryModal}
+        onClose={handleCloseCategoryModal}
+        title="Gestionar Familia"
+        maxWidth="md"
+      >
+        <div className="space-y-6">
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/40">
+            <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Familia seleccionada</p>
+            <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">
+              {managingCategory ? formatFamilyLabel(managingCategory) : '-'}
+            </p>
+          </div>
+
+          <div className="space-y-4 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+            <div>
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-900 dark:text-white">
+                Renombrar familia
+              </h3>
+            </div>
+            <div>
+              <label className="label">Nuevo nombre</label>
+              <input
+                type="text"
+                value={renameCategoryValue}
+                onChange={(event) => setRenameCategoryValue(event.target.value)}
+                className="input"
+                placeholder="Ej: Cabello premium"
+                maxLength={80}
+                disabled={categorySaving}
+              />
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => void handleRenameCategory()}
+                className="btn btn-primary"
+                disabled={categorySaving}
+              >
+                Guardar familia
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-4 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+            <div>
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-900 dark:text-white">
+                Mover productos
+              </h3>
+            </div>
+            <div>
+              <label className="label">Mover productos a</label>
+              <select
+                value={replacementCategoryValue}
+                onChange={(event) => setReplacementCategoryValue(event.target.value)}
+                className="input"
+                disabled={categorySaving}
+              >
+                <option value="">Selecciona una familia</option>
+                {replacementFamilyOptions.map((family) => (
+                  <option key={family} value={family}>
+                    {family}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => void handleDeleteCategory()}
+                className="btn btn-primary"
+                disabled={categorySaving}
+              >
+                Mover productos
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-4 rounded-xl border border-red-300 bg-red-50/40 p-4 dark:border-red-900 dark:bg-red-950/20">
+            <div>
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-red-700 dark:text-red-300">
+                Eliminar familia con productos
+              </h3>
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => void handleDeleteCategoryWithProducts()}
+                className="btn btn-danger"
+                disabled={categorySaving || managedCategoryCount === 0}
+              >
+                {managedCategoryCount > 0
+                  ? `Eliminar todo (${managedCategoryCount})`
+                  : 'Eliminar todo'}
+              </button>
+            </div>
+          </div>
+        </div>
       </Modal>
 
       {/* Modal de Movimiento de Stock */}

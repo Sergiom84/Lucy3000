@@ -187,6 +187,13 @@ export const updateAppointmentBodySchema = z
     validateAppointmentServiceSelection(payload, ctx)
   })
 
+export const chargeAppointmentWithBonoBodySchema = z
+  .object({
+    bonoPackId: z.string().uuid('Invalid bonoPackId').optional(),
+    sessionsToConsume: z.coerce.number().int().min(1, 'sessionsToConsume must be at least 1').optional()
+  })
+  .strict()
+
 export const createAppointmentLegendBodySchema = z
   .object({
     category: z.string().trim().min(1, 'La categoría es obligatoria').max(120, 'La categoría es demasiado larga'),

@@ -65,3 +65,37 @@ export const updateServiceBodySchema = z
   .refine((payload) => Object.keys(payload).length > 0, {
     message: 'At least one field is required'
   })
+
+const serviceCategoryNameSchema = z
+  .string()
+  .trim()
+  .min(1, 'Category is required')
+  .max(120, 'Category is too long')
+
+export const renameServiceCategoryBodySchema = z
+  .object({
+    currentCategory: serviceCategoryNameSchema,
+    nextCategory: serviceCategoryNameSchema
+  })
+  .strict()
+  .refine((payload) => payload.currentCategory !== payload.nextCategory, {
+    message: 'The new category must be different',
+    path: ['nextCategory']
+  })
+
+export const deleteServiceCategoryBodySchema = z
+  .object({
+    category: serviceCategoryNameSchema,
+    replacementCategory: serviceCategoryNameSchema
+  })
+  .strict()
+  .refine((payload) => payload.category !== payload.replacementCategory, {
+    message: 'Replacement category must be different',
+    path: ['replacementCategory']
+  })
+
+export const deleteServiceCategoryWithServicesBodySchema = z
+  .object({
+    category: serviceCategoryNameSchema
+  })
+  .strict()

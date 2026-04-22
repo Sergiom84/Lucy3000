@@ -29,7 +29,8 @@ describe('agendaBlock.controller', () => {
 
     await getAgendaBlockProfessionals(req as any, res)
 
-    expect(res.json).toHaveBeenCalledWith(['Lucy', 'Tamara'])
+    expect(res.json).toHaveBeenCalledWith(expect.arrayContaining(['Lucy', 'Tamara']))
+    expect(res.json).toHaveBeenCalledWith(expect.not.arrayContaining(['']))
   })
 
   it('creates an agenda block and persists the calendar sync status', async () => {

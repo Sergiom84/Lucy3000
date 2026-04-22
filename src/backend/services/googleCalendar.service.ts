@@ -13,6 +13,7 @@ const GOOGLE_CALENDAR_ENV_KEYS = [
   'GOOGLE_CALENDAR_CLIENT_SECRET',
   'GOOGLE_CALENDAR_REDIRECT_URI'
 ] as const
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 
 type AuthenticatedCalendarUser = {
   id: string
@@ -56,6 +57,12 @@ export type CalendarSyncResult = {
   status: CalendarSyncStatus
   error: string | null
 }
+
+type UpsertAppointmentEventOptions = {
+  forceSync?: boolean
+}
+
+export type CalendarEventRemoteState = 'ACTIVE' | 'CANCELLED' | 'MISSING' | 'DISABLED' | 'ERROR'
 
 export type GoogleCalendarOAuthSetupStatus = {
   configured: boolean
@@ -117,13 +124,25 @@ export const isGoogleInvalidGrantError = (error: unknown) => {
 }
 
 const toDatePart = (value: Date | string) => {
+  const formatInCalendarTimezone = (date: Date) =>
+    date.toLocaleDateString('sv-SE', { timeZone: GOOGLE_CALENDAR_TIMEZONE })
+
   if (value instanceof Date) {
-    return value.toISOString().slice(0, 10)
+    return formatInCalendarTimezone(value)
   }
 
   const normalized = String(value).trim()
   if (!normalized) {
     throw new Error('Appointment date is required')
+  }
+
+  if (ISO_DATE_PATTERN.test(normalized)) {
+    return normalized
+  }
+
+  const parsed = new Date(normalized)
+  if (!Number.isNaN(parsed.getTime())) {
+    return formatInCalendarTimezone(parsed)
   }
 
   return normalized.includes('T') ? normalized.split('T')[0] : normalized
@@ -239,13 +258,62 @@ export class GoogleCalendarService {
 
     if (typeof error === 'object' && error) {
       const maybeError = error as {
-        response?: { data?: { error_description?: unknown; error?: unknown } }
+        response?: {
+          data?: {
+            error_description?: unknown
+            error?: unknown
+          }
+        }
+        error?: unknown
+        errors?: Array<{ message?: unknown; reason?: unknown }>
+        code?: unknown
+        message?: unknown
       }
-      const responseMessage =
-        maybeError.response?.data?.error_description || maybeError.response?.data?.error
+      const responseData = maybeError.response?.data
+      const responseError = responseData?.error
+      const responseDescription = responseData?.error_description
 
-      if (responseMessage) {
-        return String(responseMessage)
+      if (responseDescription) {
+        return String(responseDescription)
+      }
+
+      if (typeof responseError === 'string') {
+        return responseError
+      }
+
+      if (responseError && typeof responseError === 'object') {
+        const nestedError = responseError as {
+          message?: unknown
+          status?: unknown
+          code?: unknown
+          errors?: Array<{ message?: unknown; reason?: unknown }>
+          details?: Array<{ message?: unknown }>
+        }
+        const nestedMessage = String(nestedError.message || '').trim()
+        const nestedStatus = String(nestedError.status || '').trim()
+        const nestedReason = String(nestedError.errors?.[0]?.reason || '').trim()
+        const nestedDetail = String(nestedError.details?.[0]?.message || nestedError.errors?.[0]?.message || '').trim()
+
+        if (nestedMessage) {
+          const qualifier = nestedStatus || nestedReason || String(nestedError.code || '').trim()
+          return qualifier ? `${nestedMessage} (${qualifier})` : nestedMessage
+        }
+
+        if (nestedDetail) {
+          return nestedDetail
+        }
+      }
+
+      if (typeof maybeError.message === 'string' && maybeError.message.trim()) {
+        return maybeError.message
+      }
+
+      const topLevelArrayMessage = String(
+        maybeError.errors?.[0]?.message || maybeError.errors?.[0]?.reason || maybeError.error || maybeError.code || ''
+      ).trim()
+
+      if (topLevelArrayMessage) {
+        return topLevelArrayMessage
       }
     }
 
@@ -354,10 +422,13 @@ export class GoogleCalendarService {
     })
   }
 
-  async upsertAppointmentEvent(input: AppointmentSyncInput): Promise<CalendarSyncResult> {
+  async upsertAppointmentEvent(
+    input: AppointmentSyncInput,
+    options: UpsertAppointmentEventOptions = {}
+  ): Promise<CalendarSyncResult> {
     const config = await this.getStoredConfig()
 
-    if (!config || !config.enabled) {
+    if (!config || (!config.enabled && !options.forceSync)) {
       return {
         eventId: input.existingEventId || null,
         status: 'DISABLED',
@@ -366,7 +437,7 @@ export class GoogleCalendarService {
     }
 
     try {
-      const { calendar, config: activeConfig } = await this.getAuthorizedCalendar()
+      const { calendar, config: activeConfig } = await this.getAuthorizedCalendar(options.forceSync)
       const requestBody = this.buildEventRequest(input)
       const sendUpdates = this.getSendUpdates(activeConfig, input.clientEmail, input.forceSendUpdates)
 
@@ -461,6 +532,38 @@ export class GoogleCalendarService {
         status: 'ERROR',
         error: await this.resolveSyncError(config.id, error)
       }
+    }
+  }
+
+  async getAppointmentEventState(eventId: string | null): Promise<CalendarEventRemoteState> {
+    if (!eventId) {
+      return 'MISSING'
+    }
+
+    const config = await this.getStoredConfig()
+    if (!config) {
+      return 'DISABLED'
+    }
+
+    try {
+      const { calendar, config: activeConfig } = await this.getAuthorizedCalendar(true)
+      const event = await calendar.events.get({
+        calendarId: activeConfig.calendarId,
+        eventId
+      })
+
+      return event.data.status === 'cancelled' ? 'CANCELLED' : 'ACTIVE'
+    } catch (error) {
+      if (isRecordNotFound(error)) {
+        return 'MISSING'
+      }
+
+      if (isGoogleInvalidGrantError(error)) {
+        await this.invalidateStoredConfig(config.id)
+        return 'ERROR'
+      }
+
+      return 'ERROR'
     }
   }
 

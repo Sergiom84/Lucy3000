@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   addStockMovement,
+  deleteProductCategory,
+  deleteProductCategoryWithProducts,
   getProducts,
-  importProductsFromExcel
+  importProductsFromExcel,
+  renameProductCategory
 } from '../../../src/backend/controllers/product.controller'
 import { createMockRequest, createMockResponse } from '../helpers/http'
 import { createWorkbookBuffer } from '../helpers/spreadsheet'
@@ -54,6 +57,97 @@ describe('product.controller.addStockMovement', () => {
       })
     )
     expect(res.json).toHaveBeenCalledWith([])
+  })
+
+  it('renames a product family across matching products', async () => {
+    prismaMock.product.findMany.mockResolvedValue([{ id: 'product-1' }, { id: 'product-2' }])
+    prismaMock.product.updateMany.mockResolvedValue({ count: 2 })
+
+    const req = createMockRequest({
+      body: {
+        currentCategory: 'Cuidado del Cabello',
+        nextCategory: 'Cabello Premium'
+      }
+    })
+    const res = createMockResponse()
+
+    await renameProductCategory(req as any, res)
+
+    expect(prismaMock.product.updateMany).toHaveBeenCalledWith({
+      where: { category: 'Cuidado del Cabello' },
+      data: { category: 'Cabello Premium' }
+    })
+    expect(res.json).toHaveBeenCalledWith({
+      message: 'Familia actualizada correctamente',
+      category: 'Cabello Premium',
+      affectedProducts: 2
+    })
+  })
+
+  it('deletes a product family by moving products to another category', async () => {
+    prismaMock.product.findMany.mockResolvedValue([{ id: 'product-1' }])
+    prismaMock.product.updateMany.mockResolvedValue({ count: 1 })
+
+    const req = createMockRequest({
+      body: {
+        category: 'Cuidado del Cabello',
+        replacementCategory: 'Sin categoría'
+      }
+    })
+    const res = createMockResponse()
+
+    await deleteProductCategory(req as any, res)
+
+    expect(prismaMock.product.updateMany).toHaveBeenCalledWith({
+      where: { category: 'Cuidado del Cabello' },
+      data: { category: 'Sin categoría' }
+    })
+    expect(res.json).toHaveBeenCalledWith({
+      message: 'Familia eliminada correctamente',
+      category: 'Sin categoría',
+      affectedProducts: 1
+    })
+  })
+
+  it('deletes a product family together with all its products when they are not linked elsewhere', async () => {
+    prismaMock.product.findMany.mockResolvedValue([{ id: 'product-1' }, { id: 'product-2' }])
+    prismaMock.product.deleteMany.mockResolvedValue({ count: 2 })
+
+    const req = createMockRequest({
+      body: {
+        category: 'Cuidado del Cabello'
+      }
+    })
+    const res = createMockResponse()
+
+    await deleteProductCategoryWithProducts(req as any, res)
+
+    expect(prismaMock.product.deleteMany).toHaveBeenCalledWith({
+      where: { category: 'Cuidado del Cabello' }
+    })
+    expect(res.json).toHaveBeenCalledWith({
+      message: 'Familia y productos eliminados correctamente',
+      affectedProducts: 2
+    })
+  })
+
+  it('blocks deleting a product family with all its products when one of them is linked', async () => {
+    prismaMock.product.findMany.mockResolvedValue([{ id: 'product-1' }])
+    prismaMock.product.deleteMany.mockRejectedValue({ code: 'P2003' })
+
+    const req = createMockRequest({
+      body: {
+        category: 'Cuidado del Cabello'
+      }
+    })
+    const res = createMockResponse()
+
+    await deleteProductCategoryWithProducts(req as any, res)
+
+    expect(res.status).toHaveBeenCalledWith(409)
+    expect(res.json).toHaveBeenCalledWith({
+      error: 'No se puede eliminar la familia porque alguno de sus productos está vinculado a ventas o presupuestos'
+    })
   })
 
   it('rejects negative quantity for non-adjustment movement', async () => {

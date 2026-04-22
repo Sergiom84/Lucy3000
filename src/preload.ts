@@ -35,6 +35,21 @@ const electronAPI = {
       }
     ) =>
       ipcRenderer.invoke('clientAssets:import', payload),
+    importGenerated: (
+      payload: {
+        assets: Array<{
+          clientId: string
+          clientName: string
+          kind: 'photos' | 'consents' | 'documents'
+          fileName: string
+          originalName: string
+          contentBase64: string
+          mimeType?: string | null
+          takenAt?: string | null
+          photoCategory?: 'before' | 'after' | 'treatments' | 'unclassified' | null
+        }>
+      }
+    ) => ipcRenderer.invoke('clientAssets:importGenerated', payload),
     delete: (payload: { clientId: string; clientName: string; assetId: string }) =>
       ipcRenderer.invoke('clientAssets:delete', payload),
     setPrimaryPhoto: (payload: { clientId: string; clientName: string; assetId: string }) =>
@@ -113,6 +128,24 @@ declare global {
             photoCategory?: 'before' | 'after' | 'treatments' | 'unclassified' | null
           }
         ) => Promise<any>
+        importGenerated: (
+          payload: {
+            assets: Array<{
+              clientId: string
+              clientName: string
+              kind: 'photos' | 'consents' | 'documents'
+              fileName: string
+              originalName: string
+              contentBase64: string
+              mimeType?: string | null
+              takenAt?: string | null
+              photoCategory?: 'before' | 'after' | 'treatments' | 'unclassified' | null
+            }>
+          }
+        ) => Promise<{
+          importedCount: number
+          clients: Array<{ clientId: string; clientName: string; baseDir: string }>
+        }>
         delete: (payload: { clientId: string; clientName: string; assetId: string }) => Promise<any>
         setPrimaryPhoto: (payload: { clientId: string; clientName: string; assetId: string }) => Promise<any>
         setPhotoCategory: (

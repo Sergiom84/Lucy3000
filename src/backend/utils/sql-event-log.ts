@@ -11,6 +11,10 @@ type SqlEventStep =
   | 'clientBonos'
   | 'accountBalances'
   | 'appointments'
+  | 'agendaBlocks'
+  | 'agendaNotes'
+  | 'assets'
+  | 'unsupported'
   | 'summary'
   | null
 

@@ -24,7 +24,19 @@ type SqlWarning = {
   code: string
   message: string
   severity: 'info' | 'warning'
-  step: 'file' | 'clients' | 'services' | 'products' | 'bonos' | 'clientBonos' | 'accountBalances' | 'appointments'
+  step:
+    | 'file'
+    | 'clients'
+    | 'services'
+    | 'products'
+    | 'bonos'
+    | 'clientBonos'
+    | 'accountBalances'
+    | 'appointments'
+    | 'agendaBlocks'
+    | 'agendaNotes'
+    | 'assets'
+    | 'unsupported'
   count?: number
 }
 
@@ -46,6 +58,7 @@ type SqlProfessionalPreview = {
 type SqlClientPreview = SqlEditableRow & {
   legacyId: string
   legacyClientNumber: string
+  barcode: string | null
   fullName: string
   firstName: string
   lastName: string
@@ -64,8 +77,27 @@ type SqlClientPreview = SqlEditableRow & {
   legacyProfessionalCode: string | null
   clientBrand: string | null
   appliedTariff: string | null
+  text9A: string | null
+  text9B: string | null
+  text15: string | null
+  text25: string | null
+  text100: string | null
+  integer1: number | null
+  integer2: number | null
+  giftVoucher: string | null
   notes: string | null
   photoRef: string | null
+  photoSkinType: string | null
+  webKey: string | null
+  discountProfile: string | null
+  globalClientNumber: string | null
+  globalUpdated: boolean
+  rejectPostal: boolean
+  rejectSms: boolean
+  rejectEmail: boolean
+  excludeSurvey: boolean
+  registeredSurvey: boolean
+  legacySha1: string | null
   isActive: boolean
 }
 
@@ -154,8 +186,118 @@ type SqlAppointmentPreview = SqlEditableRow & {
   status: string | null
   notes: string | null
   legacyPackNumber: string | null
-  isInternalBlock: boolean
   targetUserId?: string | null
+}
+
+type SqlAgendaBlockPreview = SqlEditableRow & {
+  legacyId: string
+  legacyClientNumber: string | null
+  date: string
+  startTime: string
+  endTime: string | null
+  durationMinutes: number | null
+  cabin: string | null
+  legacyProfessionalCode: string | null
+  legacyProfessionalName: string | null
+  notes: string | null
+}
+
+type SqlAgendaNotePreview = SqlEditableRow & {
+  legacyId: string
+  dayKey: string
+  legacyProfessionalCode: string | null
+  legacyProfessionalName: string | null
+  text: string
+  isActive: boolean
+  agenda: string | null
+  stationNumber: number | null
+}
+
+type SqlConsentPreview = SqlEditableRow & {
+  legacyId: string
+  clientNumber: string
+  clientName: string | null
+  health: string | null
+  medication: string | null
+  fileName: string
+}
+
+type SqlSignaturePreview = SqlEditableRow & {
+  legacyId: string
+  clientNumber: string
+  clientName: string | null
+  docType: string | null
+  fileName: string
+  legacyServiceNumber: string | null
+  signatureBase64: string | null
+}
+
+type SqlPhotoReferencePreview = {
+  tableName: string
+  rowCount: number
+}
+
+type SqlUnsupportedTablePreview = {
+  tableName: string
+  rowCount: number
+}
+
+type SqlGeneratedClientAsset = {
+  clientId: string
+  clientName: string
+  kind: 'consents' | 'documents'
+  fileName: string
+  originalName: string
+  mimeType: string
+  contentBase64: string
+  takenAt?: string | null
+}
+
+type SqlImportReport = {
+  stage: 'commit'
+  sourceName: string
+  created: {
+    legacyUsers: number
+    services: number
+    products: number
+    clients: number
+    bonoTemplates: number
+    clientBonos: number
+    accountBalances: number
+    appointments: number
+    agendaBlocks: number
+    agendaNotes: number
+  }
+  omitted: {
+    unselected: {
+      clients: number
+      services: number
+      products: number
+      bonoTemplates: number
+      clientBonos: number
+      accountBalances: number
+      appointments: number
+      agendaBlocks: number
+      agendaNotes: number
+      consents: number
+      signatures: number
+    }
+    photoReferencesSkipped: number
+    consentsWithoutClient: number
+    signaturesWithoutClient: number
+  }
+  warnings: string[]
+  unsupported: {
+    tables: SqlUnsupportedTablePreview[]
+  }
+  assetsGenerated: {
+    consents: number
+    signatures: number
+  }
+  generatedAssets: SqlGeneratedClientAsset[]
+  backupPolicy: {
+    requiresEmptyBusinessDatabase: true
+  }
 }
 
 type SqlAnalysisResult = {
@@ -171,6 +313,12 @@ type SqlAnalysisResult = {
     clientBonos: number
     accountBalances: number
     appointments: number
+    agendaBlocks: number
+    agendaNotes: number
+    consents: number
+    signatures: number
+    photoReferencesSkipped: number
+    unsupportedPopulatedTables: number
     warnings: number
   }
   warnings: SqlWarning[]
@@ -182,6 +330,12 @@ type SqlAnalysisResult = {
   clientBonos: SqlClientBonoPreview[]
   accountBalances: SqlAccountBalancePreview[]
   appointments: SqlAppointmentPreview[]
+  agendaBlocks: SqlAgendaBlockPreview[]
+  agendaNotes: SqlAgendaNotePreview[]
+  consents: SqlConsentPreview[]
+  signatures: SqlSignaturePreview[]
+  photoReferencesSkipped: SqlPhotoReferencePreview[]
+  unsupportedPopulatedTables: SqlUnsupportedTablePreview[]
 }
 
 type SqlEventLogEntry = {
@@ -190,7 +344,7 @@ type SqlEventLogEntry = {
   sessionId: string
   userId: string | null
   type: string
-  step: WizardStepId | null
+  step: SqlEventStep | null
   message: string
   payload?: Record<string, unknown>
 }
@@ -213,6 +367,8 @@ type WizardStepId =
   | 'accountBalances'
   | 'appointments'
   | 'summary'
+
+type SqlEventStep = WizardStepId | 'agendaBlocks' | 'agendaNotes' | 'assets' | 'unsupported'
 
 type WizardStep = {
   id: WizardStepId
@@ -676,6 +832,7 @@ function EditableDataStep<T extends SqlEditableRow>({
 export default function Sql() {
   const [file, setFile] = useState<File | null>(null)
   const [analysis, setAnalysis] = useState<SqlAnalysisResult | null>(null)
+  const [importReport, setImportReport] = useState<SqlImportReport | null>(null)
   const [currentStep, setCurrentStep] = useState<WizardStepId>('file')
   const [loading, setLoading] = useState(false)
   const [users, setUsers] = useState<LucyUser[]>([])
@@ -734,7 +891,7 @@ export default function Sql() {
   const trackEvent = useCallback(
     async (payload: {
       type: string
-      step?: WizardStepId | null
+      step?: SqlEventStep | null
       message: string
       payload?: Record<string, unknown>
     }) => {
@@ -812,6 +969,9 @@ export default function Sql() {
 
   const currentStepIndex = steps.findIndex((step) => step.id === currentStep)
   const stepEnabled = (stepId: WizardStepId) => stepId === 'file' || Boolean(analysis)
+  const desktopRestoreAvailable = Boolean(
+    window.electronAPI?.backup?.create && window.electronAPI?.clientAssets?.importGenerated
+  )
 
   const selectedSummary = useMemo(() => {
     if (!analysis) return null
@@ -824,9 +984,11 @@ export default function Sql() {
       clientBonos: analysis.clientBonos.filter((row) => row.selected).length,
       accountBalances: analysis.accountBalances.filter((row) => row.selected).length,
       appointments: analysis.appointments.filter((row) => row.selected).length,
-      pendingUserMappings: analysis.appointments.filter(
-        (row) => row.selected && !row.isInternalBlock && row.legacyProfessionalCode && !row.targetUserId
-      ).length
+      agendaBlocks: analysis.agendaBlocks.filter((row) => row.selected).length,
+      agendaNotes: analysis.agendaNotes.filter((row) => row.selected).length,
+      consents: analysis.consents.filter((row) => row.selected).length,
+      signatures: analysis.signatures.filter((row) => row.selected).length,
+      pendingUserMappings: analysis.appointments.filter((row) => row.selected && row.legacyProfessionalCode && !row.targetUserId).length
     }
   }, [analysis])
 
@@ -870,6 +1032,7 @@ export default function Sql() {
           : nextAnalysis
 
       setAnalysis(withMapping)
+      setImportReport(null)
       setCurrentStep('clients')
       await trackEvent({
         type: 'analyze_completed',
@@ -899,6 +1062,121 @@ export default function Sql() {
     }
   }
 
+  const handleImport = async () => {
+    if (!analysis) {
+      toast.error('Analiza primero el archivo SQL')
+      return
+    }
+
+    if (!desktopRestoreAvailable || !window.electronAPI) {
+      toast.error('La restauración requiere el bridge de escritorio disponible')
+      return
+    }
+
+    const payload = {
+      sessionId,
+      sourceName: analysis.sourceName,
+      professionals: analysis.professionals,
+      clients: analysis.clients,
+      services: analysis.services,
+      products: analysis.products,
+      bonoTemplates: analysis.bonoTemplates,
+      clientBonos: analysis.clientBonos,
+      accountBalances: analysis.accountBalances,
+      appointments: analysis.appointments,
+      agendaBlocks: analysis.agendaBlocks,
+      agendaNotes: analysis.agendaNotes,
+      consents: analysis.consents,
+      signatures: analysis.signatures,
+      photoReferencesSkipped: analysis.photoReferencesSkipped,
+      unsupportedPopulatedTables: analysis.unsupportedPopulatedTables
+    }
+
+    setLoading(true)
+    await trackEvent({
+      type: 'import_started',
+      step: 'summary',
+      message: `Se inicia la restauración SQL de ${analysis.sourceName}`,
+      payload: {
+        sourceName: analysis.sourceName
+      }
+    })
+
+    try {
+      const backupResult = await window.electronAPI.backup.create()
+      if (!backupResult?.success) {
+        throw new Error(backupResult?.message || 'No se pudo crear el backup previo')
+      }
+
+      await trackEvent({
+        type: 'backup_completed',
+        step: 'summary',
+        message: 'Backup previo creado antes de la restauración SQL',
+        payload: {
+          backupPath: backupResult.path || null
+        }
+      })
+
+      const response = await api.post('/sql/import', payload)
+      const nextReport: SqlImportReport = response.data
+      let finalReport = nextReport
+      let completedWithWarnings = false
+
+      if (nextReport.generatedAssets.length > 0) {
+        try {
+          const assetImportResult = await window.electronAPI.clientAssets.importGenerated({
+            assets: nextReport.generatedAssets
+          })
+
+          await trackEvent({
+            type: 'assets_imported',
+            step: 'summary',
+            message: `Assets legacy guardados tras la restauración SQL: ${assetImportResult.importedCount}`,
+            payload: assetImportResult
+          })
+        } catch (assetError: any) {
+          completedWithWarnings = true
+          const warningMessage = `La base se restauró, pero no se pudieron guardar los assets legacy: ${assetError?.message || 'Error desconocido'}`
+          finalReport = {
+            ...nextReport,
+            warnings: [warningMessage, ...nextReport.warnings]
+          }
+
+          await trackEvent({
+            type: 'assets_import_failed',
+            step: 'assets',
+            message: warningMessage,
+            payload: {
+              error: assetError?.message || 'Error desconocido'
+            }
+          })
+        }
+      }
+
+      setImportReport(finalReport)
+      await refreshEvents()
+      if (completedWithWarnings) {
+        toast.success('Restauración SQL completada con advertencias')
+      } else {
+        toast.success('Restauración SQL completada')
+      }
+    } catch (error: any) {
+      console.error('SQL import error:', error)
+      await trackEvent({
+        type: 'import_failed',
+        step: 'summary',
+        message: `Error restaurando ${analysis.sourceName}`,
+        payload: {
+          error: error.response?.data?.error || error.message || 'Error desconocido',
+          details: error.response?.data?.details || null
+        }
+      })
+      toast.error(error.response?.data?.error || error.message || 'No se pudo completar la restauración SQL')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const goToStep = (stepId: WizardStepId) => {
     if (!stepEnabled(stepId)) return
     setCurrentStep(stepId)
@@ -921,12 +1199,16 @@ export default function Sql() {
       goToStep={goToStep}
       stepEnabled={stepEnabled}
       moveStep={moveStep}
+      resetImportReport={() => setImportReport(null)}
       loading={loading}
       users={users}
       usersLoading={usersLoading}
       userOptions={userOptions}
       handleAnalyze={handleAnalyze}
+      handleImport={handleImport}
       selectedSummary={selectedSummary}
+      importReport={importReport}
+      desktopRestoreAvailable={desktopRestoreAvailable}
       sessionId={sessionId}
       eventEntries={eventEntries}
       eventLogPath={eventLogPath}
@@ -945,6 +1227,10 @@ type SqlSelectedSummary = {
   clientBonos: number
   accountBalances: number
   appointments: number
+  agendaBlocks: number
+  agendaNotes: number
+  consents: number
+  signatures: number
   pendingUserMappings: number
 }
 
@@ -958,12 +1244,16 @@ type SqlWizardContentProps = {
   goToStep: (stepId: WizardStepId) => void
   stepEnabled: (stepId: WizardStepId) => boolean
   moveStep: (direction: -1 | 1) => void
+  resetImportReport: () => void
   loading: boolean
   users: LucyUser[]
   usersLoading: boolean
   userOptions: Array<{ value: string; label: string }>
   handleAnalyze: () => Promise<void>
+  handleImport: () => Promise<void>
   selectedSummary: SqlSelectedSummary | null
+  importReport: SqlImportReport | null
+  desktopRestoreAvailable: boolean
   sessionId: string
   eventEntries: SqlEventLogEntry[]
   eventLogPath: string | null
@@ -999,12 +1289,16 @@ function SqlWizardContent({
   goToStep,
   stepEnabled,
   moveStep,
+  resetImportReport,
   loading,
   users,
   usersLoading,
   userOptions,
   handleAnalyze,
+  handleImport,
   selectedSummary,
+  importReport,
+  desktopRestoreAvailable,
   sessionId,
   eventEntries,
   eventLogPath,
@@ -1067,6 +1361,7 @@ function SqlWizardContent({
                 const nextFile = event.target.files?.[0] ?? null
                 setFile(nextFile)
                 setAnalysis(null)
+                resetImportReport()
                 if (nextFile) {
                   void trackEvent({
                     type: 'file_selected',
@@ -1782,32 +2077,24 @@ function SqlWizardContent({
           },
           {
             header: 'Estado',
-            render: (row) => (
-              <span className={`badge ${row.isInternalBlock ? 'badge-warning' : 'badge-success'}`}>
-                {row.isInternalBlock ? 'Bloque' : row.status || 'Cita'}
-              </span>
-            )
+            render: (row) => <span className="badge badge-success">{row.status || 'Cita'}</span>
           }
         ]}
         extraSummary={[
           {
-            label: 'Bloques internos',
-            value: String(analysis.appointments.filter((row) => row.isInternalBlock).length),
-            tone: analysis.appointments.some((row) => row.isInternalBlock) ? 'warning' : 'default'
+            label: 'Bloqueos aparte',
+            value: String(analysis.agendaBlocks.filter((row) => row.selected).length),
+            tone: analysis.agendaBlocks.some((row) => row.selected) ? 'warning' : 'default'
           },
           {
             label: 'Sin usuario Lucy',
             value: String(
-              analysis.appointments.filter(
-                (row) => row.selected && !row.isInternalBlock && row.legacyProfessionalCode && !row.targetUserId
-              ).length
+              analysis.appointments.filter((row) => row.selected && row.legacyProfessionalCode && !row.targetUserId)
+                .length
             ),
-            tone:
-              analysis.appointments.some(
-                (row) => row.selected && !row.isInternalBlock && row.legacyProfessionalCode && !row.targetUserId
-              )
-                ? 'warning'
-                : 'success'
+            tone: analysis.appointments.some((row) => row.selected && row.legacyProfessionalCode && !row.targetUserId)
+              ? 'warning'
+              : 'success'
           }
         ]}
         emptyMessage="No hay citas que coincidan con la búsqueda actual."
@@ -1867,7 +2154,6 @@ function SqlWizardContent({
             </div>
 
             <TextAreaField label="Notas" value={row.notes} onChange={(value) => updateRow({ notes: normalizeOptionalText(value) })} />
-            <CheckboxField label="Bloque interno" checked={row.isInternalBlock} onChange={(isInternalBlock) => updateRow({ isInternalBlock })} />
           </div>
         )}
       />
@@ -1889,6 +2175,10 @@ function SqlWizardContent({
           <SummaryCard label="Bonos cliente seleccionados" value={String(selectedSummary.clientBonos)} />
           <SummaryCard label="Abonos seleccionados" value={String(selectedSummary.accountBalances)} />
           <SummaryCard label="Citas seleccionadas" value={String(selectedSummary.appointments)} />
+          <SummaryCard label="Bloqueos agenda" value={String(selectedSummary.agendaBlocks)} />
+          <SummaryCard label="Notas agenda" value={String(selectedSummary.agendaNotes)} />
+          <SummaryCard label="Consentimientos" value={String(selectedSummary.consents)} />
+          <SummaryCard label="Firmas" value={String(selectedSummary.signatures)} />
           <SummaryCard
             label="Citas sin usuario Lucy"
             value={String(selectedSummary.pendingUserMappings)}
@@ -1917,7 +2207,11 @@ function SqlWizardContent({
                     ['Bonos', analysis.bonoTemplates.length, selectedSummary.bonoTemplates, analysis.bonoTemplates.reduce((sum, row) => sum + row.issues.length, 0)],
                     ['Bonos cliente', analysis.clientBonos.length, selectedSummary.clientBonos, analysis.clientBonos.reduce((sum, row) => sum + row.issues.length, 0)],
                     ['Abonos cliente', analysis.accountBalances.length, selectedSummary.accountBalances, analysis.accountBalances.reduce((sum, row) => sum + row.issues.length, 0)],
-                    ['Citas', analysis.appointments.length, selectedSummary.appointments, analysis.appointments.reduce((sum, row) => sum + row.issues.length, 0)]
+                    ['Citas', analysis.appointments.length, selectedSummary.appointments, analysis.appointments.reduce((sum, row) => sum + row.issues.length, 0)],
+                    ['Bloqueos agenda', analysis.agendaBlocks.length, selectedSummary.agendaBlocks, analysis.agendaBlocks.reduce((sum, row) => sum + row.issues.length, 0)],
+                    ['Notas agenda', analysis.agendaNotes.length, selectedSummary.agendaNotes, analysis.agendaNotes.reduce((sum, row) => sum + row.issues.length, 0)],
+                    ['Consentimientos', analysis.consents.length, selectedSummary.consents, analysis.consents.reduce((sum, row) => sum + row.issues.length, 0)],
+                    ['Firmas', analysis.signatures.length, selectedSummary.signatures, analysis.signatures.reduce((sum, row) => sum + row.issues.length, 0)]
                   ].map(([label, total, selected, issues]) => (
                     <tr key={String(label)}>
                       <td>{label}</td>
@@ -1939,8 +2233,83 @@ function SqlWizardContent({
                 <p>Tablas detectadas: <strong className="text-gray-900 dark:text-white">{analysis.detectedTables.length}</strong></p>
                 <p>Avisos totales: <strong className="text-gray-900 dark:text-white">{analysis.warnings.length}</strong></p>
                 <p>Usuarios Lucy cargados: <strong className="text-gray-900 dark:text-white">{users.length}</strong></p>
+                <p>Referencias de fotos omitidas: <strong className="text-gray-900 dark:text-white">{analysis.summary.photoReferencesSkipped}</strong></p>
+                <p>Tablas legacy no soportadas: <strong className="text-gray-900 dark:text-white">{analysis.summary.unsupportedPopulatedTables}</strong></p>
+                <p>Backup de escritorio: <strong className="text-gray-900 dark:text-white">{desktopRestoreAvailable ? 'Disponible' : 'No disponible'}</strong></p>
               </div>
             </div>
+
+            <div className="card">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Alcance pendiente</h3>
+              <div className="mt-4 space-y-3 text-sm text-gray-600 dark:text-gray-400">
+                <p>Referencias de fotos legacy detectadas: <strong className="text-gray-900 dark:text-white">{analysis.photoReferencesSkipped.reduce((sum, item) => sum + item.rowCount, 0)}</strong></p>
+                {analysis.photoReferencesSkipped.length > 0 ? (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
+                    {analysis.photoReferencesSkipped.map((item) => `${item.tableName}: ${item.rowCount}`).join(' · ')}
+                  </div>
+                ) : (
+                  <p>No se han detectado referencias de fotos legacy.</p>
+                )}
+                <p>Tablas pobladas fuera de v1: <strong className="text-gray-900 dark:text-white">{analysis.unsupportedPopulatedTables.length}</strong></p>
+                {analysis.unsupportedPopulatedTables.length > 0 ? (
+                  <div className="max-h-48 overflow-y-auto rounded-lg border border-gray-200 px-3 py-3 dark:border-gray-700">
+                    <div className="space-y-2">
+                      {analysis.unsupportedPopulatedTables.slice(0, 12).map((table) => (
+                        <p key={table.tableName} className="text-sm text-gray-700 dark:text-gray-300">
+                          {table.tableName}: {table.rowCount}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="card">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Restauración</h3>
+              <div className="mt-4 space-y-4 text-sm text-gray-600 dark:text-gray-400">
+                <p>
+                  La restauración crea primero un backup local, valida que la BD esté funcionalmente vacía y después
+                  repone clientes, tratamientos, productos, bonos, saldo, citas, bloqueos, notas y assets soportados.
+                </p>
+                {!desktopRestoreAvailable ? (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
+                    Este entorno no expone el bridge de escritorio necesario para crear el backup y guardar consentimientos o firmas.
+                  </div>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => void handleImport()}
+                  disabled={loading || !desktopRestoreAvailable}
+                  className="btn w-full disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loading ? 'Restaurando...' : 'Restablecer en BD vacía'}
+                </button>
+              </div>
+            </div>
+
+            {importReport ? (
+              <div className="card">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Último commit SQL</h3>
+                <div className="mt-4 space-y-3 text-sm text-gray-600 dark:text-gray-400">
+                  <p>Usuarios legacy creados: <strong className="text-gray-900 dark:text-white">{importReport.created.legacyUsers}</strong></p>
+                  <p>Bloqueos restaurados: <strong className="text-gray-900 dark:text-white">{importReport.created.agendaBlocks}</strong></p>
+                  <p>Notas restauradas: <strong className="text-gray-900 dark:text-white">{importReport.created.agendaNotes}</strong></p>
+                  <p>Consentimientos guardados: <strong className="text-gray-900 dark:text-white">{importReport.assetsGenerated.consents}</strong></p>
+                  <p>Firmas guardadas: <strong className="text-gray-900 dark:text-white">{importReport.assetsGenerated.signatures}</strong></p>
+                  <p>Fotos omitidas: <strong className="text-gray-900 dark:text-white">{importReport.omitted.photoReferencesSkipped}</strong></p>
+                  {importReport.warnings.length > 0 ? (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
+                      {importReport.warnings.slice(0, 8).map((warning) => (
+                        <p key={warning}>{warning}</p>
+                      ))}
+                    </div>
+                  ) : (
+                    <p>El commit no devolvió avisos adicionales.</p>
+                  )}
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -1957,7 +2326,9 @@ function SqlWizardContent({
         <div className="flex flex-wrap items-center gap-2">
           <span className="badge badge-info">Solo 01dat.sql compatible</span>
           <span className="badge badge-warning">Ventas, caja y fotos fuera</span>
-          <span className="badge badge-success">Modo seguro: sin escritura</span>
+          <span className={`badge ${desktopRestoreAvailable ? 'badge-success' : 'badge-warning'}`}>
+            {desktopRestoreAvailable ? 'Restauración segura habilitada' : 'Modo análisis: sin bridge de escritorio'}
+          </span>
         </div>
       </div>
 

@@ -111,6 +111,9 @@ const normalizeSearchText = (value: unknown) =>
     .toLowerCase()
     .trim()
 
+const normalizeCategoryMatch = (value: unknown) =>
+  normalizeSearchText(value).replace(/\s+/g, ' ')
+
 const parseTemplatePrice = (value: unknown) => {
   if (value === null || value === undefined || String(value).trim() === '') return 0
   const normalized = String(value).trim().replace(/\s*€\s*/g, '').replace(',', '.')
@@ -175,6 +178,137 @@ const writeBonoTemplates = async (templates: BonoTemplate[]) => {
   })
 }
 
+const normalizeBonoTemplateId = (value: unknown) => String(value || '').trim()
+
+const normalizeBonoPackTemplateName = (value: unknown) =>
+  normalizeSearchText(value)
+    .replace(/\s+/g, ' ')
+    .trim()
+
+const stripBonoPackSessionSuffix = (value: string) =>
+  value
+    .replace(/\b\d+\s*sesiones?\b/g, ' ')
+    .replace(/[·|-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+const scoreBonoTemplateNameMatch = (packName: string, template: BonoTemplate) => {
+  const normalizedPackName = normalizeBonoPackTemplateName(packName)
+  if (!normalizedPackName) return 0
+
+  const compactPackName = stripBonoPackSessionSuffix(normalizedPackName)
+  const normalizedDescription = normalizeBonoPackTemplateName(template.description)
+  const normalizedServiceName = normalizeBonoPackTemplateName(template.serviceName)
+  const exactCandidates = new Set(
+    [
+      normalizedDescription,
+      normalizedServiceName,
+      normalizeBonoPackTemplateName(`${template.description} ${template.serviceName}`),
+      normalizeBonoPackTemplateName(`${template.description} - ${template.serviceName}`),
+      normalizeBonoPackTemplateName(`${template.serviceName} ${template.description}`)
+    ].filter(Boolean)
+  )
+
+  if (exactCandidates.has(normalizedPackName)) return 4
+  if (compactPackName && exactCandidates.has(compactPackName)) return 3
+
+  const includesDescription = Boolean(normalizedDescription && normalizedPackName.includes(normalizedDescription))
+  const includesServiceName = Boolean(normalizedServiceName && normalizedPackName.includes(normalizedServiceName))
+
+  if (includesDescription && includesServiceName) return 3
+  if (includesDescription || includesServiceName) return 2
+
+  if (compactPackName) {
+    const compactIncludesDescription = Boolean(
+      normalizedDescription && compactPackName.includes(normalizedDescription)
+    )
+    const compactIncludesServiceName = Boolean(
+      normalizedServiceName && compactPackName.includes(normalizedServiceName)
+    )
+
+    if (compactIncludesDescription && compactIncludesServiceName) return 2
+    if (compactIncludesDescription || compactIncludesServiceName) return 1
+  }
+
+  return 0
+}
+
+const resolveBonoTemplateForPack = (
+  templates: BonoTemplate[],
+  payload: {
+    bonoTemplateId?: string | null
+    serviceId?: string | null
+    name?: string | null
+    totalSessions?: number | null
+  }
+) => {
+  const explicitTemplateId = normalizeBonoTemplateId(payload.bonoTemplateId)
+  const normalizedServiceId = String(payload.serviceId || '').trim()
+  const parsedTotalSessions = Number(payload.totalSessions || 0)
+
+  if (explicitTemplateId) {
+    const explicitTemplate = templates.find((template) => template.id === explicitTemplateId) || null
+    if (!explicitTemplate) {
+      throw new BonoOperationError(404, 'No se encontró el bono del catálogo seleccionado')
+    }
+
+    const matchesService = !normalizedServiceId || explicitTemplate.serviceId === normalizedServiceId
+    const matchesSessions =
+      !Number.isFinite(parsedTotalSessions) ||
+      parsedTotalSessions < 1 ||
+      Number(explicitTemplate.totalSessions || 0) === parsedTotalSessions
+
+    if (matchesService && matchesSessions) {
+      return explicitTemplate
+    }
+  }
+
+  if (!normalizedServiceId) {
+    return null
+  }
+
+  let candidates = templates.filter((template) => template.serviceId === normalizedServiceId)
+
+  if (Number.isFinite(parsedTotalSessions) && parsedTotalSessions > 0) {
+    const sameSessions = candidates.filter(
+      (template) => Number(template.totalSessions || 0) === parsedTotalSessions
+    )
+
+    if (sameSessions.length === 1) {
+      return sameSessions[0]
+    }
+
+    if (sameSessions.length > 1) {
+      candidates = sameSessions
+    }
+  }
+
+  if (candidates.length === 1) {
+    return candidates[0]
+  }
+
+  const scoredCandidates = candidates
+    .map((template) => ({
+      template,
+      score: scoreBonoTemplateNameMatch(payload.name || '', template)
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score)
+
+  if (scoredCandidates.length === 0) {
+    return null
+  }
+
+  if (
+    scoredCandidates.length === 1 ||
+    scoredCandidates[0].score > (scoredCandidates[1]?.score ?? 0)
+  ) {
+    return scoredCandidates[0].template
+  }
+
+  return null
+}
+
 const selectBonoTemplateSheet = (workbook: Workbook) => {
   let bestMatch: {
     sheetName: string
@@ -230,6 +364,7 @@ type PreparedClientBonoRow = {
   legacyRef: string
   name: string
   serviceId: string | null
+  bonoTemplateId: string | null
   totalSessions: number
   consumedSessions: number
   remainingSessions: number
@@ -654,11 +789,24 @@ const isExpiredStatusDate = (expiryDate: Date | null) => {
   return expiryDate < normalizedToday
 }
 
+const resolveBonoPackStatus = (payload: {
+  expiryDate: Date | null
+  totalSessions: number
+  consumedSessions: number
+}) => {
+  if (isExpiredStatusDate(payload.expiryDate)) {
+    return 'EXPIRED' as const
+  }
+
+  return payload.totalSessions - payload.consumedSessions <= 0 ? ('DEPLETED' as const) : ('ACTIVE' as const)
+}
+
 const buildClientBonoImportPreview = (
   rawRows: Record<string, unknown>[],
   clients: LegacyClientLookupRecord[],
   services: LegacyServiceLookupRecord[],
-  existingImportKeys: Set<string>
+  existingImportKeys: Set<string>,
+  bonoTemplates: BonoTemplate[]
 ) => {
   const ready: PreparedClientBonoRow[] = []
   const readyItems: ImportListItem[] = []
@@ -737,6 +885,11 @@ const buildClientBonoImportPreview = (
 
       const status = isExpiredStatusDate(expiryDate) ? 'EXPIRED' : 'ACTIVE'
       const name = `${description} · ${totalSessions} sesiones`
+      const resolvedTemplate = resolveBonoTemplateForPack(bonoTemplates, {
+        serviceId: serviceResolution.service?.id || null,
+        name,
+        totalSessions
+      })
       const displayLabel = buildClientDisplayLabel(clientCode, clientName)
       const clientResolution = resolveLegacyClient(clientCode, clientName, clientLookup)
       if (clientResolution.client && clientResolution.warning) {
@@ -780,6 +933,7 @@ const buildClientBonoImportPreview = (
           legacyRef,
           name,
           serviceId: serviceResolution.service?.id || null,
+          bonoTemplateId: resolvedTemplate?.id || null,
           totalSessions,
           consumedSessions,
           remainingSessions,
@@ -811,6 +965,7 @@ const buildClientBonoImportPreview = (
         legacyRef,
         name,
         serviceId: serviceResolution.service?.id || null,
+        bonoTemplateId: resolvedTemplate?.id || null,
         totalSessions,
         consumedSessions,
         remainingSessions,
@@ -1008,6 +1163,7 @@ const persistImportedClientBono = async (row: PreparedClientBonoRow) =>
       clientId: row.clientId,
       name: row.name,
       serviceId: row.serviceId,
+      bonoTemplateId: row.bonoTemplateId,
       legacyRef: row.legacyRef,
       importSource: CLIENT_BONO_IMPORT_SOURCE,
       totalSessions: row.totalSessions,
@@ -1207,7 +1363,7 @@ export const getClientBonos = async (req: Request, res: Response) => {
     const bonoPacks = await prisma.bonoPack.findMany({
       where: { clientId },
       include: {
-        service: { select: { id: true, name: true } },
+        service: { select: { id: true, name: true, category: true, serviceCode: true } },
         sessions: sessionInclude
       },
       orderBy: { purchaseDate: 'desc' }
@@ -1289,6 +1445,107 @@ export const createBonoTemplate = async (req: Request, res: Response) => {
     res.status(201).json(nextTemplate)
   } catch (error) {
     console.error('Create bono template error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const renameBonoTemplateCategory = async (req: Request, res: Response) => {
+  try {
+    const currentCategory = String(req.body.currentCategory || '').trim()
+    const nextCategory = String(req.body.nextCategory || '').trim()
+    const templates = await readBonoTemplates()
+
+    const matchingCount = templates.filter(
+      (template) => normalizeCategoryMatch(template.category) === normalizeCategoryMatch(currentCategory)
+    ).length
+
+    if (matchingCount === 0) {
+      return res.status(404).json({ error: 'La familia de bonos seleccionada no existe' })
+    }
+
+    const nextTemplates = templates.map((template) =>
+      normalizeCategoryMatch(template.category) === normalizeCategoryMatch(currentCategory)
+        ? {
+            ...template,
+            category: nextCategory
+          }
+        : template
+    )
+
+    await writeBonoTemplates(nextTemplates)
+
+    res.json({
+      message: 'Familia de bonos actualizada correctamente',
+      category: nextCategory,
+      affectedTemplates: matchingCount
+    })
+  } catch (error) {
+    console.error('Rename bono template category error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const deleteBonoTemplateCategory = async (req: Request, res: Response) => {
+  try {
+    const category = String(req.body.category || '').trim()
+    const replacementCategory = String(req.body.replacementCategory || '').trim()
+    const templates = await readBonoTemplates()
+
+    const matchingCount = templates.filter(
+      (template) => normalizeCategoryMatch(template.category) === normalizeCategoryMatch(category)
+    ).length
+
+    if (matchingCount === 0) {
+      return res.status(404).json({ error: 'La familia de bonos seleccionada no existe' })
+    }
+
+    const nextTemplates = templates.map((template) =>
+      normalizeCategoryMatch(template.category) === normalizeCategoryMatch(category)
+        ? {
+            ...template,
+            category: replacementCategory
+          }
+        : template
+    )
+
+    await writeBonoTemplates(nextTemplates)
+
+    res.json({
+      message: 'Familia de bonos eliminada correctamente',
+      category: replacementCategory,
+      affectedTemplates: matchingCount
+    })
+  } catch (error) {
+    console.error('Delete bono template category error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const deleteBonoTemplateCategoryWithTemplates = async (req: Request, res: Response) => {
+  try {
+    const category = String(req.body.category || '').trim()
+    const templates = await readBonoTemplates()
+
+    const matchingTemplates = templates.filter(
+      (template) => normalizeCategoryMatch(template.category) === normalizeCategoryMatch(category)
+    )
+
+    if (matchingTemplates.length === 0) {
+      return res.status(404).json({ error: 'La familia de bonos seleccionada no existe' })
+    }
+
+    const nextTemplates = templates.filter(
+      (template) => normalizeCategoryMatch(template.category) !== normalizeCategoryMatch(category)
+    )
+
+    await writeBonoTemplates(nextTemplates)
+
+    res.json({
+      message: 'Familia y bonos eliminados correctamente',
+      affectedTemplates: matchingTemplates.length
+    })
+  } catch (error) {
+    console.error('Delete bono template category with templates error:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 }
@@ -1504,7 +1761,14 @@ export const importClientBonosFromSpreadsheet = async (req: Request, res: Respon
         .map((bono) => buildClientBonoImportKey(bono.clientId, String(bono.legacyRef)))
     )
 
-    const preparedImport = buildClientBonoImportPreview(sheet.rows, clients, services, existingImportKeys)
+    const bonoTemplates = await readBonoTemplates()
+    const preparedImport = buildClientBonoImportPreview(
+      sheet.rows,
+      clients,
+      services,
+      existingImportKeys,
+      bonoTemplates
+    )
 
     if (mode === 'preview') {
       return res.json({
@@ -1596,6 +1860,7 @@ export const importClientBonosFromSpreadsheet = async (req: Request, res: Respon
           legacyRef: row.legacyRef,
           name: row.name,
           serviceId: row.serviceId,
+          bonoTemplateId: row.bonoTemplateId,
           totalSessions: row.totalSessions,
           consumedSessions: row.consumedSessions,
           remainingSessions: row.remainingSessions,
@@ -1830,7 +2095,7 @@ export const importAccountBalanceFromSpreadsheet = async (req: Request, res: Res
 
 export const createBonoPack = async (req: Request, res: Response) => {
   try {
-    const { clientId, name, serviceId, totalSessions, price, expiryDate, notes } = req.body
+    const { clientId, name, serviceId, bonoTemplateId, totalSessions, price, expiryDate, notes } = req.body
 
     if (!clientId || !name || !totalSessions || totalSessions < 1) {
       return res.status(400).json({ error: 'clientId, name and totalSessions (>= 1) are required' })
@@ -1842,12 +2107,32 @@ export const createBonoPack = async (req: Request, res: Response) => {
     }
 
     const parsedPrice = Number(price || 0)
+    const templates = await readBonoTemplates()
+    const matchedTemplate = resolveBonoTemplateForPack(templates, {
+      bonoTemplateId: bonoTemplateId || null,
+      serviceId: serviceId || null,
+      name,
+      totalSessions: parsedTotalSessions
+    })
+    const resolvedServiceId = matchedTemplate?.serviceId || normalizeBonoTemplateId(serviceId) || null
+
+    if (resolvedServiceId) {
+      const linkedService = await prisma.service.findUnique({
+        where: { id: resolvedServiceId },
+        select: { id: true }
+      })
+
+      if (!linkedService) {
+        return res.status(404).json({ error: 'No se encontró el tratamiento asociado al bono' })
+      }
+    }
 
     const bonoPack = await prisma.bonoPack.create({
       data: {
         clientId,
         name,
-        serviceId: serviceId || null,
+        serviceId: resolvedServiceId,
+        bonoTemplateId: matchedTemplate?.id || null,
         totalSessions: parsedTotalSessions,
         price: Number.isFinite(parsedPrice) ? parsedPrice : 0,
         expiryDate: expiryDate ? new Date(expiryDate) : null,
@@ -1859,7 +2144,7 @@ export const createBonoPack = async (req: Request, res: Response) => {
         }
       },
       include: {
-        service: { select: { id: true, name: true } },
+        service: { select: { id: true, name: true, category: true, serviceCode: true } },
         sessions: sessionInclude
       }
     })
@@ -1867,6 +2152,148 @@ export const createBonoPack = async (req: Request, res: Response) => {
     res.status(201).json(bonoPack)
   } catch (error) {
     console.error('Create bono pack error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const updateBonoPack = async (req: Request, res: Response) => {
+  try {
+    const { bonoPackId } = req.params
+    const { name, serviceId, bonoTemplateId, totalSessions, price, expiryDate, notes } = req.body
+
+    const parsedTotalSessions = Number.parseInt(String(totalSessions), 10)
+    if (!Number.isFinite(parsedTotalSessions) || parsedTotalSessions < 1) {
+      return res.status(400).json({ error: 'totalSessions must be a positive integer' })
+    }
+
+    const existingBonoPack = await prisma.bonoPack.findUnique({
+      where: { id: bonoPackId },
+      include: {
+        service: { select: { id: true, name: true, category: true, serviceCode: true } },
+        sessions: sessionInclude
+      }
+    })
+
+    if (!existingBonoPack) {
+      return res.status(404).json({ error: 'BonoPack not found' })
+    }
+
+    const parsedPrice = Number(price || 0)
+    const templates = await readBonoTemplates()
+    const matchedTemplate = resolveBonoTemplateForPack(templates, {
+      bonoTemplateId: bonoTemplateId || null,
+      serviceId: serviceId || null,
+      name,
+      totalSessions: parsedTotalSessions
+    })
+    const resolvedServiceId = matchedTemplate?.serviceId || normalizeBonoTemplateId(serviceId) || null
+
+    if (resolvedServiceId) {
+      const linkedService = await prisma.service.findUnique({
+        where: { id: resolvedServiceId },
+        select: { id: true }
+      })
+
+      if (!linkedService) {
+        return res.status(404).json({ error: 'No se encontró el tratamiento asociado al bono' })
+      }
+    }
+
+    const consumedSessions = existingBonoPack.sessions.filter((session) => session.status === 'CONSUMED')
+    if (parsedTotalSessions < consumedSessions.length) {
+      return res.status(400).json({
+        error: `No se puede dejar el bono por debajo de las ${consumedSessions.length} sesiones ya consumidas`
+      })
+    }
+
+    const sessionDelta = parsedTotalSessions - existingBonoPack.totalSessions
+    if (sessionDelta < 0) {
+      const removableSessions = existingBonoPack.sessions
+        .filter((session) => session.status === 'AVAILABLE' && !session.appointmentId)
+        .sort((left, right) => right.sessionNumber - left.sessionNumber)
+
+      if (removableSessions.length < Math.abs(sessionDelta)) {
+        return res.status(400).json({
+          error: 'No hay suficientes sesiones libres para reducir este bono. Libera antes las reservadas si hace falta.'
+        })
+      }
+
+      const protectedSessions = existingBonoPack.sessions.filter(
+        (session) =>
+          session.status === 'CONSUMED' ||
+          (session.status === 'AVAILABLE' && Boolean(session.appointmentId))
+      )
+      const highestProtectedSessionNumber = protectedSessions.reduce(
+        (highest, session) => Math.max(highest, Number(session.sessionNumber || 0)),
+        0
+      )
+
+      if (highestProtectedSessionNumber > parsedTotalSessions) {
+        return res.status(400).json({
+          error: 'No se puede reducir este bono sin alterar sesiones ya consumidas o reservadas. Ajusta solo sesiones libres del final.'
+        })
+      }
+    }
+
+    const normalizedExpiryDate = expiryDate ? new Date(expiryDate) : null
+    const nextStatus = resolveBonoPackStatus({
+      expiryDate: normalizedExpiryDate,
+      totalSessions: parsedTotalSessions,
+      consumedSessions: consumedSessions.length
+    })
+
+    await prisma.$transaction(async (tx) => {
+      if (sessionDelta > 0) {
+        await tx.bonoSession.createMany({
+          data: Array.from({ length: sessionDelta }, (_, index) => ({
+            bonoPackId,
+            sessionNumber: existingBonoPack.totalSessions + index + 1
+          }))
+        })
+      } else if (sessionDelta < 0) {
+        const removableSessionIds = existingBonoPack.sessions
+          .filter((session) => session.status === 'AVAILABLE' && !session.appointmentId)
+          .sort((left, right) => right.sessionNumber - left.sessionNumber)
+          .slice(0, Math.abs(sessionDelta))
+          .map((session) => session.id)
+
+        if (removableSessionIds.length > 0) {
+          await tx.bonoSession.deleteMany({
+            where: {
+              id: {
+                in: removableSessionIds
+              }
+            }
+          })
+        }
+      }
+
+      await tx.bonoPack.update({
+        where: { id: bonoPackId },
+        data: {
+          name,
+          serviceId: resolvedServiceId,
+          bonoTemplateId: matchedTemplate?.id || null,
+          totalSessions: parsedTotalSessions,
+          price: Number.isFinite(parsedPrice) ? parsedPrice : 0,
+          expiryDate: normalizedExpiryDate,
+          notes: notes || null,
+          status: nextStatus
+        }
+      })
+    })
+
+    const updatedBonoPack = await prisma.bonoPack.findUnique({
+      where: { id: bonoPackId },
+      include: {
+        service: { select: { id: true, name: true, category: true, serviceCode: true } },
+        sessions: sessionInclude
+      }
+    })
+
+    res.json(updatedBonoPack)
+  } catch (error) {
+    console.error('Update bono pack error:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 }

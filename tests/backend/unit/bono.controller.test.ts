@@ -1,15 +1,190 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  createBonoPack,
   createBonoAppointment,
   consumeSession,
   consumeAccountBalance,
   createAccountBalanceTopUp,
-  getAccountBalanceHistory
+  getAccountBalanceHistory,
+  updateBonoPack
 } from '../../../src/backend/controllers/bono.controller'
 import { createMockRequest, createMockResponse } from '../helpers/http'
 import { prismaMock, resetPrismaMock } from '../mocks/prisma.mock'
 
 vi.mock('../../../src/backend/db', async () => import('../mocks/db.mock'))
+
+describe('bono.controller createBonoPack', () => {
+  beforeEach(() => {
+    resetPrismaMock()
+  })
+
+  it('stores bonoTemplateId when the pack comes from the imported catalog', async () => {
+    prismaMock.setting.findUnique.mockResolvedValue({
+      key: 'bono_templates_catalog',
+      value: JSON.stringify([
+        {
+          id: 'template-antiacne-6',
+          category: 'Facial',
+          description: 'Bono de 6 sesiones',
+          serviceId: 'service-antiacne',
+          serviceName: 'Antiacne',
+          serviceLookup: 'ANTI',
+          totalSessions: 6,
+          price: 199,
+          isActive: true,
+          createdAt: '2026-04-21T00:00:00.000Z'
+        }
+      ])
+    })
+    prismaMock.service.findUnique.mockResolvedValue({
+      id: 'service-antiacne'
+    })
+    prismaMock.bonoPack.create.mockResolvedValue({
+      id: 'bono-pack-antiacne',
+      name: 'Bono de 6 sesiones - Antiacne',
+      bonoTemplateId: 'template-antiacne-6',
+      serviceId: 'service-antiacne',
+      sessions: [],
+      service: {
+        id: 'service-antiacne',
+        name: 'Antiacne',
+        category: 'Facial',
+        serviceCode: 'ANTI'
+      }
+    })
+
+    const req = createMockRequest({
+      body: {
+        clientId: 'client-1',
+        name: 'Bono de 6 sesiones - Antiacne',
+        serviceId: 'service-antiacne',
+        bonoTemplateId: 'template-antiacne-6',
+        totalSessions: 6,
+        price: 199
+      }
+    })
+    const res = createMockResponse()
+
+    await createBonoPack(req as any, res)
+
+    expect(prismaMock.bonoPack.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          clientId: 'client-1',
+          name: 'Bono de 6 sesiones - Antiacne',
+          serviceId: 'service-antiacne',
+          bonoTemplateId: 'template-antiacne-6',
+          totalSessions: 6,
+          price: 199
+        })
+      })
+    )
+    expect(res.status).toHaveBeenCalledWith(201)
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'bono-pack-antiacne',
+        bonoTemplateId: 'template-antiacne-6'
+      })
+    )
+  })
+})
+
+describe('bono.controller updateBonoPack', () => {
+  beforeEach(() => {
+    resetPrismaMock()
+  })
+
+  it('adds sessions when increasing totalSessions to correct an extra consumed session', async () => {
+    prismaMock.setting.findUnique.mockResolvedValue(null)
+    prismaMock.bonoPack.findUnique
+      .mockResolvedValueOnce({
+        id: 'bono-pack-1',
+        clientId: 'client-1',
+        name: 'Rollaction 5 sesiones',
+        totalSessions: 5,
+        status: 'ACTIVE',
+        serviceId: 'service-1',
+        bonoTemplateId: null,
+        service: { id: 'service-1', name: 'Rollaction', category: 'Corporal', serviceCode: 'ROLL' },
+        sessions: [
+          { id: 'session-1', sessionNumber: 1, status: 'CONSUMED', appointmentId: null, appointment: null },
+          { id: 'session-2', sessionNumber: 2, status: 'CONSUMED', appointmentId: null, appointment: null },
+          { id: 'session-3', sessionNumber: 3, status: 'AVAILABLE', appointmentId: null, appointment: null },
+          { id: 'session-4', sessionNumber: 4, status: 'AVAILABLE', appointmentId: null, appointment: null },
+          { id: 'session-5', sessionNumber: 5, status: 'AVAILABLE', appointmentId: null, appointment: null }
+        ]
+      })
+      .mockResolvedValueOnce({
+        id: 'bono-pack-1',
+        clientId: 'client-1',
+        name: 'Rollaction 5 sesiones',
+        totalSessions: 6,
+        status: 'ACTIVE',
+        serviceId: 'service-1',
+        bonoTemplateId: null,
+        service: { id: 'service-1', name: 'Rollaction', category: 'Corporal', serviceCode: 'ROLL' },
+        sessions: [
+          { id: 'session-1', sessionNumber: 1, status: 'CONSUMED', appointmentId: null, appointment: null },
+          { id: 'session-2', sessionNumber: 2, status: 'CONSUMED', appointmentId: null, appointment: null },
+          { id: 'session-3', sessionNumber: 3, status: 'AVAILABLE', appointmentId: null, appointment: null },
+          { id: 'session-4', sessionNumber: 4, status: 'AVAILABLE', appointmentId: null, appointment: null },
+          { id: 'session-5', sessionNumber: 5, status: 'AVAILABLE', appointmentId: null, appointment: null },
+          { id: 'session-6', sessionNumber: 6, status: 'AVAILABLE', appointmentId: null, appointment: null }
+        ]
+      })
+    prismaMock.service.findUnique.mockResolvedValue({ id: 'service-1' })
+
+    const tx = {
+      bonoSession: {
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+        deleteMany: vi.fn()
+      },
+      bonoPack: {
+        update: vi.fn().mockResolvedValue({ id: 'bono-pack-1' })
+      }
+    }
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx))
+
+    const req = createMockRequest({
+      params: { bonoPackId: 'bono-pack-1' },
+      body: {
+        name: 'Rollaction 5 sesiones',
+        serviceId: 'service-1',
+        bonoTemplateId: null,
+        totalSessions: 6,
+        price: 249,
+        expiryDate: null,
+        notes: 'Corrección manual'
+      }
+    })
+    const res = createMockResponse()
+
+    await updateBonoPack(req as any, res)
+
+    expect(tx.bonoSession.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          bonoPackId: 'bono-pack-1',
+          sessionNumber: 6
+        }
+      ]
+    })
+    expect(tx.bonoPack.update).toHaveBeenCalledWith({
+      where: { id: 'bono-pack-1' },
+      data: expect.objectContaining({
+        totalSessions: 6,
+        status: 'ACTIVE',
+        notes: 'Corrección manual'
+      })
+    })
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'bono-pack-1',
+        totalSessions: 6
+      })
+    )
+  })
+})
 
 describe('bono.controller account balance', () => {
   beforeEach(() => {

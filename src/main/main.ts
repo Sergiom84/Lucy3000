@@ -7,6 +7,17 @@ import { promises as fsPromises } from 'fs'
 import { ChildProcess, spawn } from 'child_process'
 import { printNetworkTicket } from './escpos'
 import {
+  AUTO_BACKUP_PREFIX,
+  MANUAL_BACKUP_PREFIX,
+  PRE_RESTORE_BACKUP_PREFIX,
+  createBackupSnapshot,
+  listBackupEntries,
+  pruneBackupEntries,
+  resolveBackupSource,
+  restoreDirectorySnapshot,
+  restoreSqliteSnapshot
+} from './backup'
+import {
   getMainLogFilePath,
   initializeMainLogging,
   installMainProcessErrorLogging,
@@ -19,6 +30,7 @@ import {
   createClientAssetManager,
   getContentTypeFromPath,
   type ClientAssetKind,
+  type ImportGeneratedClientAssetInput,
   type PhotoCategoryId
 } from './clientAssets'
 import { buildTicketHtml } from '../shared/ticketHtml'
@@ -716,6 +728,90 @@ const stopBackendGracefully = async () => {
   return exited
 }
 
+const runWithPackagedBackendPaused = async <T>(
+  taskLabel: string,
+  options: { restartOnSuccess: boolean },
+  task: () => Promise<T>
+) => {
+  const shouldPauseBackend = !isDevelopment && Boolean(backendProcess && backendProcess.exitCode === null)
+
+  if (!shouldPauseBackend) {
+    return task()
+  }
+
+  const stopped = await stopBackendGracefully()
+  if (!stopped) {
+    throw new Error(`No se pudo detener el backend para ${taskLabel}`)
+  }
+
+  let taskCompleted = false
+  let taskError: unknown = null
+
+  try {
+    const result = await task()
+    taskCompleted = true
+    return result
+  } catch (error) {
+    taskError = error
+    throw error
+  } finally {
+    if (!taskCompleted || options.restartOnSuccess) {
+      try {
+        await startBackendInProduction()
+      } catch (restartError) {
+        writeMainLog('error', `Failed to restart backend after ${taskLabel}`, restartError)
+        if (!taskError) {
+          throw restartError
+        }
+      }
+    }
+  }
+}
+
+const selectBackupRestoreSource = async () => {
+  const parentWindow = mainWindow ?? BrowserWindow.getFocusedWindow()
+  const showMessageBox = (options: Electron.MessageBoxOptions) =>
+    parentWindow ? dialog.showMessageBox(parentWindow, options) : dialog.showMessageBox(options)
+  const showOpenDialog = (options: Electron.OpenDialogOptions) =>
+    parentWindow ? dialog.showOpenDialog(parentWindow, options) : dialog.showOpenDialog(options)
+
+  const formatSelection = await showMessageBox({
+    type: 'question',
+    title: 'Restaurar backup',
+    message: 'Selecciona el formato del backup a restaurar',
+    detail: [
+      'Backup completo: restaura la base de datos y los assets locales del cliente.',
+      'Backup antiguo (.db): restaura solo la base de datos.'
+    ].join('\n'),
+    buttons: ['Backup completo', 'Backup antiguo (.db)', 'Cancelar'],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true
+  })
+
+  if (formatSelection.response === 2) {
+    return null
+  }
+
+  const dialogResult =
+    formatSelection.response === 0
+      ? await showOpenDialog({
+          title: 'Seleccionar carpeta de backup completo',
+          properties: ['openDirectory']
+        })
+      : await showOpenDialog({
+          title: 'Seleccionar backup .db',
+          properties: ['openFile'],
+          filters: [{ name: 'Base de datos SQLite', extensions: ['db'] }]
+        })
+
+  if (dialogResult.canceled || dialogResult.filePaths.length === 0) {
+    return null
+  }
+
+  return dialogResult.filePaths[0]
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -913,28 +1009,32 @@ ipcMain.handle('backup:create', async (_, destFolder?: string) => {
     await ensureDir(targetDir)
 
     const dbPath = getDbPath()
-    if (!fs.existsSync(dbPath)) {
-      return { success: false, message: 'Base de datos no encontrada' }
+    const snapshot = await runWithPackagedBackendPaused(
+      'crear el backup completo',
+      { restartOnSuccess: true },
+      () =>
+        createBackupSnapshot({
+          targetDir,
+          dbPath,
+          documentsClientsRootDir: getDocumentsClientsRootDir(),
+          legacyClientsRootDir: getLegacyClientsRootDir(),
+          prefix: MANUAL_BACKUP_PREFIX
+        })
+    )
+
+    await pruneBackupEntries(targetDir, MANUAL_BACKUP_PREFIX, 10)
+
+    writeMainLog('info', 'Manual backup created', {
+      backupName: snapshot.backupName,
+      backupPath: snapshot.backupPath,
+      includesClientAssets: snapshot.includesClientAssets
+    })
+
+    return {
+      success: true,
+      message: `Backup completo creado: ${snapshot.backupName}`,
+      path: snapshot.backupPath
     }
-
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-    const backupName = `lucy3000-backup-${timestamp}.db`
-    const backupPath = path.join(targetDir, backupName)
-
-    await fsPromises.copyFile(dbPath, backupPath)
-
-    // Keep only last 10 backups
-    const files = await fsPromises.readdir(targetDir)
-    const backupFiles = files
-      .filter(f => f.startsWith('lucy3000-backup-') && f.endsWith('.db'))
-      .sort()
-    if (backupFiles.length > 10) {
-      for (const old of backupFiles.slice(0, backupFiles.length - 10)) {
-        await fsPromises.unlink(path.join(targetDir, old)).catch(() => {})
-      }
-    }
-
-    return { success: true, message: `Backup creado: ${backupName}`, path: backupPath }
   } catch (error) {
     return { success: false, message: `Error al crear backup: ${error instanceof Error ? error.message : error}` }
   }
@@ -942,45 +1042,75 @@ ipcMain.handle('backup:create', async (_, destFolder?: string) => {
 
 ipcMain.handle('backup:restore', async () => {
   try {
-    const dialogResult = await dialog.showOpenDialog(mainWindow!, {
-      title: 'Seleccionar backup para restaurar',
-      properties: ['openFile'],
-      filters: [{ name: 'Base de datos SQLite', extensions: ['db'] }]
-    })
-
-    if (dialogResult.canceled || dialogResult.filePaths.length === 0) {
+    const sourcePath = await selectBackupRestoreSource()
+    if (!sourcePath) {
       return { success: false, message: 'Restauracion cancelada' }
     }
 
-    const sourcePath = dialogResult.filePaths[0]
+    const backupSource = await resolveBackupSource(sourcePath)
     const dbPath = getDbPath()
 
-    writeMainLog('info', 'Starting backup restore', { sourcePath, dbPath, isDevelopment })
+    writeMainLog('info', 'Starting backup restore', {
+      sourcePath,
+      dbPath,
+      isDevelopment,
+      backupFormat: backupSource.format,
+      includesClientAssets: backupSource.includesClientAssets
+    })
 
-    if (!isDevelopment) {
-      await stopBackendGracefully()
-    }
+    const safetySnapshot = await runWithPackagedBackendPaused(
+      'restaurar el backup',
+      { restartOnSuccess: false },
+      async () => {
+        const preRestoreSnapshot = await createBackupSnapshot({
+          targetDir: getUserDataDir(),
+          dbPath,
+          documentsClientsRootDir: getDocumentsClientsRootDir(),
+          legacyClientsRootDir: getLegacyClientsRootDir(),
+          prefix: PRE_RESTORE_BACKUP_PREFIX
+        })
 
-    // Create a safety backup before restoring
-    const safetyPath = dbPath + '.pre-restore'
-    if (fs.existsSync(dbPath)) {
-      await fsPromises.copyFile(dbPath, safetyPath)
-    }
+        await restoreSqliteSnapshot(backupSource, dbPath)
 
-    await fsPromises.copyFile(sourcePath, dbPath)
+        if (
+          backupSource.includesClientAssets &&
+          backupSource.documentsClientsSourcePath &&
+          backupSource.legacyClientsSourcePath
+        ) {
+          await restoreDirectorySnapshot(
+            backupSource.documentsClientsSourcePath,
+            getDocumentsClientsRootDir()
+          )
+          await restoreDirectorySnapshot(
+            backupSource.legacyClientsSourcePath,
+            getLegacyClientsRootDir()
+          )
+        }
+
+        return preRestoreSnapshot
+      }
+    )
 
     writeMainLog('info', 'Backup restored successfully', {
       sourcePath,
       dbPath,
-      safetyPath,
+      safetyPath: safetySnapshot.backupPath,
+      backupFormat: backupSource.format,
+      includesClientAssets: backupSource.includesClientAssets,
       requiresRelaunch: !isDevelopment
     })
 
+    const successMessage = backupSource.includesClientAssets
+      ? isDevelopment
+        ? 'Backup completo restaurado. Reinicia el entorno de desarrollo para aplicar los cambios.'
+        : 'Backup completo restaurado. La aplicacion se reiniciara para aplicar los cambios.'
+      : isDevelopment
+        ? 'Backup de base de datos restaurado. Los assets locales del cliente no se han modificado. Reinicia el entorno de desarrollo para aplicar los cambios.'
+        : 'Backup de base de datos restaurado. Los assets locales del cliente no se han modificado. La aplicacion se reiniciara para aplicar los cambios.'
+
     return {
       success: true,
-      message: isDevelopment
-        ? 'Backup restaurado. Reinicia el entorno de desarrollo para aplicar los cambios.'
-        : 'Backup restaurado. La aplicacion se reiniciara para aplicar los cambios.',
+      message: successMessage,
       requiresRelaunch: !isDevelopment
     }
   } catch (error) {
@@ -994,23 +1124,7 @@ ipcMain.handle('backup:list', async () => {
     const config = await getBackupConfig()
     await ensureDir(config.folder)
 
-    const files = await fsPromises.readdir(config.folder)
-    const backups = []
-
-    for (const file of files) {
-      if (!file.startsWith('lucy3000-backup-') || !file.endsWith('.db')) continue
-      const filePath = path.join(config.folder, file)
-      const stats = await fsPromises.stat(filePath)
-      backups.push({
-        name: file,
-        date: stats.mtime.toISOString(),
-        size: stats.size
-      })
-    }
-
-    backups.sort((a, b) => b.date.localeCompare(a.date))
-
-    return { success: true, backups }
+    return { success: true, backups: await listBackupEntries(config.folder) }
   } catch (error) {
     return { success: true, backups: [] }
   }
@@ -1057,20 +1171,26 @@ const setupAutoBackup = (config: { folder: string; autoEnabled: boolean; cronExp
       if (!fs.existsSync(dbPath)) return
 
       await ensureDir(config.folder)
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-      const backupName = `lucy3000-auto-backup-${timestamp}.db`
-      await fsPromises.copyFile(dbPath, path.join(config.folder, backupName))
+      const snapshot = await runWithPackagedBackendPaused(
+        'crear el backup automatico',
+        { restartOnSuccess: true },
+        () =>
+          createBackupSnapshot({
+            targetDir: config.folder,
+            dbPath,
+            documentsClientsRootDir: getDocumentsClientsRootDir(),
+            legacyClientsRootDir: getLegacyClientsRootDir(),
+            prefix: AUTO_BACKUP_PREFIX
+          })
+      )
 
-      // Keep only last 4 auto backups
-      const files = await fsPromises.readdir(config.folder)
-      const autoBackups = files.filter(f => f.startsWith('lucy3000-auto-backup-') && f.endsWith('.db')).sort()
-      if (autoBackups.length > 4) {
-        for (const old of autoBackups.slice(0, autoBackups.length - 4)) {
-          await fsPromises.unlink(path.join(config.folder, old)).catch(() => {})
-        }
-      }
+      await pruneBackupEntries(config.folder, AUTO_BACKUP_PREFIX, 4)
 
-      writeMainLog('info', 'Automatic backup created', { backupName, folder: config.folder })
+      writeMainLog('info', 'Automatic backup created', {
+        backupName: snapshot.backupName,
+        folder: config.folder,
+        includesClientAssets: snapshot.includesClientAssets
+      })
     } catch (error) {
       writeMainLog('error', 'Automatic backup failed', error)
     }
@@ -1117,6 +1237,13 @@ ipcMain.handle(
       kind: payload.kind,
       photoCategory: payload.photoCategory ?? null
     })
+  }
+)
+
+ipcMain.handle(
+  'clientAssets:importGenerated',
+  async (_, payload: { assets: ImportGeneratedClientAssetInput[] }) => {
+    return clientAssetManager.importGeneratedClientAssets(payload.assets || [])
   }
 )
 

@@ -1,4 +1,5 @@
 import { Request, Response } from 'express'
+import { Prisma } from '@prisma/client'
 import { prisma } from '../db'
 import type { AuthRequest } from '../middleware/auth.middleware'
 import { loadWorkbookFromBuffer, worksheetToObjects } from '../utils/spreadsheet'
@@ -10,6 +11,13 @@ const buildSearchTerms = (value: string) =>
     .split(/\s+/)
     .map((term) => term.trim())
     .filter(Boolean)
+
+const isForeignKeyConstraintError = (error: unknown) =>
+  error instanceof Prisma.PrismaClientKnownRequestError ||
+  (typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: string }).code === 'P2003')
 
 const parseSpanishDecimal = (value: unknown): number => {
   if (value === null || value === undefined) return NaN
@@ -139,7 +147,106 @@ export const deleteProduct = async (req: Request, res: Response) => {
 
     res.json({ message: 'Product deleted successfully' })
   } catch (error) {
+    if (isForeignKeyConstraintError(error)) {
+      return res.status(409).json({
+        error: 'No se puede eliminar el producto porque está vinculado a ventas o presupuestos'
+      })
+    }
+
     console.error('Delete product error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const renameProductCategory = async (req: Request, res: Response) => {
+  try {
+    const currentCategory = String(req.body.currentCategory || '').trim()
+    const nextCategory = String(req.body.nextCategory || '').trim()
+
+    const matchingProducts = await prisma.product.findMany({
+      where: { category: currentCategory },
+      select: { id: true }
+    })
+
+    if (matchingProducts.length === 0) {
+      return res.status(404).json({ error: 'La familia seleccionada no existe' })
+    }
+
+    const updateResult = await prisma.product.updateMany({
+      where: { category: currentCategory },
+      data: { category: nextCategory }
+    })
+
+    res.json({
+      message: 'Familia actualizada correctamente',
+      category: nextCategory,
+      affectedProducts: updateResult.count
+    })
+  } catch (error) {
+    console.error('Rename product category error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const deleteProductCategory = async (req: Request, res: Response) => {
+  try {
+    const category = String(req.body.category || '').trim()
+    const replacementCategory = String(req.body.replacementCategory || '').trim()
+
+    const matchingProducts = await prisma.product.findMany({
+      where: { category },
+      select: { id: true }
+    })
+
+    if (matchingProducts.length === 0) {
+      return res.status(404).json({ error: 'La familia seleccionada no existe' })
+    }
+
+    const updateResult = await prisma.product.updateMany({
+      where: { category },
+      data: { category: replacementCategory }
+    })
+
+    res.json({
+      message: 'Familia eliminada correctamente',
+      category: replacementCategory,
+      affectedProducts: updateResult.count
+    })
+  } catch (error) {
+    console.error('Delete product category error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const deleteProductCategoryWithProducts = async (req: Request, res: Response) => {
+  try {
+    const category = String(req.body.category || '').trim()
+
+    const matchingProducts = await prisma.product.findMany({
+      where: { category },
+      select: { id: true }
+    })
+
+    if (matchingProducts.length === 0) {
+      return res.status(404).json({ error: 'La familia seleccionada no existe' })
+    }
+
+    const deleteResult = await prisma.product.deleteMany({
+      where: { category }
+    })
+
+    res.json({
+      message: 'Familia y productos eliminados correctamente',
+      affectedProducts: deleteResult.count
+    })
+  } catch (error) {
+    if (isForeignKeyConstraintError(error)) {
+      return res.status(409).json({
+        error: 'No se puede eliminar la familia porque alguno de sus productos está vinculado a ventas o presupuestos'
+      })
+    }
+
+    console.error('Delete product category with products error:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 }

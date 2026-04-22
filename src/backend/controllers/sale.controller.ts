@@ -388,6 +388,7 @@ const createBonoPacksForSale = async (
           clientId: payload.clientId,
           name: match.template.description,
           serviceId: match.template.serviceId,
+          bonoTemplateId: match.template.id,
           totalSessions: match.template.totalSessions,
           price: match.template.price,
           notes: packNotes,
@@ -1055,6 +1056,7 @@ const rollbackSaleEffects = async (
     saleId: string
     saleNumber: string
     clientId: string | null
+    appointmentId: string | null
     total: number
     items: SaleItemInput[]
   }
@@ -1107,11 +1109,33 @@ const rollbackSaleEffects = async (
   })
 
   await deleteBonoPacksForSale(tx, payload.saleId)
+
+  if (payload.appointmentId) {
+    await tx.appointment.updateMany({
+      where: {
+        id: payload.appointmentId,
+        status: 'COMPLETED'
+      },
+      data: {
+        status: 'SCHEDULED'
+      }
+    })
+  }
 }
 
 const toHttpError = (error: unknown) => {
   if (error instanceof BusinessError) {
     return { statusCode: error.statusCode, message: error.message }
+  }
+
+  if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+    const targets = Array.isArray(error.meta?.target) ? error.meta.target.map((target) => String(target)) : []
+    if (targets.includes('appointmentId')) {
+      return {
+        statusCode: 409,
+        message: 'This appointment already has a linked sale. Open it from sales history before creating a new sale.'
+      }
+    }
   }
 
   return { statusCode: 500, message: 'Internal server error' }
@@ -1125,6 +1149,21 @@ const normalizeItemsFromSale = (items: { productId: string | null; serviceId: st
     quantity: item.quantity,
     price: Number(item.price)
   }))
+
+const getAppointmentSaleConflictMessage = (sale: { saleNumber?: string | null; status?: string | null }) => {
+  const saleNumberLabel = sale.saleNumber ? ` ${sale.saleNumber}` : ''
+  const saleStatus = String(sale.status || '').toUpperCase()
+
+  if (saleStatus === 'COMPLETED') {
+    return `This appointment already has the completed sale${saleNumberLabel}`
+  }
+
+  if (saleStatus === 'PENDING') {
+    return `This appointment already has the pending sale${saleNumberLabel}. Open it from sales to continue the collection.`
+  }
+
+  return `This appointment already has the linked sale${saleNumberLabel}. Open it from sales history before creating a new sale.`
+}
 
 export const getSales = async (req: Request, res: Response) => {
   try {
@@ -1333,6 +1372,7 @@ export const createSale = async (req: AuthRequest, res: Response) => {
             sale: {
               select: {
                 id: true,
+                saleNumber: true,
                 status: true
               }
             }
@@ -1343,8 +1383,11 @@ export const createSale = async (req: AuthRequest, res: Response) => {
           throw new BusinessError(404, 'Appointment not found')
         }
 
-        if (appointment.sale?.status === 'COMPLETED') {
-          throw new BusinessError(400, 'This appointment already has a completed sale')
+        if (appointment.sale) {
+          throw new BusinessError(
+            appointment.sale.status === 'COMPLETED' ? 400 : 409,
+            getAppointmentSaleConflictMessage(appointment.sale)
+          )
         }
 
         if (resolvedClientId && resolvedClientId !== appointment.clientId) {
@@ -1594,6 +1637,7 @@ export const updateSale = async (req: Request, res: Response) => {
           saleId: sale.id,
           saleNumber: sale.saleNumber,
           clientId: sale.clientId,
+          appointmentId: sale.appointmentId,
           total: Number(sale.total),
           items: normalizedItems
         })
@@ -1753,6 +1797,7 @@ export const deleteSale = async (req: Request, res: Response) => {
           saleId: sale.id,
           saleNumber: sale.saleNumber,
           clientId: sale.clientId,
+          appointmentId: sale.appointmentId,
           total: Number(sale.total),
           items: normalizeItemsFromSale(sale.items)
         })
