@@ -1,9 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+const { buildInclusiveDateRangeMock } = vi.hoisted(() => ({
+  buildInclusiveDateRangeMock: vi.fn()
+}))
+
+vi.mock('../../../src/backend/utils/date-range', () => ({
+  buildInclusiveDateRange: buildInclusiveDateRangeMock
+}))
+
 import {
   createAppointment,
   chargeAppointmentWithBono,
   deleteAppointment,
   exportAppointments,
+  getAppointmentsByDate,
   importAppointmentsFromExcel,
   updateAppointment
 } from '../../../src/backend/controllers/appointment.controller'
@@ -17,6 +26,7 @@ vi.mock('../../../src/backend/db', async () => import('../mocks/db.mock'))
 describe('appointment.controller', () => {
   beforeEach(() => {
     resetPrismaMock()
+    buildInclusiveDateRangeMock.mockReset()
     prismaMock.agendaBlock.findMany.mockResolvedValue([])
     prismaMock.setting.findUnique.mockResolvedValue(null)
     prismaMock.sale.findMany.mockResolvedValue([])
@@ -31,6 +41,32 @@ describe('appointment.controller', () => {
         serviceCode: 'FAC-01'
       }
     ])
+  })
+
+  it('uses the local inclusive day range when fetching appointments by date', async () => {
+    const dateRange = {
+      gte: new Date('2099-06-14T22:00:00.000Z'),
+      lte: new Date('2099-06-15T21:59:59.999Z')
+    }
+    buildInclusiveDateRangeMock.mockReturnValue(dateRange)
+    prismaMock.appointment.findMany.mockResolvedValue([])
+
+    const req = createMockRequest({
+      params: { date: '2099-06-15' }
+    })
+    const res = createMockResponse()
+
+    await getAppointmentsByDate(req as any, res)
+
+    expect(buildInclusiveDateRangeMock).toHaveBeenCalledWith('2099-06-15', '2099-06-15')
+    expect(prismaMock.appointment.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          date: dateRange
+        })
+      })
+    )
+    expect(res.json).toHaveBeenCalledWith([])
   })
 
   it('creates appointment with cabin and reminder notification', async () => {

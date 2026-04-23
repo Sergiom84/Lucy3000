@@ -81,7 +81,8 @@ const renderCallbackPage = (success: boolean, message: string) => {
 
 const buildCalendarSyncMessage = (
   summary: { total: number; synced: number; failed: number; skipped: number },
-  fallback: string
+  fallback: string,
+  syncedLabel = 'sincronizado'
 ) => {
   const parts = [fallback]
 
@@ -90,7 +91,7 @@ const buildCalendarSyncMessage = (
   }
 
   if (summary.synced > 0) {
-    parts.push(`${summary.synced} sincronizado${summary.synced === 1 ? '' : 's'}.`)
+    parts.push(`${summary.synced} ${syncedLabel}${summary.synced === 1 ? '' : 's'}.`)
   }
 
   if (summary.failed > 0) {
@@ -166,7 +167,7 @@ export const handleCallback = async (req: Request, res: Response) => {
       .send(
         renderCallbackPage(
           true,
-          'La cuenta ha quedado conectada. Si quieres enviar la agenda existente a Google Calendar, usa el boton Sincronizacion en Configuracion.'
+          'La cuenta ha quedado conectada. Usa Vincular, Pendientes o Sincronizar en Configuracion segun necesites.'
         )
       )
   } catch (error: any) {
@@ -254,6 +255,54 @@ export const syncCalendar = async (_req: Request, res: Response) => {
   } catch (error: any) {
     logError('Manual calendar sync error', error)
     res.status(500).json({ error: error.message || 'Error ejecutando la sincronización manual' })
+  }
+}
+
+export const linkCalendar = async (_req: Request, res: Response) => {
+  try {
+    const config = await googleCalendarService.getConfig()
+
+    if (!config) {
+      return res.status(400).json({
+        error: 'Google Calendar no está conectado. Conecta primero la cuenta antes de lanzar la vinculación.'
+      })
+    }
+
+    const summary = await appointmentCalendarSyncService.linkExistingAgenda({
+      reason: 'google-calendar-manual-link'
+    })
+
+    res.json({
+      message: buildCalendarSyncMessage(summary, 'Vinculación completada.', 'vinculado'),
+      summary
+    })
+  } catch (error: any) {
+    logError('Manual calendar link error', error)
+    res.status(500).json({ error: error.message || 'Error ejecutando la vinculación manual' })
+  }
+}
+
+export const syncPendingCalendar = async (_req: Request, res: Response) => {
+  try {
+    const config = await googleCalendarService.getConfig()
+
+    if (!config) {
+      return res.status(400).json({
+        error: 'Google Calendar no está conectado. Conecta primero la cuenta antes de lanzar la sincronización de pendientes.'
+      })
+    }
+
+    const summary = await appointmentCalendarSyncService.syncPendingAgenda({
+      reason: 'google-calendar-manual-pending-sync'
+    })
+
+    res.json({
+      message: buildCalendarSyncMessage(summary, 'Sincronización de pendientes completada.'),
+      summary
+    })
+  } catch (error: any) {
+    logError('Manual pending calendar sync error', error)
+    res.status(500).json({ error: error.message || 'Error ejecutando la sincronización de pendientes' })
   }
 }
 

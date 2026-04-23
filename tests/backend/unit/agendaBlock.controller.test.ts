@@ -1,7 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+const { buildInclusiveDateRangeMock } = vi.hoisted(() => ({
+  buildInclusiveDateRangeMock: vi.fn()
+}))
+
+vi.mock('../../../src/backend/utils/date-range', () => ({
+  buildInclusiveDateRange: buildInclusiveDateRangeMock
+}))
+
 import {
   createAgendaBlock,
   deleteAgendaBlock,
+  getAgendaBlocks,
   getAgendaBlockProfessionals
 } from '../../../src/backend/controllers/agendaBlock.controller'
 import { createMockRequest, createMockResponse } from '../helpers/http'
@@ -12,6 +21,7 @@ vi.mock('../../../src/backend/db', async () => import('../mocks/db.mock'))
 describe('agendaBlock.controller', () => {
   beforeEach(() => {
     resetPrismaMock()
+    buildInclusiveDateRangeMock.mockReset()
     prismaMock.appointment.findMany.mockResolvedValue([])
     prismaMock.agendaBlock.findMany.mockResolvedValue([])
     prismaMock.setting.findUnique.mockResolvedValue(null)
@@ -31,6 +41,37 @@ describe('agendaBlock.controller', () => {
 
     expect(res.json).toHaveBeenCalledWith(expect.arrayContaining(['Lucy', 'Tamara']))
     expect(res.json).toHaveBeenCalledWith(expect.not.arrayContaining(['']))
+  })
+
+  it('uses the inclusive local range when listing agenda blocks', async () => {
+    const dateRange = {
+      gte: new Date('2026-04-27T22:00:00.000Z'),
+      lte: new Date('2026-04-28T21:59:59.999Z')
+    }
+    buildInclusiveDateRangeMock.mockReturnValue(dateRange)
+
+    const req = createMockRequest({
+      query: {
+        startDate: '2026-04-28T00:00:00.000Z',
+        endDate: '2026-04-28T23:59:59.999Z'
+      }
+    })
+    const res = createMockResponse()
+
+    await getAgendaBlocks(req as any, res)
+
+    expect(buildInclusiveDateRangeMock).toHaveBeenCalledWith(
+      '2026-04-28T00:00:00.000Z',
+      '2026-04-28T23:59:59.999Z'
+    )
+    expect(prismaMock.agendaBlock.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          date: dateRange
+        })
+      })
+    )
+    expect(res.json).toHaveBeenCalledWith([])
   })
 
   it('creates an agenda block and persists the calendar sync status', async () => {

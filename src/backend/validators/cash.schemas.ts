@@ -25,19 +25,47 @@ export const cashListQuerySchema = z
     }
   )
 
+const denominationsRecordSchema = z.record(
+  z.string(),
+  z.coerce.number().int().min(0).max(999999)
+)
+
 export const openCashRegisterBodySchema = z
   .object({
-    openingBalance: nonNegativeMoneySchema,
+    openingBalance: nonNegativeMoneySchema.optional(),
+    openingDenominations: denominationsRecordSchema.optional(),
+    useLastClosureFloat: z.boolean().optional().default(false),
     notes: optionalNullableTextSchema(1000)
   })
   .strict()
+  .refine(
+    ({ openingBalance, useLastClosureFloat }) =>
+      useLastClosureFloat === true || typeof openingBalance === 'number',
+    {
+      message: 'openingBalance is required unless useLastClosureFloat is true',
+      path: ['openingBalance']
+    }
+  )
 
 export const closeCashRegisterBodySchema = z
   .object({
-    closingBalance: nonNegativeMoneySchema,
+    closingBalance: nonNegativeMoneySchema.optional(),
+    countedTotal: nonNegativeMoneySchema.optional(),
+    countedDenominations: denominationsRecordSchema.optional(),
+    nextDayFloat: nonNegativeMoneySchema.optional(),
+    nextDayFloatDenominations: denominationsRecordSchema.optional(),
+    differenceReason: optionalNullableTextSchema(500),
     notes: optionalNullableTextSchema(1000)
   })
   .strict()
+  .refine(
+    ({ closingBalance, countedTotal }) =>
+      typeof closingBalance === 'number' || typeof countedTotal === 'number',
+    {
+      message: 'Either closingBalance or countedTotal must be provided',
+      path: ['closingBalance']
+    }
+  )
 
 export const addCashMovementBodySchema = z
   .object({

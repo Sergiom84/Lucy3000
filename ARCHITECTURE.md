@@ -1,6 +1,6 @@
 # Arquitectura de Lucy3000
 
-Estado actualizado: 2026-04-21
+Estado actualizado: 2026-04-23
 
 ## Topología oficial
 
@@ -42,11 +42,24 @@ Responsabilidades:
 
 Archivos clave:
 - `src/main/main.ts`
+- `src/main/backendRuntime.ts`
+- `src/main/runtimeData.ts`
+- `src/main/backupRuntime.ts`
+- `src/main/clientAssetsRuntime.ts`
+- `src/main/printing.ts`
+- `src/main/ipc/*`
 - `src/main/backup.ts`
 - `src/main/clientAssets.ts`
 - `src/main/logging.ts`
 - `src/main/escpos.ts`
 - `src/preload.ts`
+- `src/shared/electron.ts`
+
+`src/main/main.ts` ya no debe actuar como contenedor de lógica:
+- compone runtimes;
+- registra IPC;
+- arranca backend y ventana;
+- delega el resto en módulos específicos.
 
 El runtime de escritorio también permite:
 - abrir carpeta de datos;
@@ -64,6 +77,8 @@ El bridge expuesto en `src/preload.ts` cubre:
 - assets locales de cliente;
 - relanzado y cierre controlado de la app.
 
+Los contratos compartidos del bridge viven en `src/shared/electron.ts`, de forma que `main`, `preload` y renderer compartan tipos estables.
+
 Esto mantiene `contextIsolation` y evita acceso directo del renderer a Node.
 
 ### 3. Renderer React
@@ -73,6 +88,12 @@ Responsabilidades:
 - estado de autenticación y tema;
 - consumo de la API solo mediante `src/renderer/utils/api.ts`;
 - uso del bridge Electron cuando existe.
+
+Estructura actual:
+- `src/renderer/pages/*` se usa como capa de routing y wrappers ligeros;
+- `src/renderer/features/*` contiene containers, hooks, adapters y componentes puros para pantallas grandes;
+- `src/renderer/components/*` mantiene piezas compartidas entre features;
+- `Settings`, `Sales`, `Cash`, `ClientDetail`, `Appointments` y `Sql` ya siguen ese patrón.
 
 Rutas activas:
 - `/`
@@ -104,6 +125,13 @@ Responsabilidades:
 - autenticar con JWT;
 - ejecutar reglas de negocio;
 - servir la SPA compilada como fallback.
+
+Estructura actual:
+- `src/backend/routes/*` conserva endpoints y middleware;
+- `src/backend/controllers/*` actúa como adaptador HTTP fino;
+- `src/backend/modules/*` concentra lógica de negocio por dominio;
+- `src/backend/services/*` queda para integraciones o procesos transversales;
+- no se ha introducido un repository genérico sobre Prisma.
 
 Rutas montadas en `src/backend/app.ts`:
 - `/api/auth`
@@ -144,6 +172,13 @@ Los módulos reales que la documentación debe reflejar son:
 - backups y restore local;
 - Google Calendar;
 - restauración SQL legacy asistida.
+
+Hotspots ya extraídos a módulos específicos:
+- `appointments`;
+- `bonos`;
+- `sales`;
+- `cash`;
+- `clients`.
 
 ## Autenticación y permisos
 
@@ -219,10 +254,17 @@ Las más recientes cubren:
 
 ### Compatibility migrations SQLite
 
-`src/backend/db.ts` todavía ejecuta guards runtime para instalaciones antiguas.
+`src/backend/db.ts` ya no concentra la compatibilidad:
+- crea el cliente Prisma;
+- reutiliza la instancia global en desarrollo;
+- orquesta la ejecución de `src/backend/db/compat/*`.
+
+Las compatibility migrations SQLite viven en `src/backend/db/compat/*`.
 Hoy cubren:
 - `users.username`;
 - `account_balance_movements.paymentMethod`;
+- `sales.paymentBreakdown`;
+- columnas de cierre y arqueo en `cash_registers`;
 - refs legacy en saldo;
 - refs legacy y `bonoTemplateId` en bonos;
 - soporte de clienta invitada;
@@ -233,6 +275,7 @@ Hoy cubren:
 - `dashboard_reminders`;
 - `pending_payments`;
 - `pending_payment_collections`;
+- múltiples sesiones de bono por cita;
 - leyendas por defecto.
 
 Son útiles para continuidad, pero no deben sustituir al flujo normal de Prisma.

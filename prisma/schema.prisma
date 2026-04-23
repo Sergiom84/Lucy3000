@@ -407,9 +407,16 @@ model CashRegister {
   id              String   @id @default(uuid())
   date            DateTime @default(now())
   openingBalance  Decimal
+  openingDenominations      String?
   closingBalance  Decimal?
   expectedBalance Decimal?
   difference      Decimal?
+  countedTotal              Decimal?
+  countedDenominations      String?
+  arqueoDifference          Decimal?
+  nextDayFloat              Decimal?
+  nextDayFloatDenominations String?
+  withdrawalAmount          Decimal?
   status          String   @default("OPEN")
   notes           String?
   openedAt        DateTime @default(now())

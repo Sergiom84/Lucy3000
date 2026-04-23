@@ -4,6 +4,7 @@ import { prisma } from '../db'
 import { AppointmentSyncInput, googleCalendarService } from '../services/googleCalendar.service'
 import { logError, logWarn } from '../utils/logger'
 import { validateAppointmentSlot } from '../utils/appointment-validation'
+import { buildInclusiveDateRange } from '../utils/date-range'
 import { getProfessionalCatalog, normalizeProfessionalName } from '../utils/professional-catalog'
 
 const agendaBlockSelect = {
@@ -123,10 +124,10 @@ export const getAgendaBlocks = async (req: Request, res: Response) => {
     const where: Prisma.AgendaBlockWhereInput = {}
 
     if (req.query.startDate && req.query.endDate) {
-      where.date = {
-        gte: new Date(String(req.query.startDate)),
-        lte: new Date(String(req.query.endDate))
-      }
+      where.date = buildInclusiveDateRange(
+        String(req.query.startDate),
+        String(req.query.endDate)
+      )
     }
 
     if (req.query.cabin) {

@@ -3,6 +3,7 @@ import { prisma } from '../db'
 import type { AuthRequest } from '../middleware/auth.middleware'
 
 export const ADMIN_ACTIVITY_NOTIFICATION_TYPE = 'ADMIN_ACTIVITY'
+export const GOOGLE_CALENDAR_REVIEW_NOTIFICATION_TYPE = 'GOOGLE_CALENDAR_REVIEW'
 
 type ResourceType = 'client' | 'product' | 'service'
 
@@ -80,6 +81,31 @@ export const notifyAdminsAboutResourceCreation = async (
         copy.plural
       )}.`,
       priority: 'NORMAL'
+    }
+  })
+}
+
+export const notifyGoogleCalendarLinkReviewNeeded = async (input: {
+  ambiguousCount: number
+  examples: string[]
+}) => {
+  if (input.ambiguousCount <= 0) {
+    return
+  }
+
+  const exampleCopy = input.examples.filter(Boolean).slice(0, 3).join(' | ')
+  const exampleSuffix = input.examples.length > 3 ? ' | ...' : ''
+
+  await prisma.notification.create({
+    data: {
+      type: GOOGLE_CALENDAR_REVIEW_NOTIFICATION_TYPE,
+      title: 'Google Calendar requiere revision manual',
+      message: `La vinculacion manual ha dejado ${input.ambiguousCount} coincidencia${
+        input.ambiguousCount === 1 ? '' : 's'
+      } ambigua${input.ambiguousCount === 1 ? '' : 's'} sin enlazar. Revisa estas entradas en Configuracion > Google Calendar.${
+        exampleCopy ? ` ${exampleCopy}${exampleSuffix}` : ''
+      }`,
+      priority: 'HIGH'
     }
   })
 }

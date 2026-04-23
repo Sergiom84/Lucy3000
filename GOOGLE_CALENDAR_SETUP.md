@@ -81,13 +81,12 @@ Si la cita tiene email de cliente, Google enviará alta, cambios o cancelación 
 - usa `primary` para empezar;
 - también puedes usar el ID de un calendario concreto.
 
-## Sincronización manual
+## Acciones manuales
 
-Desde `Settings` existe un botón de sincronización manual.
-Ese flujo lanza una sincronización completa de agenda con alcance admin, útil para:
-- enviar agenda existente tras conectar por primera vez;
-- reintentar sincronización después de fallos;
-- regenerar estados locales de sync.
+Desde `Settings` existen tres acciones manuales:
+- `Vincular`: intenta enlazar citas y bloqueos locales con eventos ya existentes en Google Calendar sin crear ni modificar eventos remotos;
+- `Pendientes`: crea en Google Calendar las citas y bloqueos locales que todavía no están vinculados;
+- `Sincronizar`: repasa la agenda completa y actualiza también los elementos ya vinculados.
 
 ## Desconexión
 

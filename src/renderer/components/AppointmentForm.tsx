@@ -28,6 +28,7 @@ import {
   type SearchableOption
 } from '../utils/searchableOptions'
 import { getRemainingBonoSessions } from '../utils/appointmentBonos'
+import { buildLocalDayRangeParams } from '../utils/localDateRange'
 
 interface BonoAppointmentContext {
   bonoPackId: string
@@ -145,11 +146,6 @@ const normalizeSlotMatchValue = (value: unknown) =>
 
 const timeRangesOverlap = (leftStart: string, leftEnd: string, rightStart: string, rightEnd: string) =>
   leftStart < rightEnd && leftEnd > rightStart
-
-const getDayRangeParams = (date: string) => ({
-  startDate: `${date}T00:00:00.000Z`,
-  endDate: `${date}T23:59:59.999Z`
-})
 
 const scheduleFieldGridClassName =
   'grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(10.75rem,1fr))]'
@@ -1022,9 +1018,10 @@ export default function AppointmentForm({
     const uniqueDates = [...new Set(slots.map((slot) => slot.date).filter(Boolean))]
     const availabilityEntries = await Promise.all(
       uniqueDates.map(async (date) => {
+        const dayRangeParams = buildLocalDayRangeParams(date)
         const [appointmentsResponse, agendaBlocksResponse] = await Promise.all([
-          api.get(`/appointments/date/${date}`),
-          api.get('/appointments/blocks', { params: getDayRangeParams(date) })
+          api.get('/appointments', { params: dayRangeParams }),
+          api.get('/appointments/blocks', { params: dayRangeParams })
         ])
 
         return {

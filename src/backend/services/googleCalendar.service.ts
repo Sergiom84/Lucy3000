@@ -123,7 +123,7 @@ export const isGoogleInvalidGrantError = (error: unknown) => {
   return Array.from(inspectedValues).some((value) => value.includes('invalid_grant'))
 }
 
-const toDatePart = (value: Date | string) => {
+export const toCalendarDatePart = (value: Date | string) => {
   const formatInCalendarTimezone = (date: Date) =>
     date.toLocaleDateString('sv-SE', { timeZone: GOOGLE_CALENDAR_TIMEZONE })
 
@@ -148,7 +148,18 @@ const toDatePart = (value: Date | string) => {
   return normalized.includes('T') ? normalized.split('T')[0] : normalized
 }
 
-const toCalendarDateTime = (date: Date | string, time: string) => `${toDatePart(date)}T${time}:00`
+export const toCalendarDateTime = (date: Date | string, time: string) => `${toCalendarDatePart(date)}T${time}:00`
+
+export type CalendarEventListItem = {
+  id: string
+  status: string | null
+  summary: string
+  description: string
+  attendeeEmails: string[]
+  startDateTime: string | null
+  endDateTime: string | null
+  privateAppointmentId: string | null
+}
 
 export class GoogleCalendarService {
   getOAuthSetupStatus(): GoogleCalendarOAuthSetupStatus {
@@ -407,6 +418,60 @@ export class GoogleCalendarService {
 
   async getConfig() {
     return this.getStoredConfig()
+  }
+
+  async listEventsInRange(input: {
+    timeMin: string
+    timeMax: string
+  }): Promise<CalendarEventListItem[]> {
+    const config = await this.getStoredConfig()
+
+    if (!config) {
+      throw new Error('Google Calendar is not connected')
+    }
+
+    try {
+      const { calendar, config: activeConfig } = await this.getAuthorizedCalendar(true)
+      const collectedEvents: CalendarEventListItem[] = []
+      let pageToken: string | undefined
+
+      do {
+        const response = await calendar.events.list({
+          calendarId: activeConfig.calendarId,
+          timeMin: input.timeMin,
+          timeMax: input.timeMax,
+          singleEvents: true,
+          orderBy: 'startTime',
+          showDeleted: false,
+          pageToken
+        })
+
+        for (const event of response.data.items || []) {
+          if (!event.id) {
+            continue
+          }
+
+          collectedEvents.push({
+            id: event.id,
+            status: event.status || null,
+            summary: String(event.summary || '').trim(),
+            description: String(event.description || '').trim(),
+            attendeeEmails: (event.attendees || [])
+              .map((attendee) => String(attendee.email || '').trim().toLowerCase())
+              .filter(Boolean),
+            startDateTime: event.start?.dateTime || event.start?.date || null,
+            endDateTime: event.end?.dateTime || event.end?.date || null,
+            privateAppointmentId: String(event.extendedProperties?.private?.appointmentId || '').trim() || null
+          })
+        }
+
+        pageToken = response.data.nextPageToken || undefined
+      } while (pageToken)
+
+      return collectedEvents
+    } catch (error) {
+      throw new Error(await this.resolveSyncError(config.id, error))
+    }
   }
 
   async updateConfig(data: { enabled?: boolean; sendClientInvites?: boolean; calendarId?: string }) {

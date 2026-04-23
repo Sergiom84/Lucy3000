@@ -8,6 +8,13 @@ Aplicación de escritorio para gestión de estética con backend local embebido.
 - Supabase queda como soporte histórico o flujos puntuales de recuperación, no como dependencia operativa del runtime actual.
 - El primer administrador ya no viene precargado: se crea por bootstrap desde login.
 
+## Estado de la refactorización
+- `src/main/main.ts` ya es composition root; el runtime de Electron está separado en módulos e IPC por dominio.
+- `src/backend/controllers/*` actúa como capa HTTP fina y la lógica de negocio hotspot vive en `src/backend/modules/*`.
+- `src/backend/db.ts` crea Prisma y orquesta compatibilidad; los guards SQLite viven en `src/backend/db/compat/*`.
+- `src/renderer/pages/*` se conserva como entrypoint de routing; la lógica de pantallas grandes vive en `src/renderer/features/*`.
+- `src/shared/electron.ts` centraliza contratos IPC compartidos entre `main`, `preload` y renderer.
+
 ## Qué hace hoy la app
 - Dashboard operativo.
 - Gestión de clientes con historial, saldo, ranking y assets locales.
@@ -24,7 +31,7 @@ Aplicación de escritorio para gestión de estética con backend local embebido.
 - Reportes y presupuestos.
 - Backups locales y restore desde escritorio.
 - Integración opcional con Google Calendar.
-- Asistente admin para analizar e importar un `01dat.sql` legacy.
+- Asistente admin para analizar e importar un `01dat.sql` o `01dat.sqlx` legacy, siempre que el contenido sea SQL plano.
 
 ## Autenticación y roles
 - Login normal: `POST /api/auth/login`
@@ -108,6 +115,7 @@ Se ejecutan directamente desde `scripts/`:
 - `scripts/pull-schema-no-docker.ps1`
 - `scripts/dev-backend.ps1`
 - `scripts/kill-dev-ports.ps1`
+- `scripts/prepare-packaged-db.js`
 
 ## Variables de entorno
 
@@ -126,10 +134,15 @@ Se ejecutan directamente desde `scripts/`:
 - `SUPABASE_*` solo para soporte histórico o recuperación
 
 ## Arquitectura resumida
-- `src/main/main.ts`: proceso principal de Electron, backend empaquetado, backups, logs, impresión y carpeta de datos local.
+- `src/main/main.ts`: composition root del proceso principal de Electron.
+- `src/main/*Runtime.ts` y `src/main/ipc/*`: runtimes técnicos e IPC por dominio.
 - `src/preload.ts`: bridge seguro con `contextBridge`.
-- `src/renderer/*`: SPA React con lazy loading de rutas pesadas.
-- `src/backend/*`: API Express con validación Zod.
+- `src/shared/electron.ts`: contratos IPC compartidos.
+- `src/renderer/pages/*`: entrypoints de routing.
+- `src/renderer/features/*`: feature containers, hooks, adapters y componentes presentacionales.
+- `src/backend/controllers/*`: adaptadores HTTP finos.
+- `src/backend/modules/*`: lógica de negocio por dominio.
+- `src/backend/db.ts` y `src/backend/db/compat/*`: bootstrap Prisma y compatibilidad SQLite.
 - `prisma/schema.prisma`: modelo de datos real.
 - `prisma/migrations/*`: migraciones versionadas.
 
@@ -138,7 +151,7 @@ Se ejecutan directamente desde `scripts/`:
   - importadores `.xlsx` desde `Settings`;
   - backups locales desde `Settings`.
 - Flujo legado aparte:
-  - asistente SQL admin para `01dat.sql`;
+  - asistente SQL admin para `01dat.sql` o `01dat.sqlx` en formato SQL plano;
   - scripts PowerShell históricos de PostgreSQL/Supabase.
 
 El asistente SQL no cubre ventas, caja ni referencias legacy de fotos.

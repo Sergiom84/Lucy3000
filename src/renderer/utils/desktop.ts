@@ -3,40 +3,20 @@ import {
 } from '../../shared/ticketPrinter'
 import { buildTicketHtml } from '../../shared/ticketHtml'
 import type { TicketPrintPayload, TicketPrinterConfig } from '../../shared/ticketPrinter'
-
-export type PhotoCategoryId = 'before' | 'after' | 'treatments' | 'unclassified'
-export type ClientAssetKind = 'photos' | 'consents' | 'documents'
-export type ClientAssetPreviewType = 'image' | 'pdf' | 'file'
-
-export type ClientAsset = {
-  id: string
-  kind: ClientAssetKind
-  fileName: string
-  originalName: string
-  addedAt: string
-  takenAt?: string | null
-  photoCategory?: PhotoCategoryId | null
-  absolutePath: string
-  previewUrl: string
-  previewType: ClientAssetPreviewType
-  isPrimaryPhoto: boolean
-}
-
-export type ClientPhotoCategorySummary = {
-  id: PhotoCategoryId
-  label: string
-  photoCount: number
-  coverUrl: string | null
-}
-
-export type ClientAssetsResponse = {
-  baseDir: string
-  primaryPhotoUrl: string | null
-  photoCategories: ClientPhotoCategorySummary[]
-  photos: ClientAsset[]
-  consents: ClientAsset[]
-  documents: ClientAsset[]
-}
+import { CLIENT_ASSET_PROTOCOL } from '../../shared/clientAssets'
+import type {
+  ClientAssetKind,
+  ClientAssetsResponse,
+  PhotoCategoryId
+} from '../../shared/clientAssets'
+export type {
+  PhotoCategoryId,
+  ClientAssetKind,
+  ClientAssetPreviewType,
+  ClientAsset,
+  ClientPhotoCategorySummary,
+  ClientAssetsResponse
+} from '../../shared/clientAssets'
 
 export type TicketPrinter = {
   name: string
@@ -56,7 +36,7 @@ export type PdfSaveResult = {
 }
 
 const desktopUnavailableError = 'Disponible solo en la app de escritorio'
-const CLIENT_ASSET_PROTOCOL = 'lucyasset://asset/'
+const CLIENT_ASSET_URL_PREFIX = `${CLIENT_ASSET_PROTOCOL}://asset/`
 let browserPrintFrame: HTMLIFrameElement | null = null
 
 const encodeBase64Url = (value: string) => {
@@ -92,7 +72,7 @@ export const normalizeDesktopAssetUrl = (value: string | null | undefined): stri
 
   if (/^[a-zA-Z]:[\\/]/.test(absolutePath)) {
     const normalizedPath = absolutePath.replace(/\//g, '\\')
-    return `${CLIENT_ASSET_PROTOCOL}${encodeBase64Url(normalizedPath)}`
+    return `${CLIENT_ASSET_URL_PREFIX}${encodeBase64Url(normalizedPath)}`
   }
 
   return trimmed
@@ -393,7 +373,8 @@ export const printTicket = async (payload: TicketPayload): Promise<TicketPrintRe
 
   const response = await window.electronAPI.ticket.print(payload)
   if (!response.success) {
-    throw new Error(response.error || 'No se pudo imprimir el ticket')
+    const message = typeof response.error === 'string' ? response.error : 'No se pudo imprimir el ticket'
+    throw new Error(message)
   }
 
   return { mode: 'desktop' }

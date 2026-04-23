@@ -5,8 +5,9 @@ import {
   SqlImportConflictError,
   SqlImportValidationError
 } from '../services/sqlImport.service'
-import { analyzeLegacySqlDump } from '../utils/sql-import'
+import { SqlAnalysisValidationError, analyzeLegacySqlDump } from '../utils/sql-import'
 import { appendSqlEvent, getSqlEventLogFilePath, listSqlEvents } from '../utils/sql-event-log'
+import { logError, logWarn } from '../utils/logger'
 
 export const analyzeSqlDump = async (req: Request, res: Response) => {
   try {
@@ -17,10 +18,25 @@ export const analyzeSqlDump = async (req: Request, res: Response) => {
     const result = analyzeLegacySqlDump(req.file.buffer, req.file.originalname || 'legacy.sql')
     return res.json(result)
   } catch (error) {
-    console.error('Analyze SQL dump error:', error)
+    if (error instanceof SqlAnalysisValidationError) {
+      logWarn('Analyze SQL dump rejected', {
+        fileName: req.file?.originalname || null,
+        fileSize: req.file?.size || null,
+        error: error.message
+      })
 
-    return res.status(400).json({
-      error: error instanceof Error ? error.message : 'No se pudo analizar el archivo SQL'
+      return res.status(error.statusCode).json({
+        error: error.message
+      })
+    }
+
+    logError('Analyze SQL dump failed', error, {
+      fileName: req.file?.originalname || null,
+      fileSize: req.file?.size || null
+    })
+
+    return res.status(500).json({
+      error: 'No se pudo analizar el archivo SQL'
     })
   }
 }
@@ -66,9 +82,14 @@ export const importSqlDump = async (req: AuthRequest, res: Response) => {
 
     return res.json(result)
   } catch (error) {
-    console.error('Import SQL dump error:', error)
-
     if (error instanceof SqlImportValidationError || error instanceof SqlImportConflictError) {
+      logWarn('Import SQL dump rejected', {
+        sessionId: req.body?.sessionId || null,
+        sourceName: req.body?.sourceName || null,
+        error: error.message,
+        details: error.details
+      })
+
       await appendSqlEvent({
         sessionId: req.body?.sessionId || 'unknown-session',
         userId: req.user?.id ?? null,
@@ -83,6 +104,11 @@ export const importSqlDump = async (req: AuthRequest, res: Response) => {
         details: error.details
       })
     }
+
+    logError('Import SQL dump failed', error, {
+      sessionId: req.body?.sessionId || null,
+      sourceName: req.body?.sourceName || null
+    })
 
     return res.status(500).json({
       error: 'No se pudo completar la restauración SQL'

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   addCashMovement,
+  closeCashRegister,
   getCashAnalytics,
   getPrivateNoTicketCashSales,
   getCashSummary,
@@ -424,6 +425,206 @@ describe('cash.controller', () => {
     expect(collectionArgs.where.operationDate.lte.getHours()).toBe(23)
     expect(collectionArgs.where.operationDate.gte.getDate()).toBe(1)
     expect(collectionArgs.where.operationDate.lte.getDate()).toBe(31)
+  })
+
+  it('opens cash register inheriting last closure float when requested', async () => {
+    prismaMock.cashRegister.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'cash-prev',
+        closedAt: new Date('2026-04-21T21:00:00.000Z'),
+        nextDayFloat: 125,
+        nextDayFloatDenominations: JSON.stringify({ 'bill-20': 5, 'bill-10': 2, 'coin-1e': 5 })
+      })
+    prismaMock.cashRegister.create.mockResolvedValue({
+      id: 'cash-new',
+      status: 'OPEN',
+      openingBalance: 125,
+      movements: []
+    })
+
+    const req = createMockRequest({
+      body: { useLastClosureFloat: true }
+    })
+    const res = createMockResponse()
+
+    await openCashRegister(req as any, res)
+
+    expect(prismaMock.cashRegister.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          openingBalance: 125,
+          openingDenominations: JSON.stringify({ 'bill-20': 5, 'bill-10': 2, 'coin-1e': 5 })
+        })
+      })
+    )
+    expect(res.status).toHaveBeenCalledWith(201)
+  })
+
+  it('rejects open-with-inherited-float when no previous closure exists', async () => {
+    prismaMock.cashRegister.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+
+    const req = createMockRequest({
+      body: { useLastClosureFloat: true }
+    })
+    const res = createMockResponse()
+
+    await openCashRegister(req as any, res)
+
+    expect(res.status).toHaveBeenCalledWith(400)
+    expect(prismaMock.cashRegister.create).not.toHaveBeenCalled()
+  })
+
+  it('closes register with next day float and creates automatic WITHDRAWAL movement', async () => {
+    prismaMock.cashRegister.findUnique.mockResolvedValue({
+      id: 'cash-1',
+      status: 'OPEN',
+      openingBalance: 50,
+      movements: [
+        { type: 'INCOME', amount: 100, paymentMethod: 'CASH' }
+      ]
+    })
+    prismaMock.cashMovement.create.mockResolvedValue({ id: 'mov-1' })
+    prismaMock.cashRegister.update.mockResolvedValue({
+      id: 'cash-1',
+      status: 'CLOSED',
+      nextDayFloat: 50,
+      countedTotal: 150,
+      withdrawalAmount: 100,
+      arqueoDifference: 0
+    })
+
+    const req = createMockRequest<AuthRequest>({
+      params: { id: 'cash-1' } as any,
+      user: { id: 'user-1', email: 'admin@lucy3000.com', role: 'ADMIN' },
+      body: {
+        countedTotal: 150,
+        countedDenominations: { 'bill-50': 2, 'bill-20': 2, 'bill-10': 1 },
+        nextDayFloat: 50,
+        nextDayFloatDenominations: { 'bill-20': 2, 'bill-10': 1 }
+      }
+    })
+    const res = createMockResponse()
+
+    await closeCashRegister(req, res)
+
+    expect(prismaMock.cashMovement.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: 'WITHDRAWAL',
+          amount: 100,
+          userId: 'user-1',
+          category: 'Retirada de cierre'
+        })
+      })
+    )
+    expect(prismaMock.cashRegister.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'CLOSED',
+          countedTotal: 150,
+          nextDayFloat: 50,
+          withdrawalAmount: 100,
+          arqueoDifference: 0,
+          closingBalance: 50
+        })
+      })
+    )
+    expect(res.json).toHaveBeenCalled()
+  })
+
+  it('does not create withdrawal movement when counted cash equals next day float', async () => {
+    prismaMock.cashRegister.findUnique.mockResolvedValue({
+      id: 'cash-1',
+      status: 'OPEN',
+      openingBalance: 50,
+      movements: []
+    })
+    prismaMock.cashRegister.update.mockResolvedValue({ id: 'cash-1', status: 'CLOSED' })
+
+    const req = createMockRequest<AuthRequest>({
+      params: { id: 'cash-1' } as any,
+      user: { id: 'user-1', email: 'admin@lucy3000.com', role: 'ADMIN' },
+      body: {
+        countedTotal: 50,
+        nextDayFloat: 50
+      }
+    })
+    const res = createMockResponse()
+
+    await closeCashRegister(req, res)
+
+    expect(prismaMock.cashMovement.create).not.toHaveBeenCalled()
+    expect(prismaMock.cashRegister.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          withdrawalAmount: 0,
+          nextDayFloat: 50
+        })
+      })
+    )
+  })
+
+  it('persists arqueo difference separately from withdrawal', async () => {
+    prismaMock.cashRegister.findUnique.mockResolvedValue({
+      id: 'cash-1',
+      status: 'OPEN',
+      openingBalance: 100,
+      movements: [{ type: 'INCOME', amount: 50, paymentMethod: 'CASH' }]
+    })
+    prismaMock.cashMovement.create.mockResolvedValue({ id: 'mov-1' })
+    prismaMock.cashRegister.update.mockResolvedValue({ id: 'cash-1', status: 'CLOSED' })
+
+    const req = createMockRequest<AuthRequest>({
+      params: { id: 'cash-1' } as any,
+      user: { id: 'user-1', email: 'admin@lucy3000.com', role: 'ADMIN' },
+      body: {
+        countedTotal: 145,
+        nextDayFloat: 100,
+        differenceReason: 'Vuelto incorrecto'
+      }
+    })
+    const res = createMockResponse()
+
+    await closeCashRegister(req, res)
+
+    expect(prismaMock.cashRegister.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          countedTotal: 145,
+          arqueoDifference: -5,
+          nextDayFloat: 100,
+          withdrawalAmount: 45,
+          notes: expect.stringContaining('Vuelto incorrecto')
+        })
+      })
+    )
+  })
+
+  it('rejects close when next day float exceeds counted cash', async () => {
+    prismaMock.cashRegister.findUnique.mockResolvedValue({
+      id: 'cash-1',
+      status: 'OPEN',
+      openingBalance: 50,
+      movements: []
+    })
+
+    const req = createMockRequest<AuthRequest>({
+      params: { id: 'cash-1' } as any,
+      user: { id: 'user-1', email: 'admin@lucy3000.com', role: 'ADMIN' },
+      body: {
+        countedTotal: 40,
+        nextDayFloat: 100
+      }
+    })
+    const res = createMockResponse()
+
+    await closeCashRegister(req, res)
+
+    expect(res.status).toHaveBeenCalledWith(400)
+    expect(prismaMock.cashRegister.update).not.toHaveBeenCalled()
   })
 
   it('returns the private cash leg of a combined sale in the private cash section', async () => {

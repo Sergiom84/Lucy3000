@@ -5,6 +5,8 @@ import {
   handleCallback,
   getConfig,
   updateConfig,
+  linkCalendar,
+  syncPendingCalendar,
   syncCalendar,
   disconnect
 } from '../controllers/calendar.controller'
@@ -26,6 +28,12 @@ router.get('/config', getConfig)
 
 // Actualizar configuración
 router.put('/config', validateRequest({ body: updateCalendarConfigBodySchema }), updateConfig)
+
+// Vinculación manual sin escribir en Google Calendar
+router.post('/link', linkCalendar)
+
+// Sincronización manual de pendientes
+router.post('/pending', syncPendingCalendar)
 
 // Sincronización manual completa
 router.post('/sync', syncCalendar)

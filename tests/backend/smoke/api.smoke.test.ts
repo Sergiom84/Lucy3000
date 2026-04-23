@@ -2,7 +2,10 @@ import jwt from 'jsonwebtoken'
 import request from 'supertest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { app } from '../../../src/backend/app'
-import { MAX_SPREADSHEET_FILE_SIZE_BYTES } from '../../../src/backend/middleware/upload.middleware'
+import {
+  MAX_SPREADSHEET_FILE_SIZE_BYTES,
+  MAX_SQL_DUMP_FILE_SIZE_BYTES
+} from '../../../src/backend/middleware/upload.middleware'
 import { createWorkbookBuffer } from '../helpers/spreadsheet'
 import { prismaMock, resetPrismaMock } from '../mocks/prisma.mock'
 
@@ -1094,6 +1097,67 @@ INSERT INTO \`tblfotos\` VALUES (1);
     )
   })
 
+  it('POST /api/sql/analyze accepts a plain .sqlx dump within the legacy limit', async () => {
+    const response = await request(app)
+      .post('/api/sql/analyze')
+      .set('Authorization', createAuthHeader())
+      .attach(
+        'file',
+        Buffer.from(
+          "CREATE TABLE `tblclientes` (`Id` int NOT NULL, `NroCliente` int DEFAULT NULL, `Nombre` varchar(120) DEFAULT NULL, PRIMARY KEY (`Id`)) ENGINE=InnoDB;\nINSERT INTO `tblclientes` VALUES (1,101,'Ana Demo');",
+          'utf8'
+        ),
+        {
+          filename: '01dat.sqlx',
+          contentType: 'application/octet-stream'
+        }
+      )
+
+    expect(response.status).toBe(200)
+    expect(response.body.summary.clients).toBe(1)
+  })
+
+  it('POST /api/sql/analyze returns a clear error for encoded .sqlx files without SQL text', async () => {
+    const response = await request(app)
+      .post('/api/sql/analyze')
+      .set('Authorization', createAuthHeader())
+      .attach(
+        'file',
+        Buffer.from(
+          [
+            'dGVzdHRlc3Qx',
+            'dGVzdHRlc3Qy',
+            'dGVzdHRlc3Qz',
+            'dGVzdHRlc3Q0',
+            'dGVzdHRlc3Q1'
+          ].join('\n'),
+          'utf8'
+        ),
+        {
+          filename: '01dat.sqlx',
+          contentType: 'application/octet-stream'
+        }
+      )
+
+    expect(response.status).toBe(400)
+    expect(response.body.error).toContain('no contiene un dump SQL plano compatible')
+    expect(response.body.error).toContain('.sqlx')
+    expect(response.body.error).toContain('01dat.sql')
+  })
+
+  it('POST /api/sql/analyze rejects dumps larger than the supported legacy limit', async () => {
+    const response = await request(app)
+      .post('/api/sql/analyze')
+      .set('Authorization', createAuthHeader())
+      .attach('file', Buffer.alloc(MAX_SQL_DUMP_FILE_SIZE_BYTES + 1, 0), {
+        filename: '01dat.sql',
+        contentType: 'application/sql'
+      })
+
+    expect(response.status).toBe(400)
+    expect(response.body.error).toContain('64MB limit')
+  })
+
   it('POST /api/sql/import blocks the commit when there is business data in the target database', async () => {
     const tx: any = createSqlImportTx()
     tx.client.count.mockResolvedValue(2)
@@ -1350,6 +1414,28 @@ INSERT INTO \`tblfotos\` VALUES (1);
     expect(response.body.error).toContain('Google Calendar no está conectado')
   })
 
+  it('POST /api/calendar/link returns 400 when Google Calendar is not connected', async () => {
+    prismaMock.googleCalendarConfig.findFirst.mockResolvedValue(null)
+
+    const response = await request(app)
+      .post('/api/calendar/link')
+      .set('Authorization', createAuthHeader())
+
+    expect(response.status).toBe(400)
+    expect(response.body.error).toContain('Google Calendar no está conectado')
+  })
+
+  it('POST /api/calendar/pending returns 400 when Google Calendar is not connected', async () => {
+    prismaMock.googleCalendarConfig.findFirst.mockResolvedValue(null)
+
+    const response = await request(app)
+      .post('/api/calendar/pending')
+      .set('Authorization', createAuthHeader())
+
+    expect(response.status).toBe(400)
+    expect(response.body.error).toContain('Google Calendar no está conectado')
+  })
+
   it('POST /api/calendar/sync runs a manual full sync for admins', async () => {
     prismaMock.googleCalendarConfig.findFirst.mockResolvedValue({
       id: 'calendar-config-1',
@@ -1361,6 +1447,64 @@ INSERT INTO \`tblfotos\` VALUES (1);
 
     const response = await request(app)
       .post('/api/calendar/sync')
+      .set('Authorization', createAuthHeader())
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        message: expect.any(String),
+        summary: expect.objectContaining({
+          total: 0,
+          synced: 0,
+          failed: 0,
+          skipped: 0
+        })
+      })
+    )
+  })
+
+  it('POST /api/calendar/link runs a manual link-only operation for admins', async () => {
+    prismaMock.googleCalendarConfig.findFirst.mockResolvedValue({
+      id: 'calendar-config-1',
+      refreshToken: 'refresh-token',
+      calendarId: 'primary',
+      enabled: false,
+      sendClientInvites: true
+    })
+    prismaMock.appointment.findMany.mockResolvedValue([])
+    prismaMock.agendaBlock.findMany.mockResolvedValue([])
+
+    const response = await request(app)
+      .post('/api/calendar/link')
+      .set('Authorization', createAuthHeader())
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        message: expect.any(String),
+        summary: expect.objectContaining({
+          total: 0,
+          synced: 0,
+          failed: 0,
+          skipped: 0
+        })
+      })
+    )
+  })
+
+  it('POST /api/calendar/pending runs a manual pending sync for admins', async () => {
+    prismaMock.googleCalendarConfig.findFirst.mockResolvedValue({
+      id: 'calendar-config-1',
+      refreshToken: 'refresh-token',
+      calendarId: 'primary',
+      enabled: false,
+      sendClientInvites: true
+    })
+    prismaMock.appointment.findMany.mockResolvedValue([])
+    prismaMock.agendaBlock.findMany.mockResolvedValue([])
+
+    const response = await request(app)
+      .post('/api/calendar/pending')
       .set('Authorization', createAuthHeader())
 
     expect(response.status).toBe(200)

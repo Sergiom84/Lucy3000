@@ -13,14 +13,14 @@ export class FileValidationError extends Error {
 }
 
 export const MAX_SPREADSHEET_FILE_SIZE_BYTES = 5 * 1024 * 1024
-export const MAX_SQL_DUMP_FILE_SIZE_BYTES = 30 * 1024 * 1024
+export const MAX_SQL_DUMP_FILE_SIZE_BYTES = 64 * 1024 * 1024
 
 const ALLOWED_SPREADSHEET_EXTENSIONS = new Set(['.xlsx'])
 const ALLOWED_SPREADSHEET_MIME_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/octet-stream'
 ])
-const ALLOWED_SQL_EXTENSIONS = new Set(['.sql'])
+const ALLOWED_SQL_EXTENSIONS = new Set(['.sql', '.sqlx'])
 const ALLOWED_SQL_MIME_TYPES = new Set([
   'application/sql',
   'text/plain',
@@ -100,6 +100,6 @@ export const validateSqlDumpUpload = (fieldName = 'file') =>
   createSpreadsheetValidator(
     ALLOWED_SQL_EXTENSIONS,
     ALLOWED_SQL_MIME_TYPES,
-    'Only .sql dump files are supported',
+    'Only .sql or .sqlx dump files are supported',
     fieldName
   )

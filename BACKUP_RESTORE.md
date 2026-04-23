@@ -1,6 +1,6 @@
 # Backup y Restauración
 
-Estado actualizado: 2026-04-21
+Estado actualizado: 2026-04-23
 
 ## Alcance
 
@@ -15,7 +15,7 @@ El flujo operativo normal del producto es el backup de escritorio gestionado por
 
 ### Qué expone la app
 
-Desde `Settings` y `src/main/main.ts` existen estas operaciones:
+Desde `Settings` y el runtime de Electron existen estas operaciones:
 - crear backup manual completo;
 - restaurar un backup completo o un `.db` legacy;
 - listar backups disponibles;
@@ -23,6 +23,11 @@ Desde `Settings` y `src/main/main.ts` existen estas operaciones:
 - activar o desactivar auto-backup;
 - abrir carpeta de datos local;
 - resetear la instalación local.
+
+La orquestación actual vive en:
+- `src/main/main.ts` como composition root;
+- `src/main/backupRuntime.ts` como runtime de backup y restore;
+- `src/main/backup.ts` como servicio técnico de snapshots y restauración.
 
 ### Qué incluye un backup completo
 
@@ -86,12 +91,14 @@ No sustituye al backup diario y no es una restauración universal de todo el neg
 
 ### Qué hace
 
-- analiza un `01dat.sql`;
+- analiza un `01dat.sql` o `01dat.sqlx` en formato SQL plano;
 - muestra un wizard por bloques de datos;
 - permite revisar, seleccionar y editar filas antes del commit;
 - registra eventos de importación;
 - crea un backup local de seguridad antes de escribir;
 - importa a la BD vacía únicamente lo soportado.
+
+La UI del asistente vive hoy bajo `src/renderer/features/sql/*`; la ruta visible sigue siendo `/sql`.
 
 ### Qué puede restaurar
 
@@ -139,7 +146,7 @@ Se ejecutan directamente, no desde `npm run`.
 - Backup local de escritorio:
   para operación diaria, soporte y restore habitual.
 - Pantalla `SQL`:
-  para rescatar datos legacy parciales desde `01dat.sql` con revisión manual.
+  para rescatar datos legacy parciales desde `01dat.sql` o `01dat.sqlx` con revisión manual, siempre que el contenido sea SQL plano.
 - Scripts PostgreSQL/Supabase:
   para auditoría histórica o soporte sobre backups remotos heredados.
 

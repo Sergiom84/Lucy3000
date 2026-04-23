@@ -4,6 +4,7 @@ import {
   resolveAppointmentEndTime,
   resolveAppointmentProfessional
 } from './appointment-spreadsheet'
+import { unzipSync } from 'zlib'
 
 type SqlPrimitive = string | number | null
 type SqlRecord = Record<string, SqlPrimitive>
@@ -52,6 +53,16 @@ export type SqlImportWarning = {
   severity: 'info' | 'warning'
   step: SqlWarningStep
   count?: number
+}
+
+export class SqlAnalysisValidationError extends Error {
+  statusCode: number
+
+  constructor(message: string) {
+    super(message)
+    this.name = 'SqlAnalysisValidationError'
+    this.statusCode = 400
+  }
 }
 
 export type SqlProfessionalPreview = {
@@ -314,6 +325,7 @@ const PHOTO_REFERENCE_TABLES = ['tblfotos', 'tblantesydespues', 'tblgalerias'] a
 const SUPPORTED_ANALYSIS_TABLE_SET = new Set<string>(SQL_ANALYZED_TABLES)
 const PHOTO_REFERENCE_TABLE_SET = new Set<string>(PHOTO_REFERENCE_TABLES)
 const mojibakePattern = /Ã.|Â.|â.|ðŸ/g
+const base64LinePattern = /^[A-Za-z0-9+/=]+$/
 
 const compactText = (value: SqlPrimitive) => {
   if (value === null) return null
@@ -418,6 +430,78 @@ const decodeSqlBuffer = (buffer: Buffer): { content: string; encoding: 'utf8' | 
   }
 
   return { content: latin1, encoding: 'latin1' }
+}
+
+const hasLegacySqlMarkers = (content: string) =>
+  /CREATE TABLE `[^`]+`/i.test(content) && /INSERT INTO `[^`]+`/i.test(content)
+
+const isLikelyBase64WrappedBinaryDump = (content: string) => {
+  const sample = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 200)
+
+  if (sample.length < 5) {
+    return false
+  }
+
+  const base64LikeLines = sample.filter((line) => line.length >= 12 && base64LinePattern.test(line)).length
+  return base64LikeLines / sample.length >= 0.9
+}
+
+const decodeLineWrappedBase64 = (content: string) => {
+  const lines = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  if (lines.length === 0) {
+    return null
+  }
+
+  try {
+    return Buffer.concat(lines.map((line) => Buffer.from(line, 'base64')))
+  } catch {
+    return null
+  }
+}
+
+const tryUnzipBuffer = (buffer: Buffer) => {
+  try {
+    return unzipSync(buffer)
+  } catch {
+    return null
+  }
+}
+
+const resolveSqlDumpContent = (buffer: Buffer) => {
+  const direct = decodeSqlBuffer(buffer)
+  if (hasLegacySqlMarkers(direct.content)) {
+    return direct
+  }
+
+  if (!isLikelyBase64WrappedBinaryDump(direct.content)) {
+    return null
+  }
+
+  const decodedBase64 = decodeLineWrappedBase64(direct.content)
+  if (!decodedBase64 || decodedBase64.length === 0) {
+    return null
+  }
+
+  const decodedDirect = decodeSqlBuffer(decodedBase64)
+  if (hasLegacySqlMarkers(decodedDirect.content)) {
+    return decodedDirect
+  }
+
+  const unzipped = tryUnzipBuffer(decodedBase64)
+  if (!unzipped || unzipped.length === 0) {
+    return null
+  }
+
+  const decodedUnzipped = decodeSqlBuffer(unzipped)
+  return hasLegacySqlMarkers(decodedUnzipped.content) ? decodedUnzipped : null
 }
 
 const createTableRegex = (tableName: string) =>
@@ -1232,7 +1316,24 @@ const buildWarnings = (payload: {
 }
 
 export const analyzeLegacySqlDump = (buffer: Buffer, sourceName: string): SqlImportAnalysis => {
-  const { content, encoding } = decodeSqlBuffer(buffer)
+  const resolvedContent = resolveSqlDumpContent(buffer)
+  if (!resolvedContent) {
+    const rawDecoded = decodeSqlBuffer(buffer)
+    const extensionHint = /\.sqlx$/i.test(sourceName)
+      ? ' El fichero recibido es .sqlx y parece venir codificado o en un formato propietario.'
+      : ''
+    const sqlxAlternativeHint = /\.sqlx$/i.test(sourceName)
+      ? ' Si el sistema anterior generó también un 01dat.sql, usa ese archivo.'
+      : ''
+
+    throw new SqlAnalysisValidationError(
+      isLikelyBase64WrappedBinaryDump(rawDecoded.content)
+        ? `El archivo no contiene un dump SQL plano compatible.${extensionHint}${sqlxAlternativeHint} Lucy3000 necesita un 01dat legible con sentencias CREATE TABLE e INSERT INTO.`
+        : 'El archivo no contiene un dump SQL legacy compatible. Lucy3000 necesita un 01dat legible con sentencias CREATE TABLE e INSERT INTO.'
+    )
+  }
+
+  const { content, encoding } = resolvedContent
   const detectedTables = [...content.matchAll(/CREATE TABLE `([^`]+)`/g)].map((match) => match[1])
   const rowsByTable = collectInsertRowsByTable(content)
   const relevantRecords = Object.fromEntries(
