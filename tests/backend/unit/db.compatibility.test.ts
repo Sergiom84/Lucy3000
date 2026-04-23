@@ -297,4 +297,30 @@ describe('ensureSqliteCompatibilityMigrations', () => {
       sortOrder: 0
     })
   })
+
+  it('clears synthetic consumedAt dates for imported bono sessions that share a duplicated timestamp', async () => {
+    const { ensureSqliteCompatibilityMigrations, executeRawUnsafe } = await loadDbModule({
+      queryResponses: {
+        "name='account_balance_movements'": [],
+        "name='bono_packs'": [{ name: 'bono_packs' }],
+        "name='bono_sessions'": [{ name: 'bono_sessions' }],
+        'SELECT\n        bp.id AS bonoPackId': [
+          {
+            bonoPackId: 'pack-legacy-1',
+            purchaseDate: '2026-04-15T00:00:00.000Z',
+            consumedCount: 4,
+            minConsumedAt: '2026-04-20T00:00:00.000Z',
+            maxConsumedAt: '2026-04-20T00:00:00.000Z'
+          }
+        ]
+      }
+    })
+
+    await ensureSqliteCompatibilityMigrations()
+
+    const executedSql = executeRawUnsafe.mock.calls.map(([sql]) => String(sql)).join('\n')
+    expect(executedSql).toContain('UPDATE "bono_sessions" SET "consumedAt" = NULL')
+    expect(executedSql).toContain('"bonoPackId" = \'pack-legacy-1\'')
+    expect(executedSql).toContain('"consumedAt" = \'2026-04-20T00:00:00.000Z\'')
+  })
 })

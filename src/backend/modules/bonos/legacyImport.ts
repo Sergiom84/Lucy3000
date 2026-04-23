@@ -786,7 +786,8 @@ const buildAccountBalanceImportPreview = (
 }
 
 const buildImportedBonoSessions = (row: PreparedClientBonoRow) => {
-  const fallbackConsumedAt = row.lastSessionAt || row.purchaseDate
+  const hasSingleConsumedSession = row.consumedSessions === 1
+  const knownConsumedAt = hasSingleConsumedSession ? row.lastSessionAt : null
 
   return Array.from({ length: row.totalSessions }, (_, index) => {
     const sessionNumber = index + 1
@@ -795,7 +796,10 @@ const buildImportedBonoSessions = (row: PreparedClientBonoRow) => {
     return {
       sessionNumber,
       status: isConsumed ? 'CONSUMED' : 'AVAILABLE',
-      consumedAt: isConsumed ? fallbackConsumedAt : null
+      // Legacy spreadsheets only expose, at best, the last session date.
+      // If several sessions were already consumed, assigning the same date to all of them
+      // makes period reports look like all usage happened on that single day.
+      consumedAt: isConsumed ? knownConsumedAt : null
     }
   })
 }

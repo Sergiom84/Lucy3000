@@ -267,3 +267,64 @@ export const backfillBonoPackTemplateIds = async (runtime: SqliteCompatibilityRu
     })
   }
 }
+
+type ImportedBonoPackConsumptionDateRow = {
+  bonoPackId: string
+  purchaseDate: string | null
+  consumedCount: number
+  minConsumedAt: string | null
+  maxConsumedAt: string | null
+}
+
+export const clearSyntheticImportedBonoConsumptionDates = async ({
+  prisma,
+  tableExists
+}: SqliteCompatibilityRuntime) => {
+  if (!(await tableExists('bono_packs')) || !(await tableExists('bono_sessions'))) {
+    return
+  }
+
+  const importedConsumedPacks = await prisma.$queryRawUnsafe<Array<ImportedBonoPackConsumptionDateRow>>(
+    `
+      SELECT
+        bp.id AS bonoPackId,
+        bp.purchaseDate AS purchaseDate,
+        COUNT(bs.id) AS consumedCount,
+        MIN(bs.consumedAt) AS minConsumedAt,
+        MAX(bs.consumedAt) AS maxConsumedAt
+      FROM "bono_packs" bp
+      JOIN "bono_sessions" bs ON bs."bonoPackId" = bp.id
+      WHERE bp."importSource" = 'LEGACY_CLIENT_BONO'
+        AND bs.status = 'CONSUMED'
+        AND bs."appointmentId" IS NULL
+        AND bs."consumedAt" IS NOT NULL
+      GROUP BY bp.id, bp."purchaseDate"
+    `
+  )
+
+  for (const pack of importedConsumedPacks) {
+    const consumedCount = Number(pack.consumedCount || 0)
+    const minConsumedAt = String(pack.minConsumedAt || '')
+    const maxConsumedAt = String(pack.maxConsumedAt || '')
+    const purchaseDate = String(pack.purchaseDate || '')
+
+    const hasSingleDuplicatedTimestamp = Boolean(minConsumedAt) && minConsumedAt === maxConsumedAt
+    const looksLikePurchaseDateFallback = Boolean(purchaseDate) && minConsumedAt === purchaseDate
+
+    if (!hasSingleDuplicatedTimestamp) {
+      continue
+    }
+
+    if (consumedCount <= 1 && !looksLikePurchaseDateFallback) {
+      continue
+    }
+
+    await prisma.$executeRawUnsafe(
+      `UPDATE "bono_sessions" SET "consumedAt" = NULL
+       WHERE "bonoPackId" = '${String(pack.bonoPackId).replace(/'/g, "''")}'
+         AND status = 'CONSUMED'
+         AND "appointmentId" IS NULL
+         AND "consumedAt" = '${minConsumedAt.replace(/'/g, "''")}'`
+    )
+  }
+}

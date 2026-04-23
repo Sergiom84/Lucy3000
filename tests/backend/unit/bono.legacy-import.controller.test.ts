@@ -126,8 +126,8 @@ describe('bono legacy import controller', () => {
           status: 'ACTIVE',
           sessions: {
             create: [
-              { sessionNumber: 1, status: 'CONSUMED', consumedAt: new Date(2026, 2, 10) },
-              { sessionNumber: 2, status: 'CONSUMED', consumedAt: new Date(2026, 2, 10) },
+              { sessionNumber: 1, status: 'CONSUMED', consumedAt: null },
+              { sessionNumber: 2, status: 'CONSUMED', consumedAt: null },
               { sessionNumber: 3, status: 'AVAILABLE', consumedAt: null },
               { sessionNumber: 4, status: 'AVAILABLE', consumedAt: null },
               { sessionNumber: 5, status: 'AVAILABLE', consumedAt: null },

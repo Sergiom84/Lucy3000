@@ -325,6 +325,21 @@ describe('sqlImport.service', () => {
     expect(tx.service.createMany).not.toHaveBeenCalled()
   })
 
+  it('creates imported bono sessions without synthetic consumedAt dates', async () => {
+    const tx = createTransactionMock()
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx))
+
+    await importSqlAnalysisToDatabase(createBasePayload() as any)
+
+    expect(tx.bonoSession.createMany).toHaveBeenCalled()
+    const createManyCalls = tx.bonoSession.createMany.mock.calls as Array<[ { data: Array<Record<string, unknown>> } ]>
+    const insertedSessions = createManyCalls.flatMap(([args]) => args.data)
+    const consumedSessions = insertedSessions.filter((session) => session.status === 'CONSUMED')
+
+    expect(consumedSessions).toHaveLength(3)
+    expect(consumedSessions.every((session) => session.consumedAt === null)).toBe(true)
+  })
+
   it('imports the selected legacy blocks, creates legacy employees and prepares generated assets', async () => {
     const tx = createTransactionMock()
     prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx))

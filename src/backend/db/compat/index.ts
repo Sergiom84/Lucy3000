@@ -16,6 +16,7 @@ import {
 } from './finance'
 import {
   backfillBonoPackTemplateIds,
+  clearSyntheticImportedBonoConsumptionDates,
   ensureLegacyAccountBalanceImportColumns,
   ensureLegacyBonoImportColumns
 } from './legacy-imports'
@@ -41,6 +42,7 @@ const sqliteCompatibilitySteps: SqliteCompatibilityStep[] = [
   ensureLegacyAccountBalanceImportColumns,
   ensureLegacyBonoImportColumns,
   backfillBonoPackTemplateIds,
+  clearSyntheticImportedBonoConsumptionDates,
   ensureAppointmentGuestSupport,
   ensureAppointmentServicesTable,
   ensureAppointmentLegendTable,

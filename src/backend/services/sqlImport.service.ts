@@ -961,7 +961,10 @@ export const importSqlAnalysisToDatabase = async (
         bonoPackId: bonoPack.id,
         sessionNumber: index + 1,
         status: index + 1 <= consumedSessions ? 'CONSUMED' : 'AVAILABLE',
-        consumedAt: index + 1 <= consumedSessions ? bonoPack.purchaseDate : null,
+        // The legacy SQL import only knows the aggregate number of consumed sessions,
+        // not the exact date of each one. Keep them undated so date-based reports do
+        // not attribute all historical usage to the purchase/import date.
+        consumedAt: null,
         appointmentId: null,
         notes: null
       }))
