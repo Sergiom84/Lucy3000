@@ -518,7 +518,7 @@ export default function AppointmentForm({
   const [clientBonos, setClientBonos] = useState<ClientBonoSummary[]>([])
 
   const isCreatingFromBono = !appointment && Boolean(fromBono?.bonoPackId)
-  const canCreateCopies = !appointment && !isCreatingFromBono
+  const canCreateCopies = !isCreatingFromBono
   const isEditingGuestAppointment = Boolean(appointment?.id) && !appointment?.clientId
   const lockClient =
     (isCreatingFromBono && Boolean(fromBono?.lockClient)) ||
@@ -1415,8 +1415,57 @@ export default function AppointmentForm({
       }
 
       if (appointment) {
-        const response = await api.put(`/appointments/${appointment.id}`, dataToSend)
-        showCalendarSyncWarning(response.data, 'Cita actualizada exitosamente')
+        const savedAppointments: any[] = []
+        const updatedResponse = await api.put(`/appointments/${appointment.id}`, dataToSend)
+        savedAppointments.push(updatedResponse.data)
+
+        for (let index = 0; index < copySlots.length; index += 1) {
+          try {
+            const copyResponse = await api.post(
+              '/appointments',
+              buildAppointmentRequest(copySlots[index])
+            )
+            savedAppointments.push(copyResponse.data)
+          } catch (error: any) {
+            const createdCopies = Math.max(savedAppointments.length - 1, 0)
+            const partialResultMessage =
+              createdCopies > 0
+                ? `La cita se ha actualizado y se ${
+                    createdCopies === 1
+                      ? 'ha creado 1 copia'
+                      : `han creado ${createdCopies} copias`
+                  }, pero la copia ${index + 1} no se pudo guardar`
+                : 'La cita se ha actualizado, pero no se pudo guardar una de las copias'
+            toast.error(
+              `${partialResultMessage}. ${error.response?.data?.error || 'Error al guardar la copia'}`
+            )
+            onSuccess()
+            return
+          }
+        }
+
+        if (copySlots.length > 0) {
+          toast.success(
+            copySlots.length === 1
+              ? 'Cita actualizada y 1 copia creada exitosamente'
+              : `Cita actualizada y ${copySlots.length} copias creadas exitosamente`
+          )
+
+          const syncWarnings = savedAppointments
+            .map((savedAppointment, index) =>
+              getCalendarSyncWarningMessage(
+                savedAppointment,
+                index === 0 ? 'Cita actualizada' : `Copia ${index}`
+              )
+            )
+            .filter((message): message is string => Boolean(message))
+
+          if (syncWarnings.length > 0) {
+            toast(syncWarnings.join(' '))
+          }
+        } else {
+          showCalendarSyncWarning(updatedResponse.data, 'Cita actualizada exitosamente')
+        }
       } else if (isCreatingFromBono && fromBono?.bonoPackId) {
         const bonoPayload = {
           userId: dataToSend.userId,
@@ -1497,6 +1546,11 @@ export default function AppointmentForm({
         requestPayload
       })
       const backendErrorMessage = error.response?.data?.error || 'Error al guardar la cita'
+      if (appointment && copySlots.length > 0 && error.response?.status === 409) {
+        toast.error(`No se pudo actualizar la cita principal. ${backendErrorMessage}`)
+        return
+      }
+
       if (!appointment && copySlots.length > 0 && error.response?.status === 409) {
         toast.error(`No se pudo crear la cita principal. ${backendErrorMessage}`)
         return
