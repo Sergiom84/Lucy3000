@@ -27,14 +27,15 @@ import {
   saveCashCount,
   updateCashOpeningBalance
 } from './cashApi'
-import CashHistoryModal from './components/CashHistoryModal'
 import CashMovementsSection from './components/CashMovementsSection'
+import CashOverviewModal from './components/CashOverviewModal'
 import CashRankingFiltersSection from './components/CashRankingFiltersSection'
 import CashSummarySection from './components/CashSummarySection'
 import PrivateCashModal from './components/PrivateCashModal'
 import { useCashPageData } from './useCashPageData'
 import type {
   CashFilters,
+  CashOverviewDateRange,
   CashRankingGroup,
   CommercialPaymentMethod,
   LastClosure,
@@ -75,6 +76,29 @@ const rankingGroups: CashRankingGroup[] = [
 
 const formatDateInput = (value: Date) => format(value, 'yyyy-MM-dd')
 const parseDateInput = (value: string) => new Date(`${value}T12:00:00`)
+type CashPeriodPreset = Exclude<Period, 'YEAR' | 'CUSTOM'>
+
+const buildCashDateRange = (preset: CashPeriodPreset, anchorDate: Date): CashOverviewDateRange => {
+  if (preset === 'DAY') {
+    const dateValue = formatDateInput(anchorDate)
+    return {
+      startDate: dateValue,
+      endDate: dateValue
+    }
+  }
+
+  if (preset === 'WEEK') {
+    return {
+      startDate: formatDateInput(startOfCalendarWeek(anchorDate)),
+      endDate: formatDateInput(endOfCalendarWeek(anchorDate))
+    }
+  }
+
+  return {
+    startDate: formatDateInput(startOfMonth(anchorDate)),
+    endDate: formatDateInput(endOfMonth(anchorDate))
+  }
+}
 
 const buildPrivateDateRange = (preset: Exclude<PrivateRangePreset, 'CUSTOM'>, anchorDate: Date) => {
   if (preset === 'DAY') {
@@ -117,16 +141,20 @@ const findOptionLabel = <T,>(
 
 export default function Cash() {
   const [period, setPeriod] = useState<Period>('DAY')
+  const [cashOverviewDateRange, setCashOverviewDateRange] = useState<CashOverviewDateRange>(() =>
+    buildCashDateRange('DAY', new Date())
+  )
   const [filters, setFilters] = useState<CashFilters>(defaultCashFilters)
   const {
     activeCashRegister,
     analyticsLoading,
     analyticsRows,
-    cashHistory,
+    cashOverview,
+    cashOverviewLoading,
     clearPrivateCashData,
     clients,
-    loadCashHistory,
     loadAnalytics,
+    loadCashOverview,
     loadPrivateNoTicketCash,
     loadRanking,
     loadSummary,
@@ -138,6 +166,7 @@ export default function Cash() {
     services,
     summary
   } = useCashPageData({
+    dateRange: cashOverviewDateRange,
     filters,
     period
   })
@@ -146,7 +175,7 @@ export default function Cash() {
   const [cashCountModal, setCashCountModal] = useState(false)
   const [cashCountStep, setCashCountStep] = useState<'COUNT' | 'FLOAT'>('COUNT')
   const [movementModal, setMovementModal] = useState(false)
-  const [historyModal, setHistoryModal] = useState(false)
+  const [summaryModal, setSummaryModal] = useState(false)
   const [privatePinModal, setPrivatePinModal] = useState(false)
   const [privateCashModal, setPrivateCashModal] = useState(false)
   const [privatePinInput, setPrivatePinInput] = useState('')
@@ -183,8 +212,31 @@ export default function Cash() {
   const [newOpeningBalance, setNewOpeningBalance] = useState('')
   const [editOpeningNotes, setEditOpeningNotes] = useState('')
 
-  const handlePeriodChange = (nextPeriod: Period) => {
+  const handlePeriodChange = (nextPeriod: CashPeriodPreset) => {
     setPeriod(nextPeriod)
+    setCashOverviewDateRange(buildCashDateRange(nextPeriod, new Date()))
+  }
+
+  const handleCashDateRangeChange = (field: keyof CashOverviewDateRange, value: string) => {
+    if (!value) return
+
+    setPeriod('CUSTOM')
+    setCashOverviewDateRange((current) => {
+      const nextRange = {
+        ...current,
+        [field]: value
+      }
+
+      if (field === 'startDate' && value > nextRange.endDate) {
+        nextRange.endDate = value
+      }
+
+      if (field === 'endDate' && value < nextRange.startDate) {
+        nextRange.startDate = value
+      }
+
+      return nextRange
+    })
   }
 
   const handleCashFilterChange = <Key extends keyof CashFilters>(key: Key, value: CashFilters[Key]) => {
@@ -328,15 +380,20 @@ export default function Cash() {
     setCashCountModal(true)
   }
 
-  const handleOpenHistoryModal = async () => {
-    const ok = await loadCashHistory()
+  const handleOpenSummaryModal = async () => {
+    const ok = await loadCashOverview()
     if (ok) {
-      setHistoryModal(true)
+      setSummaryModal(true)
     }
   }
 
+  const handleCashOverviewDateRangeChange = (nextRange: CashOverviewDateRange) => {
+    setPeriod('CUSTOM')
+    setCashOverviewDateRange(nextRange)
+  }
+
   const handleRefreshCashSections = async () => {
-    await Promise.all([loadAnalytics(), loadRanking(), loadSummary()])
+    await Promise.all([loadAnalytics(), loadRanking(), loadCashOverview(), loadSummary()])
   }
 
   const handlePrivateCalendarPreviousMonth = () => {
@@ -362,7 +419,7 @@ export default function Cash() {
       setOpenCashModal(false)
       setOpeningBalance('')
       setOpenNotes('')
-      await loadSummary()
+      await Promise.all([loadSummary(), loadCashOverview()])
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'No se pudo abrir la caja')
     }
@@ -377,7 +434,7 @@ export default function Cash() {
         notes: null
       })
       toast.success(`Caja abierta con fondo heredado de ${formatCurrency(lastClosure.nextDayFloat)}`)
-      await loadSummary()
+      await Promise.all([loadSummary(), loadCashOverview()])
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'No se pudo abrir la caja con el fondo heredado')
     } finally {
@@ -404,7 +461,7 @@ export default function Cash() {
       setMovementCategory('')
       setMovementDescription('')
       setMovementReference('')
-      await loadSummary()
+      await Promise.all([loadSummary(), loadCashOverview()])
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'No se pudo registrar el movimiento')
     }
@@ -422,7 +479,7 @@ export default function Cash() {
       setEditOpeningBalanceModal(false)
       setNewOpeningBalance('')
       setEditOpeningNotes('')
-      await loadSummary()
+      await Promise.all([loadSummary(), loadCashOverview()])
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'No se pudo actualizar el saldo inicial')
     }
@@ -463,12 +520,27 @@ export default function Cash() {
     }
   }
 
-  const paymentsByMethod = summary?.cards?.paymentsByMethod || {}
-  const incomeCards = summary?.cards?.income || { day: 0, month: 0, year: 0 }
-  const workPerformedCards = summary?.cards?.workPerformed || { day: 0, month: 0, year: 0 }
+  const overviewPaymentMethods = cashOverview?.summary.paymentMethods
+  const paymentsByMethod = overviewPaymentMethods
+    ? {
+        CASH: Number(overviewPaymentMethods.cash || 0),
+        CARD: Number(overviewPaymentMethods.card || 0),
+        BIZUM: Number(overviewPaymentMethods.other || 0),
+        ABONO: Number(overviewPaymentMethods.accountBalance || 0)
+      }
+    : summary?.cards?.paymentsByMethod || {}
+  const incomeAmount = cashOverview
+    ? Number(cashOverview.summary.billing.totalCollected || 0)
+    : Number(summary?.cards?.income?.day || 0)
+  const workPerformedAmount = cashOverview
+    ? Number(cashOverview.summary.billing.billed || 0)
+    : Number(summary?.cards?.workPerformed?.day || 0)
 
-  const openingBalanceAmount = Number(summary?.cards?.openingBalance || 0)
-  const currentCashBalance = summary?.cards?.currentBalance || 0
+  const openingBalanceAmount = Number(
+    cashOverview?.summary.cash.openingBalance ?? summary?.cards?.openingBalance ?? 0
+  )
+  const currentCashBalance =
+    cashOverview?.summary.cash.currentCash ?? summary?.cards?.currentBalance ?? 0
   const closingSummary = summary?.cards?.closingSummary || {
     expectedOfficialCash: Number(currentCashBalance || 0),
     officialCashCollected: Number(paymentsByMethod.CASH || 0),
@@ -590,6 +662,20 @@ export default function Cash() {
     return `${formatCalendarText(parseDateInput(privateDateRange.startDate), 'D MMM')} - ${formatCalendarText(parseDateInput(privateDateRange.endDate), 'D MMM')}`
   }, [privateDateRange.endDate, privateDateRange.startDate, privateRangePreset])
 
+  const cashRangeLabel = useMemo(() => {
+    const start = parseDateInput(cashOverviewDateRange.startDate)
+    const end = parseDateInput(cashOverviewDateRange.endDate)
+    const formattedStart = format(start, 'dd/MM/yyyy')
+    const formattedEnd = format(end, 'dd/MM/yyyy')
+    const rangeText = formattedStart === formattedEnd ? formattedStart : `${formattedStart} - ${formattedEnd}`
+
+    if (period === 'DAY') return `Día · ${rangeText}`
+    if (period === 'WEEK') return `Semanal · ${rangeText}`
+    if (period === 'MONTH') return `Mensual · ${rangeText}`
+    if (period === 'YEAR') return `Anual · ${rangeText}`
+    return `Rango · ${rangeText}`
+  }, [cashOverviewDateRange.endDate, cashOverviewDateRange.startDate, period])
+
   const persistCashCount = async (appliedAsClose: boolean) => {
     if (!activeCashRegister) {
       toast.error('No hay caja abierta')
@@ -683,7 +769,7 @@ export default function Cash() {
       setNextDayFloatQuantities(buildEmptyCashCountInputs())
       setCashCountNote('')
       setCashCountRevealed(false)
-      await loadSummary()
+      await Promise.all([loadSummary(), loadCashOverview()])
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'No se pudo cerrar la caja')
     } finally {
@@ -692,34 +778,39 @@ export default function Cash() {
   }
 
   const exportContext = useMemo(
-    () => ({
-      period,
-      clientLabel: findOptionLabel(
-        clients,
-        filters.clientId,
-        (client) => client.id,
-        (client) => `${client.firstName} ${client.lastName}`.trim(),
-        'Todos los clientes'
-      ),
-      paymentMethodLabel: filters.paymentMethod ? paymentMethodLabel(filters.paymentMethod) : 'Todos los pagos',
-      serviceLabel: findOptionLabel(
-        services,
-        filters.serviceId,
-        (service) => service.id,
-        (service) => service.name,
-        'Todos los tratamientos'
-      ),
-      productLabel: findOptionLabel(
-        products,
-        filters.productId,
-        (product) => product.id,
-        (product) => product.name,
-        'Todos los productos'
-      ),
-      typeLabel:
-        filters.type === 'SERVICE' ? 'Tratamientos' : filters.type === 'PRODUCT' ? 'Productos' : 'Todo'
-    }),
-    [clients, filters, period, products, services]
+    () => {
+      return {
+        period,
+        periodLabel: cashRangeLabel,
+        startDate: cashOverviewDateRange.startDate,
+        endDate: cashOverviewDateRange.endDate,
+        clientLabel: findOptionLabel(
+          clients,
+          filters.clientId,
+          (client) => client.id,
+          (client) => `${client.firstName} ${client.lastName}`.trim(),
+          'Todos los clientes'
+        ),
+        paymentMethodLabel: filters.paymentMethod ? paymentMethodLabel(filters.paymentMethod) : 'Todos los pagos',
+        serviceLabel: findOptionLabel(
+          services,
+          filters.serviceId,
+          (service) => service.id,
+          (service) => service.name,
+          'Todos los tratamientos'
+        ),
+        productLabel: findOptionLabel(
+          products,
+          filters.productId,
+          (product) => product.id,
+          (product) => product.name,
+          'Todos los productos'
+        ),
+        typeLabel:
+          filters.type === 'SERVICE' ? 'Tratamientos' : filters.type === 'PRODUCT' ? 'Productos' : 'Todo'
+      }
+    },
+    [cashOverviewDateRange.endDate, cashOverviewDateRange.startDate, cashRangeLabel, clients, filters, period, products, services]
   )
 
   const handleExportExcel = async () => {
@@ -746,7 +837,11 @@ export default function Cash() {
     try {
       const result = await savePdfDocument({
         html: buildCashMovementsPdfHtml(analyticsRows, exportContext),
-        defaultFileName: getCashMovementsPdfFileName(period),
+        defaultFileName: getCashMovementsPdfFileName(
+          exportContext.period,
+          exportContext.startDate,
+          exportContext.endDate
+        ),
         landscape: true
       })
 
@@ -771,8 +866,8 @@ export default function Cash() {
         </div>
 
         <div className="flex gap-3">
-          <button onClick={() => void handleOpenHistoryModal()} className="btn btn-secondary">
-            Historial
+          <button onClick={() => void handleOpenSummaryModal()} className="btn btn-secondary">
+            Resumen
           </button>
           <button onClick={() => setPrivatePinModal(true)} className="btn btn-secondary" title="Sección privada">
             Privado
@@ -798,7 +893,7 @@ export default function Cash() {
       <CashSummarySection
         canEditOpeningBalance={Boolean(activeCashRegister)}
         currentCashBalance={Number(currentCashBalance || 0)}
-        incomeCards={incomeCards}
+        incomeAmount={incomeAmount}
         lastClosure={lastClosure}
         onEditOpeningBalance={handlePrepareOpeningBalanceEdit}
         onOpenCashWithInheritedFloat={() => void handleOpenCashWithInheritedFloat()}
@@ -807,7 +902,7 @@ export default function Cash() {
         openingWithInheritedSaving={openingWithInheritedSaving}
         paymentMethods={commercialPaymentMethods}
         paymentsByMethod={paymentsByMethod}
-        workPerformedCards={workPerformedCards}
+        workPerformedAmount={workPerformedAmount}
       />
 
       <CashMovementsSection
@@ -820,7 +915,9 @@ export default function Cash() {
 
       <CashRankingFiltersSection
         clients={clients}
+        dateRange={cashOverviewDateRange}
         filters={filters}
+        onDateRangeChange={handleCashDateRangeChange}
         onFilterChange={handleCashFilterChange}
         onPeriodChange={handlePeriodChange}
         onResetFilters={handleResetCashFilters}
@@ -855,8 +952,8 @@ export default function Cash() {
         </div>
       </Modal>
 
-      <Modal isOpen={cashCountModal} onClose={() => closeCashCountModal()} title="Cuadrar caja" maxWidth="4xl">
-        <div className="space-y-5">
+      <Modal isOpen={cashCountModal} onClose={() => closeCashCountModal()} title="Cuadrar caja" maxWidth="6xl" hideTitle>
+        <div className="space-y-3">
           {hasInheritedOpeningBreakdown && (
             <div className="rounded-2xl border border-indigo-200 bg-indigo-50/60 px-4 py-3 dark:border-indigo-900/60 dark:bg-indigo-950/20">
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -888,79 +985,65 @@ export default function Cash() {
             </div>
           )}
 
-          <div className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/40">
-            <div className="min-w-0 flex-1">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
-                {cashCountStep === 'COUNT' ? 'Paso 1 · Conteo real en caja' : 'Paso 2 · Cambio para mañana'}
-              </p>
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                {cashCountStep === 'COUNT'
-                  ? 'Cuenta el efectivo real por denominaciones y comprueba la diferencia de arqueo.'
-                  : 'Ahora indica qué billetes y monedas dejas como fondo para el siguiente día.'}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {cashCountStep === 'COUNT' && (
-                <>
-                  <label className="flex cursor-pointer items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm dark:border-slate-600 dark:bg-gray-800 dark:text-slate-200">
-                    <input
-                      type="checkbox"
-                      checked={cashCountBlind}
-                      onChange={(event) => {
-                        setCashCountBlind(event.target.checked)
-                        setCashCountRevealed(false)
-                      }}
-                      className="h-4 w-4 accent-indigo-600"
-                    />
-                    Recuento a ciegas
-                  </label>
-                  {cashCountBlind && !cashCountRevealed && (
-                    <button
-                      onClick={() => setCashCountRevealed(true)}
-                      className="btn btn-secondary h-9 px-3 text-xs"
-                      type="button"
-                    >
-                      Comprobar
-                    </button>
-                  )}
-                  <button
-                    onClick={() => handleResetCashCount()}
-                    className="btn btn-secondary h-9 px-3 text-xs"
-                    type="button"
-                  >
-                    Limpiar
-                  </button>
-                </>
+          {cashCountStep === 'COUNT' && (
+            <div className="flex flex-wrap items-center justify-end gap-2 pr-12">
+              <label className="flex cursor-pointer items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm dark:border-slate-600 dark:bg-gray-800 dark:text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={cashCountBlind}
+                  onChange={(event) => {
+                    setCashCountBlind(event.target.checked)
+                    setCashCountRevealed(false)
+                  }}
+                  className="h-4 w-4 accent-indigo-600"
+                />
+                Recuento a ciegas
+              </label>
+              {cashCountBlind && !cashCountRevealed && (
+                <button
+                  onClick={() => setCashCountRevealed(true)}
+                  className="btn btn-secondary h-9 px-3 text-xs"
+                  type="button"
+                >
+                  Comprobar
+                </button>
               )}
+              <button
+                onClick={() => handleResetCashCount()}
+                className="btn btn-secondary h-9 px-3 text-xs"
+                type="button"
+              >
+                Limpiar
+              </button>
             </div>
-          </div>
+          )}
 
           {cashCountStep === 'COUNT' ? (
             <>
-              <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-gray-900/50">
+              <section className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-gray-900/50">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
                     Fondo inicial cargado
                   </p>
-                  <p className="mt-1 text-2xl font-bold tabular-nums text-slate-900 dark:text-slate-100">
+                  <p className="mt-1 text-xl font-bold tabular-nums text-slate-900 dark:text-slate-100">
                     {cashCountExpectedVisible ? formatCurrency(openingBalanceAmount) : '••••••'}
                   </p>
                 </div>
-                <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/20">
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3 dark:border-emerald-900/60 dark:bg-emerald-950/20">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-700 dark:text-emerald-300">
                     Cobros en efectivo
                   </p>
-                  <p className="mt-1 text-2xl font-bold tabular-nums text-emerald-900 dark:text-emerald-100">
+                  <p className="mt-1 text-xl font-bold tabular-nums text-emerald-900 dark:text-emerald-100">
                     {cashCountExpectedVisible
                       ? formatCurrency(Number(closingSummary.officialCashCollected || 0))
                       : '••••••'}
                   </p>
                 </div>
-                <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-900/60 dark:bg-amber-950/20">
+                <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-3 dark:border-amber-900/60 dark:bg-amber-950/20">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-700 dark:text-amber-300">
                     Ajustes manuales
                   </p>
-                  <p className="mt-1 text-2xl font-bold tabular-nums text-amber-900 dark:text-amber-100">
+                  <p className="mt-1 text-xl font-bold tabular-nums text-amber-900 dark:text-amber-100">
                     {cashCountExpectedVisible
                       ? manualBalanceDelta === 0
                         ? formatCurrency(0)
@@ -973,18 +1056,20 @@ export default function Cash() {
                     Salidas {cashCountExpectedVisible ? formatCurrency(registeredOutflows) : '••••••'}
                   </p>
                 </div>
-                <div className="rounded-2xl border border-indigo-200 bg-indigo-50/70 p-4 dark:border-indigo-900/60 dark:bg-indigo-950/20">
+                <div className="rounded-2xl border border-indigo-200 bg-indigo-50/70 p-3 dark:border-indigo-900/60 dark:bg-indigo-950/20">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-indigo-700 dark:text-indigo-300">
                     Efectivo esperado
                   </p>
-                  <p className="mt-1 text-2xl font-bold tabular-nums text-indigo-900 dark:text-indigo-100">
+                  <p className="mt-1 text-xl font-bold tabular-nums text-indigo-900 dark:text-indigo-100">
                     {cashCountExpectedVisible ? formatCurrency(Number(currentCashBalance || 0)) : '••••••'}
                   </p>
                 </div>
               </section>
 
-              <div className="grid gap-4 xl:grid-cols-[1fr_1fr_0.9fr]">
-                <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-gray-800">
+              <div className="grid gap-3 xl:grid-cols-[minmax(0,2fr)_18rem]">
+                <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-gray-800">
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    <div className="min-w-0">
                   <div className="flex items-baseline justify-between">
                     <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
                       Billetes
@@ -993,13 +1078,13 @@ export default function Cash() {
                       {cashCountPieces.billPieces} {cashCountPieces.billPieces === 1 ? 'pieza' : 'piezas'}
                     </span>
                   </div>
-                  <div className="mt-3 space-y-2">
+                  <div className="mt-2 space-y-1.5">
                     {CASH_COUNT_BILL_DENOMINATIONS.map((denomination, billIndex) => (
                       <div
                         key={denomination.key}
-                        className="grid grid-cols-[minmax(3.5rem,auto)_5.5rem_minmax(0,1fr)] items-center gap-3"
+                          className="grid grid-cols-[minmax(3.5rem,auto)_5.25rem_minmax(0,1fr)] items-center gap-2"
                       >
-                        <span className="text-xl font-bold leading-none tabular-nums whitespace-nowrap text-slate-800 dark:text-slate-100">
+                        <span className="text-lg font-bold leading-none tabular-nums whitespace-nowrap text-slate-800 dark:text-slate-100">
                           {denomination.label}
                         </span>
                         <input
@@ -1012,7 +1097,7 @@ export default function Cash() {
                           onChange={(event) => handleCashCountQuantityChange(denomination.key, event.target.value)}
                           onFocus={(event) => event.target.select()}
                           onKeyDown={(event) => handleCashCountKeyDown(billIndex, event)}
-                          className="input h-10 text-center font-semibold tabular-nums"
+                          className="input h-9 text-center font-semibold tabular-nums"
                           placeholder="0"
                         />
                         <div className="min-w-0 text-right">
@@ -1026,9 +1111,9 @@ export default function Cash() {
                       </div>
                     ))}
                   </div>
-                </section>
+                    </div>
 
-                <section className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/10">
+                    <div className="min-w-0 border-t border-amber-200 pt-3 dark:border-amber-900/50 lg:border-l lg:border-t-0 lg:pl-3 lg:pt-0">
                   <div className="flex items-baseline justify-between">
                     <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-700 dark:text-amber-300">
                       Monedas
@@ -1037,15 +1122,15 @@ export default function Cash() {
                       {cashCountPieces.coinPieces} {cashCountPieces.coinPieces === 1 ? 'pieza' : 'piezas'}
                     </span>
                   </div>
-                  <div className="mt-3 space-y-2">
+                  <div className="mt-2 space-y-1.5">
                     {CASH_COUNT_COIN_DENOMINATIONS.map((denomination, coinIndex) => {
                       const refIndex = CASH_COUNT_BILL_DENOMINATIONS.length + coinIndex
                       return (
                         <div
                           key={denomination.key}
-                          className="grid grid-cols-[minmax(3.5rem,auto)_5.5rem_minmax(0,1fr)] items-center gap-3"
+                          className="grid grid-cols-[minmax(3.5rem,auto)_5.25rem_minmax(0,1fr)] items-center gap-2"
                         >
-                          <span className="text-xl font-bold leading-none tabular-nums whitespace-nowrap text-amber-800 dark:text-amber-100">
+                          <span className="text-lg font-bold leading-none tabular-nums whitespace-nowrap text-amber-800 dark:text-amber-100">
                             {denomination.label}
                           </span>
                           <input
@@ -1058,7 +1143,7 @@ export default function Cash() {
                             onChange={(event) => handleCashCountQuantityChange(denomination.key, event.target.value)}
                             onFocus={(event) => event.target.select()}
                             onKeyDown={(event) => handleCashCountKeyDown(refIndex, event)}
-                            className="input h-10 border-amber-200 bg-white text-center font-semibold tabular-nums dark:border-amber-900/60 dark:bg-gray-900"
+                            className="input h-9 border-amber-200 bg-white text-center font-semibold tabular-nums dark:border-amber-900/60 dark:bg-gray-900"
                             placeholder="0"
                           />
                           <div className="min-w-0 text-right">
@@ -1073,14 +1158,61 @@ export default function Cash() {
                       )
                     })}
                   </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 max-w-[42rem] border-t border-slate-200 pt-3 dark:border-slate-700">
+                    {cashCountExpectedVisible && cashCountSummary.difference !== 0 && (
+                      <>
+                        <label className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
+                          Motivo de la diferencia *
+                        </label>
+                        <textarea
+                          value={cashCountNote}
+                          onChange={(event) => setCashCountNote(event.target.value)}
+                          className="input mt-2 w-full resize-none text-sm"
+                          rows={2}
+                          placeholder="Error de cambio, vuelto incorrecto, etc."
+                        />
+                      </>
+                    )}
+
+                    <div className={`${cashCountExpectedVisible && cashCountSummary.difference !== 0 ? 'mt-3' : ''} flex flex-col gap-2 sm:flex-row`}>
+                      <button
+                        onClick={closeCashCountModal}
+                        className="btn btn-secondary whitespace-nowrap"
+                        type="button"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        onClick={() => void handleSaveCashCount()}
+                        className="btn btn-secondary whitespace-nowrap"
+                        disabled={cashCountSaving || cashCountPieces.totalPieces === 0}
+                        type="button"
+                      >
+                        {cashCountSaving ? 'Guardando recuento...' : 'Guardar recuento parcial'}
+                      </button>
+                      <button
+                        onClick={handleContinueToNextDayFloat}
+                        className="btn btn-primary whitespace-nowrap"
+                        disabled={cashCountPieces.totalPieces === 0}
+                        type="button"
+                      >
+                        {cashCountBlind && !cashCountRevealed
+                          ? 'Comprobar y continuar'
+                          : 'Continuar con cambio para mañana'}
+                      </button>
+                    </div>
+                  </div>
                 </section>
 
-                <aside className="space-y-3">
-                  <div className="rounded-3xl bg-slate-950 px-5 py-6 text-center text-white shadow-lg dark:bg-slate-100 dark:text-slate-950">
-                    <p className="text-xs uppercase tracking-[0.28em] text-white/70 dark:text-slate-500">
+                <aside className="space-y-2">
+                  <div className="rounded-3xl bg-slate-950 px-4 py-4 text-center text-white shadow-lg dark:bg-slate-100 dark:text-slate-950">
+                    <p className="text-[11px] uppercase tracking-[0.24em] text-white/70 dark:text-slate-500">
                       Efectivo contado
                     </p>
-                    <p className="mt-2 text-3xl font-black tabular-nums tracking-tight whitespace-nowrap">
+                    <p className="mt-1.5 text-2xl font-black tabular-nums tracking-tight whitespace-nowrap">
                       {formatCurrency(cashCountSummary.total)}
                     </p>
                     <p className="mt-1 text-[11px] text-white/60 dark:text-slate-500">
@@ -1090,7 +1222,7 @@ export default function Cash() {
 
                   {cashCountExpectedVisible && (
                     <div
-                      className={`rounded-2xl border px-4 py-3 text-center ${
+                      className={`rounded-2xl border px-3 py-2.5 text-center ${
                         cashCountSummary.isBalanced
                           ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-200'
                           : cashCountSummary.difference > 0
@@ -1099,7 +1231,7 @@ export default function Cash() {
                       }`}
                     >
                       <p className="text-[11px] font-semibold uppercase tracking-[0.2em]">Diferencia de arqueo</p>
-                      <p className="mt-1 text-2xl font-bold tabular-nums tracking-tight whitespace-nowrap">
+                      <p className="mt-1 text-xl font-bold tabular-nums tracking-tight whitespace-nowrap">
                         {cashCountSummary.isBalanced
                           ? 'Cuadrada'
                           : `${cashCountSummary.difference > 0 ? '+' : ''}${formatCurrency(cashCountSummary.difference)}`}
@@ -1108,11 +1240,11 @@ export default function Cash() {
                     </div>
                   )}
 
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm dark:border-slate-700 dark:bg-gray-900/50">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-3 text-sm dark:border-slate-700 dark:bg-gray-900/50">
                     <h3 className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
                       Flujo del día
                     </h3>
-                    <div className="mt-3 space-y-2">
+                    <div className="mt-2 space-y-1.5">
                       <div className="flex items-center justify-between">
                         <span className="text-slate-600 dark:text-slate-300">Efectivo oficial</span>
                         <strong className="tabular-nums text-slate-900 dark:text-slate-100">
@@ -1137,13 +1269,13 @@ export default function Cash() {
                           {formatCurrency(Number(closingSummary.privateCashCollected || 0))}
                         </strong>
                       </div>
-                      <div className="flex items-center justify-between border-t border-slate-200 pt-2 dark:border-slate-700">
+                      <div className="flex items-center justify-between border-t border-slate-200 pt-1.5 dark:border-slate-700">
                         <span className="font-medium text-slate-700 dark:text-slate-200">Total sin abonos</span>
                         <strong className="tabular-nums text-slate-900 dark:text-slate-100">
                           {formatCurrency(Number(closingSummary.totalCollectedExcludingAbono || 0))}
                         </strong>
                       </div>
-                      <div className="flex items-center justify-between border-t border-slate-200 pt-2 dark:border-slate-700">
+                      <div className="flex items-center justify-between border-t border-slate-200 pt-1.5 dark:border-slate-700">
                         <span className="text-slate-600 dark:text-slate-300">Salidas registradas</span>
                         <strong className="tabular-nums text-slate-900 dark:text-slate-100">
                           {formatCurrency(registeredOutflows)}
@@ -1152,11 +1284,11 @@ export default function Cash() {
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm dark:border-slate-700 dark:bg-gray-900/50">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-3 text-sm dark:border-slate-700 dark:bg-gray-900/50">
                     <h3 className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
                       Resumen
                     </h3>
-                    <div className="mt-3 space-y-2">
+                    <div className="mt-2 space-y-1.5">
                       <div className="flex items-center justify-between">
                         <span className="text-slate-600 dark:text-slate-300">Billetes</span>
                         <strong className="tabular-nums text-slate-900 dark:text-slate-100">
@@ -1170,51 +1302,10 @@ export default function Cash() {
                         </strong>
                       </div>
                     </div>
+
                   </div>
 
-                  {cashCountExpectedVisible && cashCountSummary.difference !== 0 && (
-                    <div className="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-gray-900/50">
-                      <label className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
-                        Motivo de la diferencia *
-                      </label>
-                      <textarea
-                        value={cashCountNote}
-                        onChange={(event) => setCashCountNote(event.target.value)}
-                        className="input mt-2 w-full resize-none text-sm"
-                        rows={2}
-                        placeholder="Error de cambio, vuelto incorrecto, etc."
-                      />
-                    </div>
-                  )}
                 </aside>
-              </div>
-
-              <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-                <button
-                  onClick={closeCashCountModal}
-                  className="btn btn-secondary"
-                  type="button"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={() => void handleSaveCashCount()}
-                  className="btn btn-secondary"
-                  disabled={cashCountSaving || cashCountPieces.totalPieces === 0}
-                  type="button"
-                >
-                  {cashCountSaving ? 'Guardando recuento...' : 'Guardar recuento parcial'}
-                </button>
-                <button
-                  onClick={handleContinueToNextDayFloat}
-                  className="btn btn-primary"
-                  disabled={cashCountPieces.totalPieces === 0}
-                  type="button"
-                >
-                  {cashCountBlind && !cashCountRevealed
-                    ? 'Comprobar y continuar'
-                    : 'Continuar con cambio para mañana'}
-                </button>
               </div>
             </>
           ) : (
@@ -1601,10 +1692,13 @@ export default function Cash() {
         totalAmount={privateCashTotal}
       />
 
-      <CashHistoryModal
-        cashHistory={cashHistory}
-        isOpen={historyModal}
-        onClose={() => setHistoryModal(false)}
+      <CashOverviewModal
+        dateRange={cashOverviewDateRange}
+        isLoading={cashOverviewLoading}
+        isOpen={summaryModal}
+        onClose={() => setSummaryModal(false)}
+        onDateRangeChange={(nextRange) => void handleCashOverviewDateRangeChange(nextRange)}
+        overview={cashOverview}
       />
     </div>
   )

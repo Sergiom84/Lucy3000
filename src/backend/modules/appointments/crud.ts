@@ -51,13 +51,15 @@ export const createAppointmentRecord = async (payload: Record<string, unknown>) 
   }
 
   const selectedServiceIds = selectedServices.map((service) => service.id)
-  const computedEndTime = calculateAppointmentEndTime(
-    String(payload.startTime || ''),
-    selectedServices.reduce((total, service) => total + Math.max(0, Number(service.duration || 0)), 0)
-  )
+  const requestedEndTime =
+    String(payload.endTime || '').trim() ||
+    calculateAppointmentEndTime(
+      String(payload.startTime || ''),
+      selectedServices.reduce((total, service) => total + Math.max(0, Number(service.duration || 0)), 0)
+    )
   const data = buildAppointmentPayload(payload, {
     serviceId: selectedServiceIds[0],
-    endTime: computedEndTime
+    endTime: requestedEndTime
   })
   const resolvedProfessional = await resolveProfessionalName(data.userId, data.professional)
 
@@ -133,14 +135,18 @@ export const updateAppointmentRecord = async (id: string, payload: Record<string
 
   const serviceSelectionChanged = payload.serviceId !== undefined || payload.serviceIds !== undefined
   const shouldRecalculateEndTime = serviceSelectionChanged || payload.startTime !== undefined
+  const requestedEndTime =
+    payload.endTime !== undefined
+      ? String(payload.endTime)
+      : shouldRecalculateEndTime
+        ? calculateAppointmentEndTime(
+            String(payload.startTime || existing.startTime),
+            selectedServices.reduce((total, service) => total + Math.max(0, Number(service.duration || 0)), 0)
+          )
+        : undefined
   const updateData = buildAppointmentUpdatePayload(payload, {
     serviceId: selectedServices[0].id,
-    endTime: shouldRecalculateEndTime
-      ? calculateAppointmentEndTime(
-          String(payload.startTime || existing.startTime),
-          selectedServices.reduce((total, service) => total + Math.max(0, Number(service.duration || 0)), 0)
-        )
-      : undefined
+    endTime: requestedEndTime
   })
   const partyValidationError = validateAppointmentPartyUpdate(existing, updateData)
 

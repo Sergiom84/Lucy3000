@@ -61,6 +61,11 @@ export const fetchSaleDetail = async (saleId: string) => {
   return response.data
 }
 
+export const updateSaleNotes = async (saleId: string, notes: string | null) => {
+  const response = await api.put(`/sales/${saleId}`, { notes })
+  return response.data
+}
+
 export const consumeBonoPack = async (bonoPackId: string) => {
   await api.put(`/bonos/${bonoPackId}/consume`)
 }

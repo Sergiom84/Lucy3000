@@ -428,7 +428,7 @@ describe('bono.controller bono appointments and sessions', () => {
           reminder: true,
           date: new Date('2099-04-15T10:00:00.000Z'),
           startTime: '10:00',
-          endTime: '10:30',
+          endTime: '10:45',
           status: 'SCHEDULED',
           notes: null,
           client: { firstName: 'Ana', lastName: 'Lopez', phone: '600000000', email: 'ana@example.com' },
@@ -450,7 +450,7 @@ describe('bono.controller bono appointments and sessions', () => {
       reminder: true,
       date: new Date('2099-04-15T10:00:00.000Z'),
       startTime: '10:00',
-      endTime: '10:30',
+      endTime: '10:45',
       status: 'SCHEDULED',
       notes: null,
       client: { firstName: 'Ana', lastName: 'Lopez', phone: '600000000', email: 'ana@example.com' },
@@ -470,7 +470,7 @@ describe('bono.controller bono appointments and sessions', () => {
         cabin: 'LUCY',
         date: '2099-04-15T10:00:00.000Z',
         startTime: '10:00',
-        endTime: '10:30',
+        endTime: '10:45',
         status: 'SCHEDULED',
         reminder: true
       }
@@ -483,7 +483,7 @@ describe('bono.controller bono appointments and sessions', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           serviceId: 'service-1',
-          endTime: '10:30',
+          endTime: '10:45',
           appointmentServices: {
             create: [{ serviceId: 'service-1', sortOrder: 0 }]
           }

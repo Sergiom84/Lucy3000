@@ -27,7 +27,8 @@ import {
   deleteClientQuote,
   fetchSaleDetail,
   updateClientAppointmentStatus,
-  updateClientRecord
+  updateClientRecord,
+  updateSaleNotes
 } from './clientDetailApi'
 import ClientDetailAbonosPanel from './components/ClientDetailAbonosPanel'
 import ClientDetailAppointmentsPanel from './components/ClientDetailAppointmentsPanel'
@@ -47,6 +48,7 @@ import type {
   ClientDetailQuote,
   ClientDetailSale,
   ClientDetailSaleLabelSource,
+  ClientDetailSaleNote,
   ClientDetailTab,
   ClientDetailTabOption,
   ClientDetailToolbarItem
@@ -212,6 +214,7 @@ export default function ClientDetail() {
   const [accountBalanceSaving, setAccountBalanceSaving] = useState(false)
   const [noteDraft, setNoteDraft] = useState('')
   const [noteSaving, setNoteSaving] = useState(false)
+  const [saleNoteSavingId, setSaleNoteSavingId] = useState<string | null>(null)
   const [accountBalanceDraft, setAccountBalanceDraft] = useState<ClientDetailAccountBalanceDraft>({
     description: '',
     amount: '',
@@ -583,6 +586,34 @@ export default function ClientDetail() {
   }, [clientAssets, client?.photoUrl])
 
   const clientNotes = useMemo(() => parseClientNotes(client?.notes), [client?.notes])
+  const saleNotes = useMemo<ClientDetailSaleNote[]>(
+    () =>
+      (client?.sales || [])
+        .map((sale) => ({
+          id: sale.id,
+          date: sale.date,
+          treatment: getSaleTreatmentLabel(sale),
+          note: String(sale.notes || '').trim()
+        }))
+        .filter((saleNote) => saleNote.note.length > 0),
+    [client?.sales]
+  )
+
+  const handleUpdateSaleNote = async (saleId: string, nextNote: string | null) => {
+    try {
+      setSaleNoteSavingId(saleId)
+      await updateSaleNotes(saleId, nextNote)
+      toast.success(nextNote ? 'Nota de venta actualizada' : 'Nota de venta eliminada')
+      await refreshClient()
+      return true
+    } catch (error: any) {
+      console.error('Error updating sale note:', error)
+      toast.error(error.response?.data?.error || 'No se pudo actualizar la nota de venta')
+      return false
+    } finally {
+      setSaleNoteSavingId(null)
+    }
+  }
 
   const handleConsumeBonoSession = async (bonoPackId: string) => {
     try {
@@ -930,6 +961,10 @@ export default function ClientDetail() {
         client={client}
         profileImageUrl={profileImageUrl}
         pendingTotal={clientPendingTotal}
+        saleNotes={saleNotes}
+        saleNoteSavingId={saleNoteSavingId}
+        onDeleteSaleNote={(saleId) => handleUpdateSaleNote(saleId, null)}
+        onUpdateSaleNote={handleUpdateSaleNote}
       />
 
       <ClientDetailQuickToolbar items={toolbarItems} onSelectTab={(tab) => setActiveTab(tab)} />

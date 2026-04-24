@@ -388,7 +388,7 @@ export const updateBonoPack = async (req: Request, res: Response) => {
 export const createBonoAppointment = async (req: Request, res: Response) => {
   try {
     const { bonoPackId } = req.params
-    const { userId, cabin, date, startTime, status, notes, reminder } = req.body
+    const { userId, cabin, date, startTime, endTime, status, notes, reminder } = req.body
 
     const bonoPack = await prisma.bonoPack.findUnique({
       where: { id: bonoPackId },
@@ -462,10 +462,12 @@ export const createBonoAppointment = async (req: Request, res: Response) => {
       professional,
       date: toDate(String(date)),
       startTime: String(startTime),
-      endTime: calculateAppointmentEndTime(
-        String(startTime),
-        selectedServices.reduce((total, service) => total + Math.max(0, Number(service.duration || 0)), 0)
-      ),
+      endTime:
+        String(endTime || '').trim() ||
+        calculateAppointmentEndTime(
+          String(startTime),
+          selectedServices.reduce((total, service) => total + Math.max(0, Number(service.duration || 0)), 0)
+        ),
       status: (status as string) || 'SCHEDULED',
       notes: notes ? String(notes) : null,
       reminder: reminder === undefined ? true : Boolean(reminder)

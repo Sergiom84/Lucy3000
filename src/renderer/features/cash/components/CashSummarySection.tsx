@@ -4,12 +4,12 @@ import {
 } from '../../../utils/cashCount'
 import { formatCurrency } from '../../../utils/format'
 import { paymentMethodLabel } from '../../../utils/tickets'
-import type { CashSummaryPeriodTotals, CommercialPaymentMethod, LastClosure } from '../types'
+import type { CommercialPaymentMethod, LastClosure } from '../types'
 
 type CashSummarySectionProps = {
   canEditOpeningBalance: boolean
   currentCashBalance: number
-  incomeCards: CashSummaryPeriodTotals
+  incomeAmount: number
   lastClosure: LastClosure | null
   onEditOpeningBalance: () => void
   onOpenCashWithInheritedFloat: () => void
@@ -18,34 +18,23 @@ type CashSummarySectionProps = {
   openingWithInheritedSaving: boolean
   paymentMethods: readonly CommercialPaymentMethod[]
   paymentsByMethod: Record<string, number>
-  workPerformedCards: CashSummaryPeriodTotals
+  workPerformedAmount: number
 }
 
 type CashMetricCardProps = {
+  amount: number
   title: string
-  values: CashSummaryPeriodTotals
 }
 
-function CashMetricCard({ title, values }: CashMetricCardProps) {
+function CashMetricCard({ amount, title }: CashMetricCardProps) {
   return (
     <div className="card">
       <div className="flex items-center justify-between mb-2">
         <span className="text-sm text-gray-600 dark:text-gray-400">{title}</span>
       </div>
-      <div className="space-y-1 text-sm">
-        <div className="flex justify-between">
-          <span className="text-gray-600 dark:text-gray-400">Día</span>
-          <strong>{formatCurrency(Number(values.day || 0))}</strong>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-gray-600 dark:text-gray-400">Mes</span>
-          <strong>{formatCurrency(Number(values.month || 0))}</strong>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-gray-600 dark:text-gray-400">Año</span>
-          <strong>{formatCurrency(Number(values.year || 0))}</strong>
-        </div>
-      </div>
+      <p className="text-2xl font-bold text-gray-900 dark:text-white">
+        {formatCurrency(Number(amount || 0))}
+      </p>
     </div>
   )
 }
@@ -53,7 +42,7 @@ function CashMetricCard({ title, values }: CashMetricCardProps) {
 export default function CashSummarySection({
   canEditOpeningBalance,
   currentCashBalance,
-  incomeCards,
+  incomeAmount,
   lastClosure,
   onEditOpeningBalance,
   onOpenCashWithInheritedFloat,
@@ -62,7 +51,7 @@ export default function CashSummarySection({
   openingWithInheritedSaving,
   paymentMethods,
   paymentsByMethod,
-  workPerformedCards
+  workPerformedAmount
 }: CashSummarySectionProps) {
   return (
     <>
@@ -156,8 +145,8 @@ export default function CashSummarySection({
           </div>
         </div>
 
-        <CashMetricCard title="Cobrado real" values={incomeCards} />
-        <CashMetricCard title="Trabajo realizado" values={workPerformedCards} />
+        <CashMetricCard amount={incomeAmount} title="Cobrado real" />
+        <CashMetricCard amount={workPerformedAmount} title="Trabajo realizado" />
 
         <div className="card bg-gradient-to-br from-blue-600 to-blue-700 text-white">
           <div className="flex items-center justify-between mb-2">

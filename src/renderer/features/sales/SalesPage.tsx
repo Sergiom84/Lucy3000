@@ -4,6 +4,7 @@ import {
   Clock,
   CreditCard,
   FileText,
+  Pencil,
   Plus,
   Search,
   ShoppingCart,
@@ -34,6 +35,7 @@ import {
   preloadSalesCatalogs
 } from './salesApi'
 import {
+  calculateAdjustedItemPrice,
   formatFamilyLabel,
   getSaleItemLabel,
   mapSaleClient,
@@ -116,6 +118,11 @@ export default function Sales() {
   const [pendingCollectionPaymentMethod, setPendingCollectionPaymentMethod] = useState<SalePaymentMethod>('CASH')
   const [pendingCollectionCashDecisionModalOpen, setPendingCollectionCashDecisionModalOpen] = useState(false)
   const [pendingCollectionSaving, setPendingCollectionSaving] = useState(false)
+  const [priceAdjustmentItemId, setPriceAdjustmentItemId] = useState<string | null>(null)
+  const [priceAdjustmentDraft, setPriceAdjustmentDraft] = useState({
+    euros: '',
+    percent: ''
+  })
   const [submitting, setSubmitting] = useState(false)
   const {
     accountBalanceHistory,
@@ -262,6 +269,7 @@ export default function Sales() {
         id: `${type}-${item.id}-${Date.now()}`,
         type,
         name: type === 'bono' ? (item as BonoTemplate).description : (item as Product | Service).name,
+        basePrice: Number(item.price),
         price: Number(item.price),
         quantity: 1,
         ...(type === 'product'
@@ -292,6 +300,52 @@ export default function Sales() {
 
   const removeFromCart = (id: string) => {
     setCart((current) => current.filter((item) => item.id !== id))
+    if (priceAdjustmentItemId === id) {
+      closePriceAdjustmentModal()
+    }
+  }
+
+  const openPriceAdjustmentModal = (item: CartItem) => {
+    setPriceAdjustmentItemId(item.id)
+    setPriceAdjustmentDraft({
+      euros: item.priceIncreaseEuros ? String(item.priceIncreaseEuros) : '',
+      percent: item.priceIncreasePercent ? String(item.priceIncreasePercent) : ''
+    })
+  }
+
+  const closePriceAdjustmentModal = () => {
+    setPriceAdjustmentItemId(null)
+    setPriceAdjustmentDraft({
+      euros: '',
+      percent: ''
+    })
+  }
+
+  const applyPriceAdjustment = () => {
+    if (!priceAdjustmentItemId) return
+
+    const eurosIncrease = parsePositiveNumericInput(priceAdjustmentDraft.euros)
+    const percentIncrease = parsePositiveNumericInput(priceAdjustmentDraft.percent)
+
+    setCart((current) =>
+      current.map((item) => {
+        if (item.id !== priceAdjustmentItemId) return item
+
+        const basePrice = item.basePrice ?? item.price
+        return {
+          ...item,
+          basePrice,
+          priceIncreaseEuros: eurosIncrease,
+          priceIncreasePercent: percentIncrease,
+          price: calculateAdjustedItemPrice({
+            basePrice,
+            eurosIncrease,
+            percentIncrease
+          })
+        }
+      })
+    )
+    closePriceAdjustmentModal()
   }
 
   const calculateTotals = () => {
@@ -1197,6 +1251,18 @@ export default function Sales() {
   const pendingCollectionRemainingAfterDraft = roundCurrency(
     Math.max(0, pendingCollectionRemainingAmount - pendingCollectionAmountDraft)
   )
+  const priceAdjustmentItem = cart.find((item) => item.id === priceAdjustmentItemId) ?? null
+  const priceAdjustmentBasePrice = priceAdjustmentItem?.basePrice ?? priceAdjustmentItem?.price ?? 0
+  const priceAdjustmentEurosIncrease = parsePositiveNumericInput(priceAdjustmentDraft.euros)
+  const priceAdjustmentPercentIncrease = parsePositiveNumericInput(priceAdjustmentDraft.percent)
+  const priceAdjustmentPreviewPrice = calculateAdjustedItemPrice({
+    basePrice: priceAdjustmentBasePrice,
+    eurosIncrease: priceAdjustmentEurosIncrease,
+    percentIncrease: priceAdjustmentPercentIncrease
+  })
+  const priceAdjustmentPreviewIncrease = roundCurrency(
+    Math.max(0, priceAdjustmentPreviewPrice - priceAdjustmentBasePrice)
+  )
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -1697,31 +1763,50 @@ export default function Sales() {
                     <p>Carrito vacío</p>
                   </div>
                 ) : (
-                  cart.map((item) => (
-                    <div key={item.id} className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                      <div className="flex-1">
-                        <p className="font-medium text-gray-900 dark:text-white text-sm">{item.name}</p>
-                        {item.detail ? (
-                          <p className="text-xs text-gray-500 dark:text-gray-400">{item.detail}</p>
-                        ) : null}
-                        <p className="text-sm text-gray-600 dark:text-gray-400">
-                          €{item.price.toFixed(2)} × {item.quantity}
-                        </p>
+                  cart.map((item) => {
+                    const basePrice = item.basePrice ?? item.price
+                    const itemPriceIncrease = roundCurrency(Math.max(0, item.price - basePrice))
+
+                    return (
+                      <div key={item.id} className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-gray-900 dark:text-white text-sm">{item.name}</p>
+                          {item.detail ? (
+                            <p className="text-xs text-gray-500 dark:text-gray-400">{item.detail}</p>
+                          ) : null}
+                          <p className="text-sm text-gray-600 dark:text-gray-400">
+                            €{item.price.toFixed(2)} × {item.quantity}
+                          </p>
+                          {itemPriceIncrease > 0 ? (
+                            <p className="text-xs text-blue-600 dark:text-blue-400">
+                              Base €{basePrice.toFixed(2)} + €{itemPriceIncrease.toFixed(2)}
+                            </p>
+                          ) : null}
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <button onClick={() => updateCartItemQuantity(item.id, -1)} className="btn btn-secondary btn-sm">
+                            -
+                          </button>
+                          <span className="w-8 text-center font-semibold">{item.quantity}</span>
+                          <button onClick={() => updateCartItemQuantity(item.id, 1)} className="btn btn-secondary btn-sm">
+                            <Plus className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openPriceAdjustmentModal(item)}
+                            className="text-gray-600 transition-colors hover:text-blue-600 dark:text-gray-300 dark:hover:text-blue-400"
+                            aria-label={`Incrementar precio de ${item.name}`}
+                            title="Incrementar precio"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => removeFromCart(item.id)} className="text-red-600" aria-label={`Eliminar ${item.name}`}>
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => updateCartItemQuantity(item.id, -1)} className="btn btn-secondary btn-sm">
-                          -
-                        </button>
-                        <span className="w-8 text-center font-semibold">{item.quantity}</span>
-                        <button onClick={() => updateCartItemQuantity(item.id, 1)} className="btn btn-secondary btn-sm">
-                          <Plus className="w-4 h-4" />
-                        </button>
-                        <button onClick={() => removeFromCart(item.id)} className="text-red-600">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))
+                    )
+                  })
                 )}
               </div>
 
@@ -2200,6 +2285,88 @@ export default function Sales() {
           </div>
         </div>
       )}
+
+      <Modal
+        isOpen={Boolean(priceAdjustmentItem)}
+        onClose={closePriceAdjustmentModal}
+        title="Incrementar precio"
+        maxWidth="sm"
+      >
+        {priceAdjustmentItem ? (
+          <div className="space-y-4">
+            <div className="rounded-lg border border-gray-200 px-4 py-3 dark:border-gray-700">
+              <p className="font-semibold text-gray-900 dark:text-white">{priceAdjustmentItem.name}</p>
+              <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-gray-500 dark:text-gray-400">Precio base</p>
+                  <p className="font-semibold text-gray-900 dark:text-white">
+                    {formatCurrency(priceAdjustmentBasePrice)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-500 dark:text-gray-400">Precio final</p>
+                  <p className="font-semibold text-blue-600 dark:text-blue-400">
+                    {formatCurrency(priceAdjustmentPreviewPrice)}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="label">Incremento (€)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={priceAdjustmentDraft.euros}
+                  onChange={(event) =>
+                    setPriceAdjustmentDraft((current) => ({
+                      ...current,
+                      euros: event.target.value
+                    }))
+                  }
+                  className="input"
+                  placeholder="0"
+                />
+              </div>
+              <div>
+                <label className="label">Incremento (%)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={priceAdjustmentDraft.percent}
+                  onChange={(event) =>
+                    setPriceAdjustmentDraft((current) => ({
+                      ...current,
+                      percent: event.target.value
+                    }))
+                  }
+                  className="input"
+                  placeholder="0"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg bg-gray-50 px-4 py-3 text-sm dark:bg-gray-900">
+              <span className="text-gray-600 dark:text-gray-400">Incremento aplicado</span>
+              <span className="font-semibold text-gray-900 dark:text-white">
+                {formatCurrency(priceAdjustmentPreviewIncrease)}
+              </span>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button type="button" onClick={closePriceAdjustmentModal} className="btn btn-secondary">
+                Cancelar
+              </button>
+              <button type="button" onClick={applyPriceAdjustment} className="btn btn-primary">
+                Aplicar
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
 
       <Modal
         isOpen={accountBalanceConfirmModalOpen}

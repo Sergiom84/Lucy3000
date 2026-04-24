@@ -204,7 +204,7 @@ describe('appointment.controller', () => {
     expect(res.status).toHaveBeenCalledWith(201)
   })
 
-  it('creates appointment with multiple services and recalculates end time', async () => {
+  it('creates appointment with multiple services and keeps the requested end time', async () => {
     prismaMock.googleCalendarConfig.findFirst.mockResolvedValue(null)
     prismaMock.service.findMany.mockResolvedValue([
       {
@@ -229,7 +229,7 @@ describe('appointment.controller', () => {
       reminder: true,
       date: new Date('2099-06-15T10:00:00.000Z'),
       startTime: '10:00',
-      endTime: '11:15',
+      endTime: '10:45',
       client: { firstName: 'Ana', lastName: 'Lopez', phone: '600000000', email: 'ana@example.com' },
       user: { id: 'user-1', name: 'Lucy', email: 'admin@lucy3000.com' },
       service: { id: 'service-1', name: 'Limpieza facial' },
@@ -246,7 +246,7 @@ describe('appointment.controller', () => {
       reminder: true,
       date: new Date('2099-06-15T10:00:00.000Z'),
       startTime: '10:00',
-      endTime: '11:15',
+      endTime: '10:45',
       client: { firstName: 'Ana', lastName: 'Lopez', phone: '600000000', email: 'ana@example.com' },
       user: { id: 'user-1', name: 'Lucy', email: 'admin@lucy3000.com' },
       service: { id: 'service-1', name: 'Limpieza facial' },
@@ -271,7 +271,7 @@ describe('appointment.controller', () => {
         professional: 'Lucy',
         date: '2099-06-15T10:00:00.000Z',
         startTime: '10:00',
-        endTime: '10:15',
+        endTime: '10:45',
         status: 'SCHEDULED',
         notes: null,
         reminder: true
@@ -285,7 +285,7 @@ describe('appointment.controller', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           serviceId: 'service-1',
-          endTime: '11:15',
+          endTime: '10:45',
           appointmentServices: {
             create: [
               { serviceId: 'service-1', sortOrder: 0 },
@@ -296,6 +296,109 @@ describe('appointment.controller', () => {
       })
     )
     expect(res.status).toHaveBeenCalledWith(201)
+  })
+
+  it('updates appointment scheduling with the requested end time when services change', async () => {
+    prismaMock.googleCalendarConfig.findFirst.mockResolvedValue(null)
+    prismaMock.appointment.findUnique.mockResolvedValue({
+      id: 'appointment-1',
+      clientId: 'client-1',
+      guestName: null,
+      guestPhone: null,
+      status: 'SCHEDULED',
+      date: new Date('2099-06-15T10:00:00.000Z'),
+      startTime: '10:00',
+      endTime: '10:30',
+      professional: 'Lucy',
+      cabin: 'LUCY',
+      serviceId: 'service-1',
+      sale: null,
+      bonoSessions: [],
+      appointmentServices: [
+        {
+          serviceId: 'service-1',
+          sortOrder: 0,
+          service: { id: 'service-1', name: 'Limpieza facial', duration: 30 }
+        }
+      ]
+    })
+    prismaMock.service.findMany.mockResolvedValue([
+      {
+        id: 'service-2',
+        name: 'Masaje cervical',
+        duration: 45,
+        category: 'Corporal',
+        serviceCode: 'COR-02'
+      }
+    ])
+    prismaMock.appointment.findMany.mockResolvedValue([])
+
+    const updatedAppointment = {
+      id: 'appointment-1',
+      clientId: 'client-1',
+      cabin: 'LUCY',
+      reminder: true,
+      date: new Date('2099-06-15T10:00:00.000Z'),
+      startTime: '10:15',
+      endTime: '11:00',
+      professional: 'Lucy',
+      status: 'SCHEDULED',
+      notes: null,
+      client: { firstName: 'Ana', lastName: 'Lopez', phone: '600000000', email: 'ana@example.com' },
+      user: { id: 'user-1', name: 'Lucy', email: 'admin@lucy3000.com' },
+      service: { id: 'service-2', name: 'Masaje cervical' },
+      appointmentServices: [
+        {
+          serviceId: 'service-2',
+          sortOrder: 0,
+          service: { id: 'service-2', name: 'Masaje cervical' }
+        }
+      ],
+      bonoSessions: [],
+      sale: null,
+      googleCalendarEventId: null
+    }
+
+    prismaMock.appointment.update
+      .mockResolvedValueOnce(updatedAppointment)
+      .mockResolvedValueOnce({
+        ...updatedAppointment,
+        googleCalendarSyncStatus: 'DISABLED',
+        googleCalendarSyncError: null
+      })
+
+    const req = createMockRequest({
+      params: { id: 'appointment-1' },
+      body: {
+        startTime: '10:15',
+        endTime: '11:00',
+        serviceId: 'service-2',
+        serviceIds: ['service-2']
+      }
+    })
+    const res = createMockResponse()
+
+    await updateAppointment(req as any, res)
+
+    expect(prismaMock.appointment.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          serviceId: 'service-2',
+          startTime: '10:15',
+          endTime: '11:00',
+          appointmentServices: {
+            deleteMany: {},
+            create: [{ serviceId: 'service-2', sortOrder: 0 }]
+          }
+        })
+      })
+    )
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'appointment-1',
+        endTime: '11:00'
+      })
+    )
   })
 
   it('rejects appointment creation when the slot is blocked by an agenda block', async () => {

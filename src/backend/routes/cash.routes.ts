@@ -9,6 +9,7 @@ import {
   closeCashRegister,
   addCashMovement,
   getCashMovements,
+  getCashOverview,
   updateOpeningBalance,
   getPrivateNoTicketCashSales,
   createCashCount,
@@ -43,6 +44,7 @@ router.get(
 )
 router.get('/analytics', validateRequest({ query: cashAnalyticsQuerySchema }), getCashAnalytics)
 router.get('/analytics/ranking', validateRequest({ query: cashAnalyticsQuerySchema }), getCashRanking)
+router.get('/overview', validateRequest({ query: cashAnalyticsQuerySchema }), getCashOverview)
 router.get('/:id', validateRequest({ params: cashIdParamSchema }), getCashRegisterById)
 router.post('/open', validateRequest({ body: openCashRegisterBodySchema }), openCashRegister)
 router.post(

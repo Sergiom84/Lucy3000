@@ -4,6 +4,7 @@ import {
   fetchCashAnalytics,
   fetchCashFilterOptions,
   fetchCashHistory,
+  fetchCashOverview,
   fetchCashRanking,
   fetchCashSummary,
   fetchPrivateNoTicketCash
@@ -11,8 +12,10 @@ import {
 import type {
   CashAnalyticsRow,
   CashClientOption,
+  CashDateRange,
   CashFilters,
   CashHistoryEntry,
+  CashOverview,
   CashProductOption,
   CashRanking,
   CashRegister,
@@ -23,11 +26,12 @@ import type {
 } from './types'
 
 type UseCashPageDataArgs = {
+  dateRange: CashDateRange
   filters: CashFilters
   period: Period
 }
 
-export const useCashPageData = ({ filters, period }: UseCashPageDataArgs) => {
+export const useCashPageData = ({ dateRange, filters, period }: UseCashPageDataArgs) => {
   const [activeCashRegister, setActiveCashRegister] = useState<CashRegister | null>(null)
   const [summary, setSummary] = useState<CashSummary | null>(null)
   const [analyticsRows, setAnalyticsRows] = useState<CashAnalyticsRow[]>([])
@@ -41,6 +45,8 @@ export const useCashPageData = ({ filters, period }: UseCashPageDataArgs) => {
   const [privateCashTotal, setPrivateCashTotal] = useState(0)
   const [privateCashLoading, setPrivateCashLoading] = useState(false)
   const [cashHistory, setCashHistory] = useState<CashHistoryEntry[]>([])
+  const [cashOverview, setCashOverview] = useState<CashOverview | null>(null)
+  const [cashOverviewLoading, setCashOverviewLoading] = useState(false)
 
   const loadSummary = async () => {
     try {
@@ -63,10 +69,10 @@ export const useCashPageData = ({ filters, period }: UseCashPageDataArgs) => {
     }
   }
 
-  const loadAnalytics = async () => {
+  const loadAnalytics = async (nextDateRange: CashDateRange = dateRange) => {
     try {
       setAnalyticsLoading(true)
-      const nextAnalytics = await fetchCashAnalytics(period, filters)
+      const nextAnalytics = await fetchCashAnalytics(period, filters, nextDateRange)
       setAnalyticsRows(nextAnalytics.rows)
     } catch {
       toast.error('No se pudo cargar la analítica de caja')
@@ -75,9 +81,9 @@ export const useCashPageData = ({ filters, period }: UseCashPageDataArgs) => {
     }
   }
 
-  const loadRanking = async () => {
+  const loadRanking = async (nextDateRange: CashDateRange = dateRange) => {
     try {
-      const nextRanking = await fetchCashRanking(period, filters)
+      const nextRanking = await fetchCashRanking(period, filters, nextDateRange)
       setRanking(nextRanking)
     } catch {
       toast.error('No se pudo cargar el ranking')
@@ -92,6 +98,20 @@ export const useCashPageData = ({ filters, period }: UseCashPageDataArgs) => {
     } catch {
       toast.error('No se pudo cargar el historial de caja')
       return false
+    }
+  }
+
+  const loadCashOverview = async (nextDateRange: CashDateRange = dateRange) => {
+    try {
+      setCashOverviewLoading(true)
+      const nextOverview = await fetchCashOverview(period, filters, nextDateRange)
+      setCashOverview(nextOverview)
+      return true
+    } catch {
+      toast.error('No se pudo cargar el resumen de caja')
+      return false
+    } finally {
+      setCashOverviewLoading(false)
     }
   }
 
@@ -131,18 +151,21 @@ export const useCashPageData = ({ filters, period }: UseCashPageDataArgs) => {
 
   useEffect(() => {
     if (!initialDataLoaded) return
-    void Promise.all([loadAnalytics(), loadRanking()])
-  }, [filters, initialDataLoaded, period])
+    void Promise.all([loadAnalytics(), loadRanking(), loadCashOverview()])
+  }, [dateRange.endDate, dateRange.startDate, filters, initialDataLoaded, period])
 
   return {
     activeCashRegister,
     analyticsLoading,
     analyticsRows,
     cashHistory,
+    cashOverview,
+    cashOverviewLoading,
     clearPrivateCashData,
     clients,
     loadCashHistory,
     loadAnalytics,
+    loadCashOverview,
     loadPrivateNoTicketCash,
     loadRanking,
     loadSummary,

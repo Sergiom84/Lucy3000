@@ -4,6 +4,7 @@ export {
   createCashCount,
   getCashAnalytics,
   getCashMovements,
+  getCashOverview,
   getCashRanking,
   getCashRegisterById,
   getCashRegisters,

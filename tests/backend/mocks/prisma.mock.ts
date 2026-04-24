@@ -28,6 +28,7 @@ export const prismaMock: any = {
 
   pendingPayment: {
     findUnique: vi.fn(),
+    findMany: vi.fn(),
     create: vi.fn(),
     update: vi.fn()
   },
@@ -63,6 +64,8 @@ export const prismaMock: any = {
   },
 
   bonoSession: {
+    count: vi.fn(),
+    findMany: vi.fn(),
     createMany: vi.fn(),
     deleteMany: vi.fn(),
     update: vi.fn(),

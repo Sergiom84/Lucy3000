@@ -1,23 +1,35 @@
 import api from '../../utils/api'
 import type {
   CashAnalyticsRow,
+  CashDateRange,
   CashFilterOptions,
   CashFilters,
   CashHistoryEntry,
+  CashOverview,
   CashRanking,
   CashSummary,
   Period,
   PrivateNoTicketCashResponse
 } from './types'
 
-const buildCashAnalyticsParams = (period: Period, filters: CashFilters) => ({
-  period,
-  ...filters,
-  clientId: filters.clientId || undefined,
-  serviceId: filters.serviceId || undefined,
-  productId: filters.productId || undefined,
-  paymentMethod: filters.paymentMethod || undefined
-})
+const buildCashAnalyticsParams = (
+  period: Period,
+  filters: CashFilters,
+  dateRange?: CashDateRange
+) => {
+  const apiPeriod = period === 'CUSTOM' ? 'DAY' : period
+
+  return {
+    period: apiPeriod,
+    startDate: dateRange?.startDate || undefined,
+    endDate: dateRange?.endDate || undefined,
+    ...filters,
+    clientId: filters.clientId || undefined,
+    serviceId: filters.serviceId || undefined,
+    productId: filters.productId || undefined,
+    paymentMethod: filters.paymentMethod || undefined
+  }
+}
 
 export const fetchCashSummary = async (): Promise<CashSummary> => {
   const response = await api.get('/cash/summary')
@@ -40,10 +52,11 @@ export const fetchCashFilterOptions = async (): Promise<CashFilterOptions> => {
 
 export const fetchCashAnalytics = async (
   period: Period,
-  filters: CashFilters
+  filters: CashFilters,
+  dateRange?: CashDateRange
 ): Promise<{ rows: CashAnalyticsRow[] }> => {
   const response = await api.get<{ rows: CashAnalyticsRow[] }>('/cash/analytics', {
-    params: buildCashAnalyticsParams(period, filters)
+    params: buildCashAnalyticsParams(period, filters, dateRange)
   })
 
   return response.data
@@ -51,10 +64,23 @@ export const fetchCashAnalytics = async (
 
 export const fetchCashRanking = async (
   period: Period,
-  filters: CashFilters
+  filters: CashFilters,
+  dateRange?: CashDateRange
 ): Promise<CashRanking> => {
   const response = await api.get<CashRanking>('/cash/analytics/ranking', {
-    params: buildCashAnalyticsParams(period, filters)
+    params: buildCashAnalyticsParams(period, filters, dateRange)
+  })
+
+  return response.data
+}
+
+export const fetchCashOverview = async (
+  period: Period,
+  filters: CashFilters,
+  dateRange?: CashDateRange
+): Promise<CashOverview> => {
+  const response = await api.get<CashOverview>('/cash/overview', {
+    params: buildCashAnalyticsParams(period, filters, dateRange)
   })
 
   return response.data

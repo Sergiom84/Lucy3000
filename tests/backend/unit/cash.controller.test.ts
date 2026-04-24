@@ -3,6 +3,7 @@ import {
   addCashMovement,
   closeCashRegister,
   getCashAnalytics,
+  getCashOverview,
   getPrivateNoTicketCashSales,
   getCashSummary,
   openCashRegister
@@ -330,6 +331,125 @@ describe('cash.controller', () => {
         })
       ])
     })
+  })
+
+  it('builds overview data with sales, abonos and cash movements', async () => {
+    const saleDate = new Date('2026-03-07T10:00:00.000Z')
+    const analyticsSale = {
+      id: 'sale-1',
+      saleNumber: 'V-000100',
+      date: saleDate,
+      clientId: 'client-1',
+      professional: 'LUCY',
+      total: 100,
+      paymentMethod: 'CARD',
+      accountBalanceMovements: [{ type: 'CONSUMPTION', amount: 30 }],
+      paymentBreakdown: null,
+      client: { id: 'client-1', firstName: 'Ana', lastName: 'Lopez' },
+      appointment: null,
+      user: { name: 'Administrador' },
+      items: [
+        {
+          id: 'item-1',
+          description: 'Higiene facial',
+          quantity: 1,
+          subtotal: 100,
+          serviceId: 'service-1',
+          productId: null,
+          service: { id: 'service-1', name: 'Higiene facial' },
+          product: null
+        }
+      ]
+    }
+
+    prismaMock.sale.findMany
+      .mockResolvedValueOnce([analyticsSale])
+      .mockResolvedValueOnce([
+        {
+          id: 'sale-1',
+          total: 100,
+          discount: 10,
+          items: [{ quantity: 1, subtotal: 100 }]
+        }
+      ])
+    prismaMock.pendingPaymentCollection.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ amount: 15, paymentMethod: 'CASH', showInOfficialCash: true }])
+    prismaMock.cashRegister.findFirst.mockResolvedValue({
+      id: 'cash-1',
+      openingBalance: 50,
+      status: 'OPEN',
+      movements: [
+        { type: 'INCOME', amount: 70, paymentMethod: 'CASH' },
+        { type: 'DEPOSIT', amount: 10, paymentMethod: null },
+        { type: 'EXPENSE', amount: 5, paymentMethod: null }
+      ]
+    })
+    prismaMock.accountBalanceMovement.findMany.mockResolvedValue([
+      { type: 'TOP_UP', amount: 20, paymentMethod: 'CASH' }
+    ])
+    prismaMock.pendingPayment.findMany.mockResolvedValue([{ amount: 40 }])
+    prismaMock.bonoSession.count.mockResolvedValue(2)
+
+    const req = createMockRequest({
+      query: {
+        period: 'DAY',
+        type: 'ALL'
+      }
+    })
+    const res = createMockResponse()
+
+    await getCashOverview(req as any, res)
+
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        summary: expect.objectContaining({
+          billing: {
+            billed: 100,
+            totalCollected: 90
+          },
+          paymentMethods: {
+            cash: 20,
+            card: 70,
+            other: 0,
+            pendingCurrent: 40,
+            accountBalance: 30
+          },
+          serviceTypes: {
+            withDiscounts: 10,
+            freeOfChargeCount: 0,
+            topUps: 20,
+            pendingCollections: 15,
+            amortizedCount: 2
+          },
+          cash: {
+            openingBalance: 50,
+            manualMovements: 5,
+            currentCash: 125
+          }
+        }),
+        salesAndServices: [
+          {
+            id: 'SERVICE:service-1',
+            description: 'Higiene facial',
+            itemType: 'SERVICE',
+            quantity: 1,
+            amount: 100
+          }
+        ],
+        distribution: {
+          servicesAmount: 100,
+          productsAmount: 0
+        },
+        professionals: [
+          {
+            name: 'Lucy',
+            services: 1,
+            amount: 100
+          }
+        ]
+      })
+    )
   })
 
   it('returns the selected professional for private no-ticket cash sales', async () => {

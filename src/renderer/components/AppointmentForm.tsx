@@ -879,6 +879,10 @@ export default function AppointmentForm({
     }
   }
 
+  const handleEndTimeInputChange = (value: string) => {
+    setEndTimeInput(value)
+  }
+
   const handleCopyStartTimeInputChange = (value: string) => {
     setCopyStartTimeInput(value)
   }
@@ -1772,10 +1776,9 @@ export default function AppointmentForm({
             </label>
             <TimeInput
               value={endTimeInput}
-              onChange={() => {}}
+              onChange={handleEndTimeInputChange}
               onBlur={handleEndTimeBlur}
               placeholder="08:15"
-              readOnly
               disabled={!normalizedStartTime || formData.serviceIds.length === 0}
             />
             {endTimeState.error && (

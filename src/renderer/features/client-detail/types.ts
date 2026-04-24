@@ -69,6 +69,13 @@ export type ClientDetailSale = ClientDetailSaleLabelSource & {
   }> | null
 }
 
+export type ClientDetailSaleNote = {
+  id: string
+  date: string
+  treatment: string
+  note: string
+}
+
 export type ClientDetailAppointment = {
   id: string
   date: string

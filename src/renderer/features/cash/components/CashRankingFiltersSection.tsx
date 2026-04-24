@@ -3,6 +3,7 @@ import { formatCurrency } from '../../../utils/format'
 import { paymentMethodLabel } from '../../../utils/tickets'
 import type {
   CashClientOption,
+  CashDateRange,
   CashFilters,
   CashProductOption,
   CashRanking,
@@ -13,12 +14,15 @@ import type {
 } from '../types'
 
 type CashFilterChangeHandler = <Key extends keyof CashFilters>(key: Key, value: CashFilters[Key]) => void
+type CashPeriodPreset = Exclude<Period, 'YEAR' | 'CUSTOM'>
 
 type CashRankingFiltersSectionProps = {
   clients: CashClientOption[]
+  dateRange: CashDateRange
   filters: CashFilters
+  onDateRangeChange: (field: keyof CashDateRange, value: string) => void
   onFilterChange: CashFilterChangeHandler
-  onPeriodChange: (period: Period) => void
+  onPeriodChange: (period: CashPeriodPreset) => void
   onResetFilters: () => void
   paymentMethods: readonly CommercialPaymentMethod[]
   period: Period
@@ -33,9 +37,17 @@ const formatQuantity = (value: number) => {
   return value.toFixed(3).replace(/\.?0+$/, '')
 }
 
+const periodOptions: Array<{ label: string; value: CashPeriodPreset }> = [
+  { value: 'DAY', label: 'Día' },
+  { value: 'WEEK', label: 'Semanal' },
+  { value: 'MONTH', label: 'Mensual' }
+]
+
 export default function CashRankingFiltersSection({
   clients,
+  dateRange,
   filters,
+  onDateRangeChange,
   onFilterChange,
   onPeriodChange,
   onResetFilters,
@@ -92,16 +104,37 @@ export default function CashRankingFiltersSection({
       </div>
 
       <div className="card space-y-4">
-        <div className="flex gap-2 flex-wrap">
-          {(['DAY', 'WEEK', 'MONTH', 'YEAR'] as Period[]).map((item) => (
+        <div className="flex flex-wrap items-end gap-2">
+          {periodOptions.map((item) => (
             <button
-              key={item}
-              onClick={() => onPeriodChange(item)}
-              className={`btn ${period === item ? 'btn-primary' : 'btn-secondary'}`}
+              key={item.value}
+              onClick={() => onPeriodChange(item.value)}
+              className={`btn ${period === item.value ? 'btn-primary' : 'btn-secondary'}`}
+              type="button"
             >
-              {item === 'DAY' ? 'Día' : item === 'WEEK' ? 'Semanal' : item === 'MONTH' ? 'Mensual' : 'Anual'}
+              {item.label}
             </button>
           ))}
+
+          <label className="min-w-[9.5rem] flex-1 text-xs font-medium text-gray-600 dark:text-gray-400 sm:flex-none">
+            Fecha inicio
+            <input
+              className={`input mt-1 text-sm ${period === 'CUSTOM' ? 'border-primary-500' : ''}`}
+              onChange={(event) => onDateRangeChange('startDate', event.target.value)}
+              type="date"
+              value={dateRange.startDate}
+            />
+          </label>
+
+          <label className="min-w-[9.5rem] flex-1 text-xs font-medium text-gray-600 dark:text-gray-400 sm:flex-none">
+            Fecha fin
+            <input
+              className={`input mt-1 text-sm ${period === 'CUSTOM' ? 'border-primary-500' : ''}`}
+              onChange={(event) => onDateRangeChange('endDate', event.target.value)}
+              type="date"
+              value={dateRange.endDate}
+            />
+          </label>
         </div>
 
         <div className="grid md:grid-cols-2 gap-3">
