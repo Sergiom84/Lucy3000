@@ -56,12 +56,18 @@ export type ClientDetailSale = ClientDetailSaleLabelSource & {
   items: ClientDetailSaleItem[]
   pendingPayment?: {
     status?: string | null
+    collections?: Array<{
+      id?: string | null
+    }> | null
   } | null
-  paymentBreakdown?: Array<{
-    amount?: CurrencyValue
-    paymentMethod?: string | null
-    showInOfficialCash?: boolean | null
-  }> | null
+  paymentBreakdown?:
+    | string
+    | Array<{
+        amount?: CurrencyValue
+        paymentMethod?: string | null
+        showInOfficialCash?: boolean | null
+      }>
+    | null
   accountBalanceMovements?: Array<{
     amount?: CurrencyValue
     balanceAfter?: CurrencyValue

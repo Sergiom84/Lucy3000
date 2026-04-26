@@ -11,6 +11,7 @@ import {
   buildPendingCollectionTicketPayload,
   buildSaleTicketPayload,
   buildQuoteHtml,
+  paymentMethodLabel,
   salePaymentMethodLabel
 } from '../../utils/tickets'
 import { buildClientPendingSummary, type PendingPaymentRow } from '../../utils/clientPendingPayments'
@@ -28,6 +29,7 @@ import {
   fetchSaleDetail,
   updateClientAppointmentStatus,
   updateClientRecord,
+  updateSalePaymentMethod,
   updateSaleNotes
 } from './clientDetailApi'
 import ClientDetailAbonosPanel from './components/ClientDetailAbonosPanel'
@@ -73,6 +75,10 @@ type PendingCollectionExecutionOptions = {
   paymentMethod: 'CASH' | 'CARD' | 'BIZUM' | 'ABONO'
   accountBalanceUsageAmount?: number
 }
+
+type EditableSalePaymentMethod = 'CASH' | 'CARD' | 'BIZUM'
+
+const editableSalePaymentMethods: EditableSalePaymentMethod[] = ['CASH', 'CARD', 'BIZUM']
 
 const appointmentStatusLabel: Record<string, string> = {
   SCHEDULED: 'Programada',
@@ -162,6 +168,26 @@ const getSaleDisplayStatusLabel = (sale: ClientDetailSale) =>
 const getSaleDisplayStatusBadgeClassName = (sale: ClientDetailSale) =>
   getSaleDisplayStatus(sale) === 'PENDING' ? 'badge-warning' : 'badge-success'
 
+const hasSaleStoredPaymentBreakdown = (sale: ClientDetailSale) => {
+  if (Array.isArray(sale.paymentBreakdown)) return sale.paymentBreakdown.length > 0
+  return String(sale.paymentBreakdown || '').trim().length > 0
+}
+
+const hasSaleAccountBalanceUsage = (sale: ClientDetailSale) =>
+  (sale.accountBalanceMovements || []).some(
+    (movement) => String(movement.type || '').toUpperCase() === 'CONSUMPTION' && Number(movement.amount || 0) > 0
+  )
+
+const hasSalePendingCollections = (sale: ClientDetailSale) =>
+  (sale.pendingPayment?.collections || []).length > 0
+
+const normalizeEditableSalePaymentMethod = (paymentMethod: unknown): EditableSalePaymentMethod => {
+  const normalizedPaymentMethod = String(paymentMethod || '').toUpperCase()
+  return editableSalePaymentMethods.includes(normalizedPaymentMethod as EditableSalePaymentMethod)
+    ? (normalizedPaymentMethod as EditableSalePaymentMethod)
+    : 'CASH'
+}
+
 const getSaleTreatmentLabel = (sale: ClientDetailSaleLabelSource | null | undefined) => {
   const labels = Array.isArray(sale?.items)
     ? sale.items
@@ -215,6 +241,9 @@ export default function ClientDetail() {
   const [noteDraft, setNoteDraft] = useState('')
   const [noteSaving, setNoteSaving] = useState(false)
   const [saleNoteSavingId, setSaleNoteSavingId] = useState<string | null>(null)
+  const [paymentMethodModalSale, setPaymentMethodModalSale] = useState<ClientDetailSale | null>(null)
+  const [paymentMethodDraft, setPaymentMethodDraft] = useState<EditableSalePaymentMethod>('CASH')
+  const [paymentMethodSaving, setPaymentMethodSaving] = useState(false)
   const [accountBalanceDraft, setAccountBalanceDraft] = useState<ClientDetailAccountBalanceDraft>({
     description: '',
     amount: '',
@@ -615,6 +644,52 @@ export default function ClientDetail() {
     }
   }
 
+  const canEditSalePaymentMethod = (sale: ClientDetailSale) =>
+    getSaleDisplayStatus(sale) === 'COMPLETED' &&
+    editableSalePaymentMethods.includes(String(sale.paymentMethod || '').toUpperCase() as EditableSalePaymentMethod) &&
+    !hasSaleStoredPaymentBreakdown(sale) &&
+    !hasSaleAccountBalanceUsage(sale) &&
+    !hasSalePendingCollections(sale)
+
+  const handleOpenSalePaymentMethodModal = (sale: ClientDetailSale) => {
+    if (!canEditSalePaymentMethod(sale)) {
+      toast.error('Solo se puede corregir el método de pago de ventas cobradas con un pago directo')
+      return
+    }
+
+    setPaymentMethodModalSale(sale)
+    setPaymentMethodDraft(normalizeEditableSalePaymentMethod(sale.paymentMethod))
+  }
+
+  const handleCloseSalePaymentMethodModal = () => {
+    if (paymentMethodSaving) return
+    setPaymentMethodModalSale(null)
+    setPaymentMethodDraft('CASH')
+  }
+
+  const handleConfirmSalePaymentMethodUpdate = async () => {
+    if (!paymentMethodModalSale) return
+
+    if (paymentMethodDraft === normalizeEditableSalePaymentMethod(paymentMethodModalSale.paymentMethod)) {
+      handleCloseSalePaymentMethodModal()
+      return
+    }
+
+    try {
+      setPaymentMethodSaving(true)
+      await updateSalePaymentMethod(paymentMethodModalSale.id, paymentMethodDraft)
+      toast.success('Método de pago actualizado')
+      setPaymentMethodModalSale(null)
+      setPaymentMethodDraft('CASH')
+      await refreshClient()
+    } catch (error: any) {
+      console.error('Error updating sale payment method:', error)
+      toast.error(error.response?.data?.error || 'No se pudo actualizar el método de pago')
+    } finally {
+      setPaymentMethodSaving(false)
+    }
+  }
+
   const handleConsumeBonoSession = async (bonoPackId: string) => {
     try {
       await consumeBonoPack(bonoPackId)
@@ -883,6 +958,8 @@ export default function ClientDetail() {
             getSaleDisplayStatusBadgeClassName={getSaleDisplayStatusBadgeClassName}
             getSaleDisplayStatusLabel={getSaleDisplayStatusLabel}
             getSaleTreatmentLabel={getSaleTreatmentLabel}
+            canEditSalePaymentMethod={canEditSalePaymentMethod}
+            onEditPaymentMethod={handleOpenSalePaymentMethodModal}
             onPrintSale={(saleId) => void handlePrintSale(saleId)}
           />
         )
@@ -1019,6 +1096,65 @@ export default function ClientDetail() {
           onSuccess={handleFormSuccess}
           onCancel={() => setShowEditModal(false)}
         />
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(paymentMethodModalSale)}
+        onClose={handleCloseSalePaymentMethodModal}
+        title="Modificar método de pago"
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          {paymentMethodModalSale && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+              <div className="flex items-center justify-between gap-4">
+                <span className="font-medium">{paymentMethodModalSale.saleNumber || 'Venta'}</span>
+                <span>{formatCurrency(Number(paymentMethodModalSale.total || 0))}</span>
+              </div>
+              <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Pago actual: {salePaymentMethodLabel(paymentMethodModalSale)}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="label" htmlFor="sale-payment-method">
+              Método de pago
+            </label>
+            <select
+              id="sale-payment-method"
+              className="input"
+              value={paymentMethodDraft}
+              onChange={(event) => setPaymentMethodDraft(normalizeEditableSalePaymentMethod(event.target.value))}
+              disabled={paymentMethodSaving}
+            >
+              {editableSalePaymentMethods.map((method) => (
+                <option key={method} value={method}>
+                  {paymentMethodLabel(method)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={handleCloseSalePaymentMethodModal}
+              className="btn btn-secondary"
+              disabled={paymentMethodSaving}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleConfirmSalePaymentMethodUpdate()}
+              className="btn btn-primary"
+              disabled={paymentMethodSaving}
+            >
+              {paymentMethodSaving ? 'Guardando...' : 'Guardar'}
+            </button>
+          </div>
+        </div>
       </Modal>
 
       <Modal

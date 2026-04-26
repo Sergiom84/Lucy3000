@@ -447,7 +447,18 @@ export const updateSale = async (req: Request, res: Response) => {
           pendingPayment: {
             select: {
               amount: true,
-              status: true
+              status: true,
+              collections: {
+                select: {
+                  id: true
+                }
+              }
+            }
+          },
+          accountBalanceMovements: {
+            select: {
+              type: true,
+              amount: true
             }
           }
         }
@@ -460,6 +471,30 @@ export const updateSale = async (req: Request, res: Response) => {
       const nextStatus = (status || sale.status) as string
       let nextPaymentMethod = (paymentMethod || sale.paymentMethod) as string
       const normalizedItems = normalizeItemsFromSale(sale.items)
+      const isPaymentMethodCorrection =
+        Boolean(paymentMethod) &&
+        String(paymentMethod || '').toUpperCase() !== String(sale.paymentMethod || '').toUpperCase()
+      const hasStoredPaymentBreakdown = Boolean(String(sale.paymentBreakdown || '').trim())
+      const hasAccountBalanceUsage = (sale.accountBalanceMovements || []).some(
+        (movement) => String(movement.type || '').toUpperCase() === 'CONSUMPTION' && Number(movement.amount || 0) > 0
+      )
+      const hasPendingCollections = (sale.pendingPayment?.collections || []).length > 0
+      const isCompletedDirectPaymentCorrection =
+        isPaymentMethodCorrection && sale.status === 'COMPLETED' && nextStatus === 'COMPLETED'
+
+      if (
+        isCompletedDirectPaymentCorrection &&
+        (!['CASH', 'CARD', 'BIZUM'].includes(String(nextPaymentMethod || '').toUpperCase()) ||
+          hasStoredPaymentBreakdown ||
+          hasAccountBalanceUsage ||
+          hasPendingCollections)
+      ) {
+        throw new BusinessError(
+          400,
+          'Payment method correction is only available for completed sales with a single direct payment'
+        )
+      }
+
       const bonoMatches = getBonoMatchesForSale(
         normalizedItems.map((item) => ({
           productId: item.productId,
@@ -505,6 +540,8 @@ export const updateSale = async (req: Request, res: Response) => {
           ? false
           : sale.status === 'PENDING' && nextStatus === 'COMPLETED'
             ? true
+            : isPaymentMethodCorrection && nextPaymentMethod !== 'CASH'
+              ? true
             : sale.showInOfficialCash
 
       if (sale.status === 'COMPLETED' && nextStatus !== 'COMPLETED') {

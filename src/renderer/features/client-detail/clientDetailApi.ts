@@ -66,6 +66,14 @@ export const updateSaleNotes = async (saleId: string, notes: string | null) => {
   return response.data
 }
 
+export const updateSalePaymentMethod = async (
+  saleId: string,
+  paymentMethod: 'CASH' | 'CARD' | 'BIZUM'
+) => {
+  const response = await api.put(`/sales/${saleId}`, { paymentMethod })
+  return response.data
+}
+
 export const consumeBonoPack = async (bonoPackId: string) => {
   await api.put(`/bonos/${bonoPackId}/consume`)
 }

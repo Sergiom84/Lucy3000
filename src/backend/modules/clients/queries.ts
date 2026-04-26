@@ -214,6 +214,13 @@ export const getClientByIdOrThrow = async (id: string) => {
     sales: {
       include: {
         items: true,
+        accountBalanceMovements: {
+          select: {
+            type: true,
+            amount: true,
+            balanceAfter: true
+          }
+        },
         pendingPayment: {
           include: {
             collections: {
