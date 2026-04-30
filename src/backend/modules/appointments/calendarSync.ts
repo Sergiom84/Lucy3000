@@ -27,6 +27,9 @@ type AppointmentCalendarDeleteTarget = {
   guestPhone?: string | null
 }
 
+const shouldDeleteAppointmentCalendarEvent = (status: string | null | undefined) =>
+  status === 'CANCELLED' || status === 'NO_SHOW'
+
 const logAppointmentCalendarSyncWarning = (
   message: string,
   appointment: AppointmentCalendarSyncLogTarget,
@@ -64,9 +67,14 @@ export const persistAppointmentCalendarSyncResult = async (
 }
 
 export const syncCreatedAppointmentCalendar = async (appointment: AppointmentRecord) => {
-  const syncResult = await googleCalendarService.upsertAppointmentEvent(
-    buildAppointmentCalendarSyncInput(appointment)
-  )
+  const syncResult = shouldDeleteAppointmentCalendarEvent(appointment.status)
+    ? await googleCalendarService.deleteAppointmentEvent(
+        appointment.googleCalendarEventId,
+        getAppointmentDisplayEmail(appointment)
+      )
+    : await googleCalendarService.upsertAppointmentEvent(
+        buildAppointmentCalendarSyncInput(appointment)
+      )
   const persistedAppointment = await persistAppointmentCalendarSyncResult(appointment.id, syncResult)
 
   logAppointmentCalendarSyncWarning(
@@ -80,7 +88,7 @@ export const syncCreatedAppointmentCalendar = async (appointment: AppointmentRec
 
 export const syncUpdatedAppointmentCalendar = async (appointment: AppointmentRecord) => {
   const syncResult =
-    appointment.status === 'CANCELLED'
+    shouldDeleteAppointmentCalendarEvent(appointment.status)
       ? await googleCalendarService.deleteAppointmentEvent(
           appointment.googleCalendarEventId,
           getAppointmentDisplayEmail(appointment)

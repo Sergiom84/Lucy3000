@@ -29,6 +29,7 @@ interface BonoCardProps {
     service: { id: string; name: string } | null
     sessions: BonoSession[]
   }
+  onAddSession: (bonoPackId: string) => void
   onConsume: (bonoPackId: string) => void
   onDelete: (bonoPackId: string) => void
   onEdit: (bonoPackId: string) => void
@@ -52,8 +53,16 @@ const toAppointmentDateTime = (appointment: { date: string; startTime: string })
 
 const getCabinLabel = (cabin: string) => cabin.replace('CABINA_', 'Cabina ')
 
-export default function BonoCard({ bonoPack, onConsume, onDelete, onEdit, onScheduleAppointment }: BonoCardProps) {
+export default function BonoCard({
+  bonoPack,
+  onAddSession,
+  onConsume,
+  onDelete,
+  onEdit,
+  onScheduleAppointment
+}: BonoCardProps) {
   const consumed = bonoPack.sessions.filter(s => s.status === 'CONSUMED').length
+  const canRecoverLastConsumedSession = consumed > 0
   const remainingSessions = Math.max(bonoPack.totalSessions - consumed, 0)
   const badge = statusBadge[bonoPack.status] || statusBadge.ACTIVE
   const now = new Date()
@@ -141,7 +150,7 @@ export default function BonoCard({ bonoPack, onConsume, onDelete, onEdit, onSche
       </div>
 
       {/* Footer */}
-      <div className="flex items-center justify-between pt-2 border-t border-gray-200 dark:border-gray-700 mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-gray-200 dark:border-gray-700 mb-4">
         <div className="flex-1 min-w-0">
           <p className="text-sm text-gray-600 dark:text-gray-400">
             {consumed}/{bonoPack.totalSessions} sesiones usadas · Restantes: {remainingSessions}
@@ -152,7 +161,7 @@ export default function BonoCard({ bonoPack, onConsume, onDelete, onEdit, onSche
             </p>
           )}
         </div>
-        <div className="flex items-center gap-2 ml-3">
+        <div className="flex flex-wrap items-center justify-end gap-2 sm:ml-3">
           <button
             onClick={() => onScheduleAppointment(bonoPack.id)}
             disabled={bonoPack.status !== 'ACTIVE' || reservableSessions === 0}
@@ -164,6 +173,18 @@ export default function BonoCard({ bonoPack, onConsume, onDelete, onEdit, onSche
             }
           >
             Añadir cita
+          </button>
+          <button
+            onClick={() => onAddSession(bonoPack.id)}
+            disabled={!canRecoverLastConsumedSession}
+            className="btn btn-secondary btn-sm text-purple-700 underline decoration-purple-600 underline-offset-4 hover:text-purple-800 dark:text-purple-300 dark:decoration-purple-400 dark:hover:text-purple-200"
+            title={
+              canRecoverLastConsumedSession
+                ? 'Recupera la última sesión descontada por error. No aumenta el total de sesiones del bono.'
+                : 'No hay sesiones descontadas que recuperar.'
+            }
+          >
+            Añadir Sesión
           </button>
           <button
             onClick={() => onEdit(bonoPack.id)}

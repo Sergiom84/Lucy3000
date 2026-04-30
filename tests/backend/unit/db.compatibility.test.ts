@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ensureClientCancelledAppointmentCountColumn } from '../../../src/backend/db/compat/clients'
 
 type QueryRow = Record<string, unknown>
 
@@ -123,6 +124,33 @@ describe('ensureSqliteCompatibilityMigrations', () => {
     expect(bonoPackFindMany).not.toHaveBeenCalled()
     expect(appointmentLegendCountMock).not.toHaveBeenCalled()
     expect(appointmentLegendCreateMany).not.toHaveBeenCalled()
+  })
+
+  it('adds and backfills the client cancelled appointment counter when missing', async () => {
+    const executeRawUnsafe = vi.fn(async () => undefined)
+    const addColumnIfMissing = vi.fn(async () => true)
+    const tableExists = vi.fn(async (tableName: string) => tableName === 'appointments')
+
+    await ensureClientCancelledAppointmentCountColumn({
+      prisma: {
+        $executeRawUnsafe: executeRawUnsafe
+      },
+      tableExists,
+      addColumnIfMissing,
+      indexExists: vi.fn(),
+      getTableColumns: vi.fn(),
+      databaseUrl: 'file:./compatibility-test.db'
+    } as any)
+
+    expect(addColumnIfMissing).toHaveBeenCalledWith(
+      'clients',
+      'cancelledAppointmentCount',
+      'ALTER TABLE "clients" ADD COLUMN "cancelledAppointmentCount" INTEGER NOT NULL DEFAULT 0'
+    )
+    expect(tableExists).toHaveBeenCalledWith('appointments')
+    const executedSql = executeRawUnsafe.mock.calls.map(([sql]) => String(sql)).join('\n')
+    expect(executedSql).toContain('UPDATE "clients"')
+    expect(executedSql).toContain('"appointments"."status" IN (\'CANCELLED\', \'NO_SHOW\')')
   })
 
   it('rebuilds appointments table when clientId is still required', async () => {

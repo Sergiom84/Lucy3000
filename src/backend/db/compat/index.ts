@@ -9,6 +9,7 @@ import {
   ensureDefaultAppointmentLegends
 } from './appointments'
 import { ensureMultipleBonoSessionsPerAppointment } from './bono-packs'
+import { ensureClientCancelledAppointmentCountColumn } from './clients'
 import {
   ensureAccountBalancePaymentMethodColumn,
   ensureCashRegisterClosureColumns,
@@ -36,6 +37,7 @@ type SqliteCompatibilityStep = (runtime: SqliteCompatibilityRuntime) => Promise<
 
 const sqliteCompatibilitySteps: SqliteCompatibilityStep[] = [
   ensureUsersUsernameColumn,
+  ensureClientCancelledAppointmentCountColumn,
   ensureAccountBalancePaymentMethodColumn,
   ensureSalesPaymentBreakdownColumn,
   ensureCashRegisterClosureColumns,

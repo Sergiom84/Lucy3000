@@ -1077,84 +1077,92 @@ describe('appointment.controller', () => {
     expect(prismaMock.appointment.delete).not.toHaveBeenCalled()
   })
 
-  it('releases reserved bono session when appointment moves to cancelled', async () => {
-    prismaMock.googleCalendarConfig.findFirst.mockResolvedValue(null)
-    prismaMock.appointment.findUnique.mockResolvedValue({
-      id: 'appointment-1',
-      clientId: 'client-1',
-      guestName: null,
-      guestPhone: null,
-      status: 'SCHEDULED',
-      serviceId: 'service-1',
-      appointmentServices: [
-        {
-          serviceId: 'service-1',
-          sortOrder: 0,
-          service: { id: 'service-1', name: 'Limpieza facial', duration: 30 }
-        }
-      ]
-    })
-
-    const updatedAppointment = {
-      id: 'appointment-1',
-      cabin: 'LUCY',
-      reminder: true,
-      date: new Date('2099-03-07T10:00:00.000Z'),
-      startTime: '10:00',
-      endTime: '10:30',
-      status: 'CANCELLED',
-      notes: null,
-      client: { firstName: 'Ana', lastName: 'Lopez', phone: '600000000', email: 'ana@example.com' },
-      user: { id: 'user-1', name: 'Lucy', email: 'admin@lucy3000.com' },
-      service: { id: 'service-1', name: 'Limpieza facial' },
-      sale: null,
-      googleCalendarEventId: 'event-1'
-    }
-
-    prismaMock.appointment.update
-      .mockResolvedValueOnce(updatedAppointment)
-      .mockResolvedValueOnce({
-        ...updatedAppointment,
-        googleCalendarEventId: null,
-        googleCalendarSyncStatus: 'DISABLED',
-        googleCalendarSyncError: null
-      })
-    prismaMock.bonoSession.updateMany.mockResolvedValue({ count: 1 })
-    const deleteCalendarSpy = vi
-      .spyOn(googleCalendarService, 'deleteAppointmentEvent')
-      .mockResolvedValue({
-        eventId: null,
-        status: 'DISABLED',
-        error: null
-      })
-
-    const req = createMockRequest({
-      params: { id: 'appointment-1' },
-      body: {
-        status: 'CANCELLED'
-      }
-    })
-    const res = createMockResponse()
-
-    await updateAppointment(req as any, res)
-
-    expect(prismaMock.bonoSession.updateMany).toHaveBeenCalledWith({
-      where: {
-        appointmentId: 'appointment-1',
-        status: 'AVAILABLE'
-      },
-      data: {
-        appointmentId: null
-      }
-    })
-    expect(deleteCalendarSpy).toHaveBeenCalledWith('event-1', 'ana@example.com')
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({
+  it.each(['CANCELLED', 'NO_SHOW'] as const)(
+    'releases reserved bono session and deletes the calendar event when appointment moves to %s',
+    async (status) => {
+      prismaMock.googleCalendarConfig.findFirst.mockResolvedValue(null)
+      prismaMock.appointment.count.mockResolvedValue(2)
+      prismaMock.appointment.findUnique.mockResolvedValue({
         id: 'appointment-1',
-        status: 'CANCELLED'
+        clientId: 'client-1',
+        guestName: null,
+        guestPhone: null,
+        status: 'SCHEDULED',
+        serviceId: 'service-1',
+        appointmentServices: [
+          {
+            serviceId: 'service-1',
+            sortOrder: 0,
+            service: { id: 'service-1', name: 'Limpieza facial', duration: 30 }
+          }
+        ]
       })
-    )
-  })
+
+      const updatedAppointment = {
+        id: 'appointment-1',
+        cabin: 'LUCY',
+        reminder: true,
+        date: new Date('2099-03-07T10:00:00.000Z'),
+        startTime: '10:00',
+        endTime: '10:30',
+        status,
+        notes: null,
+        client: { firstName: 'Ana', lastName: 'Lopez', phone: '600000000', email: 'ana@example.com' },
+        user: { id: 'user-1', name: 'Lucy', email: 'admin@lucy3000.com' },
+        service: { id: 'service-1', name: 'Limpieza facial' },
+        sale: null,
+        googleCalendarEventId: 'event-1'
+      }
+
+      prismaMock.appointment.update
+        .mockResolvedValueOnce(updatedAppointment)
+        .mockResolvedValueOnce({
+          ...updatedAppointment,
+          googleCalendarEventId: null,
+          googleCalendarSyncStatus: 'DISABLED',
+          googleCalendarSyncError: null
+        })
+      prismaMock.bonoSession.updateMany.mockResolvedValue({ count: 1 })
+      const deleteCalendarSpy = vi
+        .spyOn(googleCalendarService, 'deleteAppointmentEvent')
+        .mockResolvedValue({
+          eventId: null,
+          status: 'DISABLED',
+          error: null
+        })
+
+      const req = createMockRequest({
+        params: { id: 'appointment-1' },
+        body: {
+          status
+        }
+      })
+      const res = createMockResponse()
+
+      await updateAppointment(req as any, res)
+
+      expect(prismaMock.bonoSession.updateMany).toHaveBeenCalledWith({
+        where: {
+          appointmentId: 'appointment-1',
+          status: 'AVAILABLE'
+        },
+        data: {
+          appointmentId: null
+        }
+      })
+      expect(prismaMock.client.update).toHaveBeenCalledWith({
+        where: { id: 'client-1' },
+        data: { cancelledAppointmentCount: 2 }
+      })
+      expect(deleteCalendarSpy).toHaveBeenCalledWith('event-1', 'ana@example.com')
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'appointment-1',
+          status
+        })
+      )
+    }
+  )
 
   it('releases reserved bono session when the appointment changes to an incompatible treatment', async () => {
     prismaMock.googleCalendarConfig.findFirst.mockResolvedValue(null)

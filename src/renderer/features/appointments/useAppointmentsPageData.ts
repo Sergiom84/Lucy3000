@@ -22,6 +22,10 @@ type UseAppointmentsPageDataArgs = {
   editingAppointment: any
 }
 
+type RefreshAppointmentsOptions = {
+  showLoading?: boolean
+}
+
 export const useAppointmentsPageData = ({
   currentDate,
   view,
@@ -38,9 +42,11 @@ export const useAppointmentsPageData = ({
   const [consumedAppointmentBono, setConsumedAppointmentBono] = useState<AppointmentConsumedBono | null>(null)
   const [selectedAppointmentBonoId, setSelectedAppointmentBonoId] = useState('')
 
-  const refreshAppointments = async () => {
+  const refreshAppointments = async ({ showLoading = true }: RefreshAppointmentsOptions = {}) => {
     try {
-      setLoading(true)
+      if (showLoading) {
+        setLoading(true)
+      }
       const nextData = await fetchAppointmentsInRange({ currentDate, view })
       setAppointments(nextData.appointments)
       setAgendaBlocks(nextData.agendaBlocks)
@@ -48,8 +54,16 @@ export const useAppointmentsPageData = ({
       console.error('Error fetching appointments:', error)
       toast.error('Error al cargar la agenda')
     } finally {
-      setLoading(false)
+      if (showLoading) {
+        setLoading(false)
+      }
     }
+  }
+
+  const removeAppointmentLocally = (appointmentId: string) => {
+    setAppointments((currentAppointments) =>
+      currentAppointments.filter((appointment) => appointment.id !== appointmentId)
+    )
   }
 
   const refreshAppointmentLegends = async () => {
@@ -149,6 +163,7 @@ export const useAppointmentsPageData = ({
     legendItems,
     legendLoading,
     loading,
+    removeAppointmentLocally,
     refreshAppointments,
     refreshAppointmentLegendCategories,
     refreshAppointmentLegends,

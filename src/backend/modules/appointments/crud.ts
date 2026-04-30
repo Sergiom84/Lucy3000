@@ -2,6 +2,7 @@ import { prisma } from '../../db'
 import { calculateAppointmentEndTime, deriveAppointmentServiceIds } from '../../utils/appointment-services'
 import { isActiveAppointmentStatus, validateAppointmentSlot } from '../../utils/appointment-validation'
 import { getAppointmentDisplayName } from '../../utils/customer-display'
+import { syncClientCancelledAppointmentCounts } from '../../utils/client-cancellation-counts'
 import {
   deleteAppointmentCalendarEvent,
   syncCreatedAppointmentCalendar,
@@ -93,6 +94,7 @@ export const createAppointmentRecord = async (payload: Record<string, unknown>) 
     },
     include: appointmentInclude
   })
+  await syncClientCancelledAppointmentCounts([createdAppointment.clientId])
   const appointment = await syncCreatedAppointmentCalendar(createdAppointment)
 
   if (data.reminder) {
@@ -210,6 +212,7 @@ export const updateAppointmentRecord = async (id: string, payload: Record<string
   } else if (serviceSelectionChanged || registeredClientChanged) {
     await releaseReservedBonoSessions(updatedAppointment.id)
   }
+  await syncClientCancelledAppointmentCounts([existing.clientId, updatedAppointment.clientId])
   const appointment = await syncUpdatedAppointmentCalendar(updatedAppointment)
 
   return appointment
@@ -246,6 +249,7 @@ export const deleteAppointmentRecord = async (id: string) => {
   await prisma.appointment.delete({
     where: { id }
   })
+  await syncClientCancelledAppointmentCounts([appointment.clientId])
 
   return { message: 'Appointment deleted successfully' }
 }

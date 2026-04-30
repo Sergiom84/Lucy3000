@@ -27,6 +27,7 @@ import AppointmentLegendModal from '../../components/AppointmentLegendModal'
 import AppointmentForm from '../../components/AppointmentForm'
 import { getAppointmentDisplayName } from '../../../shared/customerDisplay'
 import { getAppointmentPrimaryService, getAppointmentServiceLabel } from '../../utils/appointmentServices'
+import { getAppointmentCancellationWarning } from '../../utils/appointmentCancellations'
 import {
   calendarCulture,
   calendarFormats,
@@ -110,7 +111,19 @@ function CalendarEvent({ event }: { event: any }) {
   const clientName = getAppointmentDisplayName(appointment)
   const serviceName = getAppointmentServiceLabel(appointment) || appointment.service?.name || ''
   const timeRange = `${appointment.startTime} - ${appointment.endTime}`
-  const tooltip = `${clientName}\n${serviceName}\n${timeRange}\nCabina: ${cabinLabels[appointment.cabin] || appointment.cabin}`
+  const cancellationWarning = getAppointmentCancellationWarning(appointment)
+  const tooltip = [
+    clientName,
+    serviceName,
+    timeRange,
+    `Cabina: ${cabinLabels[appointment.cabin] || appointment.cabin}`,
+    cancellationWarning || null
+  ].filter(Boolean).join('\n')
+  const cancellationBadge = cancellationWarning ? (
+    <span className="mt-0.5 inline-flex max-w-full rounded bg-white/90 px-1 text-[9px] font-semibold leading-4 text-amber-700 shadow-sm">
+      <span className="truncate">{cancellationWarning}</span>
+    </span>
+  ) : null
 
   const startMinutes = (() => {
     const [h, m] = appointment.startTime.split(':').map(Number)
@@ -126,6 +139,7 @@ function CalendarEvent({ event }: { event: any }) {
     return (
       <div className="leading-[1.15] overflow-hidden" title={tooltip}>
         <p className="text-[10px] font-semibold truncate">{clientName} &middot; {serviceName}</p>
+        {cancellationBadge}
       </div>
     )
   }
@@ -135,6 +149,7 @@ function CalendarEvent({ event }: { event: any }) {
       <div className="leading-[1.15] overflow-hidden" title={tooltip}>
         <p className="text-[11px] font-semibold truncate">{clientName}</p>
         <p className="text-[10px] opacity-90 truncate">{serviceName}</p>
+        {cancellationBadge}
       </div>
     )
   }
@@ -144,6 +159,7 @@ function CalendarEvent({ event }: { event: any }) {
       <p className="font-semibold text-xs truncate">{clientName}</p>
       <p className="text-[11px] opacity-90 truncate">{serviceName}</p>
       <p className="text-[10px] opacity-80">{timeRange}</p>
+      {cancellationBadge}
     </div>
   )
 }
@@ -162,6 +178,7 @@ export default function Appointments() {
   const [preselectedStartTime, setPreselectedStartTime] = useState<string | undefined>()
   const [preselectedEndTime, setPreselectedEndTime] = useState<string | undefined>()
   const [initialCabin, setInitialCabin] = useState<'LUCY' | 'TAMARA' | 'CABINA_1' | 'CABINA_2'>('LUCY')
+  const [appointmentFormInstance, setAppointmentFormInstance] = useState(0)
   const [view, setView] = useState<View>('day')
   const [currentDate, setCurrentDate] = useState(new Date())
   const [showChargeBonoModal, setShowChargeBonoModal] = useState(false)
@@ -178,6 +195,7 @@ export default function Appointments() {
     legendItems,
     legendLoading,
     loading,
+    removeAppointmentLocally,
     refreshAppointments,
     selectedAppointmentBonoId,
     setLegendItems,
@@ -199,6 +217,7 @@ export default function Appointments() {
     resourceId?: string | number
     action: 'select' | 'click' | 'doubleClick'
   }) => {
+    setAppointmentFormInstance((currentValue) => currentValue + 1)
     setSelectedDate(start)
     const selectedCabin = String(resourceId || 'LUCY') as typeof initialCabin
     setInitialCabin(selectedCabin)
@@ -227,6 +246,7 @@ export default function Appointments() {
   }
 
   const handleSelectEvent = (event: any) => {
+    setAppointmentFormInstance((currentValue) => currentValue + 1)
     setSelectedDate(undefined)
     setPreselectedStartTime(undefined)
     setPreselectedEndTime(undefined)
@@ -283,9 +303,10 @@ export default function Appointments() {
 
     try {
       await deleteAppointmentById(id)
+      removeAppointmentLocally(id)
       toast.success('Cita eliminada')
-      await refreshAppointments()
       handleCloseModal()
+      void refreshAppointments({ showLoading: false })
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Error al eliminar cita')
     }
@@ -455,6 +476,17 @@ export default function Appointments() {
   const selectedAppointmentBonoCandidate =
     appointmentBonoCandidates.find((bonoPack) => bonoPack.id === selectedAppointmentBonoId) ||
     (appointmentBonoCandidates.length === 1 ? appointmentBonoCandidates[0] : null)
+  const editingAppointmentCancellationWarning = getAppointmentCancellationWarning(editingAppointment)
+  const appointmentFormKey = editingAppointment?.id
+    ? `edit-${editingAppointment.id}-${appointmentFormInstance}`
+    : [
+        'new',
+        appointmentFormInstance,
+        selectedDate?.toISOString() || 'manual',
+        preselectedStartTime || '',
+        preselectedEndTime || '',
+        initialCabin
+      ].join('|')
 
   const getThemeForAppointment = (appointment: any) =>
     getAppointmentColorTheme(
@@ -554,6 +586,7 @@ export default function Appointments() {
           ) : null}
           <button
             onClick={() => {
+              setAppointmentFormInstance((currentValue) => currentValue + 1)
               setEditingAppointment(null)
               setEditingAgendaBlock(null)
               setShowBlockModal(false)
@@ -841,6 +874,11 @@ export default function Appointments() {
                     >
                       Eliminar cita
                     </button>
+                    {editingAppointmentCancellationWarning ? (
+                      <span className="inline-flex items-center rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                        {editingAppointmentCancellationWarning}
+                      </span>
+                    ) : null}
                   </div>
                   {appointmentBonosLoading ? (
                     <p className="text-xs text-gray-500 dark:text-gray-400">Buscando bonos compatibles...</p>
@@ -888,6 +926,7 @@ export default function Appointments() {
           )}
 
           <AppointmentForm
+            key={appointmentFormKey}
             appointment={editingAppointment?.id ? editingAppointment : undefined}
             onSuccess={handleFormSuccess}
             onCancel={handleCloseModal}

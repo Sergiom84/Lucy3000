@@ -4,6 +4,7 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from '../db'
 import { resolveAppointmentEndTime } from '../utils/appointment-spreadsheet'
 import { normalizeProfessionalName } from '../utils/professional-catalog'
+import { syncClientCancelledAppointmentCounts } from '../utils/client-cancellation-counts'
 import type {
   SqlAccountBalancePreview,
   SqlAgendaBlockPreview,
@@ -1082,6 +1083,10 @@ export const importSqlAnalysisToDatabase = async (
       async (chunk) => {
         await tx.appointmentService.createMany({ data: chunk })
       }
+    )
+    await syncClientCancelledAppointmentCounts(
+      appointmentData.map((appointment) => appointment.clientId),
+      tx
     )
 
     const agendaBlockData = selectedAgendaBlocks.map((block) => {

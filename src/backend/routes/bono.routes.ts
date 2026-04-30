@@ -12,6 +12,7 @@ import {
   deleteBonoTemplateCategoryWithTemplates,
   createBonoPack,
   createBonoAppointment,
+  addSessionToBonoPack,
   consumeSession,
   deleteBonoPack,
   updateBonoPack,
@@ -91,6 +92,7 @@ router.post(
   validateRequest({ params: bonoPackIdParamSchema, body: createBonoAppointmentBodySchema }),
   createBonoAppointment
 )
+router.post('/:bonoPackId/sessions', validateRequest({ params: bonoPackIdParamSchema }), addSessionToBonoPack)
 router.put('/:bonoPackId/consume', validateRequest({ params: bonoPackIdParamSchema }), consumeSession)
 router.delete('/:bonoPackId', validateRequest({ params: bonoPackIdParamSchema }), deleteBonoPack)
 router.get(

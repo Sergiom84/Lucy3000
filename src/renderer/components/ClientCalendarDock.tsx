@@ -151,6 +151,7 @@ export default function ClientCalendarDock({
   const [preselectedStartTime, setPreselectedStartTime] = useState<string | undefined>()
   const [preselectedEndTime, setPreselectedEndTime] = useState<string | undefined>()
   const [initialCabin, setInitialCabin] = useState<'LUCY' | 'TAMARA' | 'CABINA_1' | 'CABINA_2'>('LUCY')
+  const [appointmentFormInstance, setAppointmentFormInstance] = useState(0)
   const [showOnlySelectedClient, setShowOnlySelectedClient] = useState(Boolean(selectedClientId))
   const activeClientId = showOnlySelectedClient ? selectedClientId : null
 
@@ -275,6 +276,17 @@ export default function ClientCalendarDock({
       appointments.filter((appointment) => requiresAppointmentCharge(appointment)).length,
     [appointments]
   )
+  const appointmentFormKey = editingAppointment?.id
+    ? `edit-${editingAppointment.id}-${appointmentFormInstance}`
+    : [
+        'new',
+        appointmentFormInstance,
+        selectedDate?.toISOString() || 'manual',
+        preselectedStartTime || '',
+        preselectedEndTime || '',
+        initialCabin,
+        selectedClientId || ''
+      ].join('|')
 
   const currentDateMoment = useMemo(() => moment(currentDate), [currentDate])
   const monthGridDays = useMemo(() => {
@@ -346,6 +358,7 @@ export default function ClientCalendarDock({
     resourceId?: string | number
     action: 'select' | 'click' | 'doubleClick'
   }) => {
+    setAppointmentFormInstance((currentValue) => currentValue + 1)
     setSelectedDate(start)
     const slotMinutes = start.getHours() * 60 + start.getMinutes()
     const nextStartTime =
@@ -372,6 +385,7 @@ export default function ClientCalendarDock({
   }
 
   const handleSelectEvent = (event: any) => {
+    setAppointmentFormInstance((currentValue) => currentValue + 1)
     if (event.kind === 'agenda-block') {
       setEditingAppointment(null)
       setEditingAgendaBlock(event.agendaBlock)
@@ -427,9 +441,12 @@ export default function ClientCalendarDock({
 
     try {
       await api.delete(`/appointments/${id}`)
+      setAppointments((currentAppointments) =>
+        currentAppointments.filter((appointment) => appointment.id !== id)
+      )
       toast.success('Cita eliminada')
-      fetchAppointments()
       handleCloseAppointmentModal()
+      void fetchAppointments()
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Error al eliminar cita')
     }
@@ -612,6 +629,7 @@ export default function ClientCalendarDock({
 
                 <button
                   onClick={() => {
+                    setAppointmentFormInstance((currentValue) => currentValue + 1)
                     setSelectedDate(new Date(currentDate))
                     setPreselectedStartTime(undefined)
                     setPreselectedEndTime(undefined)
@@ -760,6 +778,7 @@ export default function ClientCalendarDock({
           )}
 
           <AppointmentForm
+            key={appointmentFormKey}
             appointment={editingAppointment?.id ? editingAppointment : undefined}
             onSuccess={handleAppointmentSuccess}
             onCancel={handleCloseAppointmentModal}
@@ -768,7 +787,6 @@ export default function ClientCalendarDock({
             preselectedEndTime={preselectedEndTime}
             initialCabin={initialCabin}
             preselectedClientId={selectedClientId || undefined}
-            lockClientSelection={Boolean(activeClientId)}
           />
         </div>
       </Modal>

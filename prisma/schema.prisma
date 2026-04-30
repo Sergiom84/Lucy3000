@@ -92,6 +92,7 @@ model Client {
   photoUrl        String?
   loyaltyPoints   Int       @default(0)
   totalSpent      Decimal   @default(0)
+  cancelledAppointmentCount Int      @default(0)
   isActive        Boolean   @default(true)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt

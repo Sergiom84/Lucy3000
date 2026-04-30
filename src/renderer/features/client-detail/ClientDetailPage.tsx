@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { AlertTriangle, CreditCard, FileText, Ticket } from 'lucide-react'
-import { formatCurrency } from '../../utils/format'
+import { formatCurrency, formatDateTime } from '../../utils/format'
 import {
   getPrintTicketSuccessMessage,
   normalizeDesktopAssetUrl,
@@ -21,6 +21,7 @@ import ClientForm from '../../components/ClientForm'
 import BonoPackModal from '../../components/BonoPackModal'
 import AppointmentForm from '../../components/AppointmentForm'
 import {
+  addBonoPackSession,
   collectPendingSale,
   consumeBonoPack,
   createAccountBalanceTopUp,
@@ -213,6 +214,27 @@ const serializeClientNotes = (notes: string[]) => {
   return normalizedNotes.length > 0 ? normalizedNotes.join('\n\n') : null
 }
 
+type ClientDetailBonoSession = ClientDetailBonoPack['sessions'][number]
+
+const getLastConsumedBonoSession = (bonoPack: ClientDetailBonoPack | null): ClientDetailBonoSession | null => {
+  if (!bonoPack) return null
+
+  return (
+    bonoPack.sessions
+      .filter((session) => session.status === 'CONSUMED')
+      .sort((left, right) => {
+        const leftConsumedAt = left.consumedAt ? new Date(left.consumedAt).getTime() : 0
+        const rightConsumedAt = right.consumedAt ? new Date(right.consumedAt).getTime() : 0
+
+        if (leftConsumedAt !== rightConsumedAt) {
+          return rightConsumedAt - leftConsumedAt
+        }
+
+        return Number(right.sessionNumber || 0) - Number(left.sessionNumber || 0)
+      })[0] || null
+  )
+}
+
 export default function ClientDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -255,6 +277,8 @@ export default function ClientDetail() {
   const [editingBonoPack, setEditingBonoPack] = useState<ClientDetailBonoPack | null>(null)
   const [showBonoAppointmentModal, setShowBonoAppointmentModal] = useState(false)
   const [selectedBonoForAppointment, setSelectedBonoForAppointment] = useState<ClientDetailBonoPack | null>(null)
+  const [selectedBonoForAddSession, setSelectedBonoForAddSession] = useState<ClientDetailBonoPack | null>(null)
+  const [addingBonoSession, setAddingBonoSession] = useState(false)
   const [pendingSettlementTarget, setPendingSettlementTarget] = useState<PendingPaymentRow | null>(null)
   const [pendingSettlementModalOpen, setPendingSettlementModalOpen] = useState(false)
   const [pendingSettlementSaving, setPendingSettlementSaving] = useState(false)
@@ -413,6 +437,43 @@ export default function ClientDetail() {
   const handleBonoAppointmentSuccess = async () => {
     handleCloseBonoAppointmentModal()
     await refreshClient()
+  }
+
+  const handleOpenAddBonoSessionModal = (bonoPackId: string) => {
+    const selectedBono = clientBonoPacks.find((bonoPack) => bonoPack.id === bonoPackId) || null
+    if (!selectedBono) {
+      toast.error('No se encontró el bono seleccionado')
+      return
+    }
+
+    if (!getLastConsumedBonoSession(selectedBono)) {
+      toast.error('No hay sesiones descontadas que recuperar')
+      return
+    }
+
+    setSelectedBonoForAddSession(selectedBono)
+  }
+
+  const handleCloseAddBonoSessionModal = () => {
+    if (addingBonoSession) return
+    setSelectedBonoForAddSession(null)
+  }
+
+  const handleConfirmAddBonoSession = async () => {
+    if (!selectedBonoForAddSession) return
+
+    try {
+      setAddingBonoSession(true)
+      await addBonoPackSession(selectedBonoForAddSession.id)
+      toast.success('Sesión recuperada')
+      setSelectedBonoForAddSession(null)
+      await refreshClient()
+    } catch (error: any) {
+      console.error('Error adding bono session:', error)
+      toast.error(error.response?.data?.error || 'No se pudo recuperar la sesión')
+    } finally {
+      setAddingBonoSession(false)
+    }
   }
 
   const handleClosePendingSettlementModal = () => {
@@ -915,6 +976,16 @@ export default function ClientDetail() {
     { id: 'appointments', label: 'Citas', count: client.appointments?.length || 0 },
     { id: 'sales', label: 'Ventas', count: client.sales?.length || 0 }
   ]
+  const addSessionConsumedCount =
+    selectedBonoForAddSession?.sessions.filter((session) => session.status === 'CONSUMED').length || 0
+  const addSessionRemainingCount = selectedBonoForAddSession
+    ? Math.max(selectedBonoForAddSession.totalSessions - addSessionConsumedCount, 0)
+    : 0
+  const addSessionLastConsumedSession = getLastConsumedBonoSession(selectedBonoForAddSession)
+  const addSessionRecoveredRemainingCount =
+    selectedBonoForAddSession && addSessionLastConsumedSession
+      ? addSessionRemainingCount + 1
+      : addSessionRemainingCount
 
   const activePanel = (() => {
     switch (activeTab) {
@@ -1004,6 +1075,7 @@ export default function ClientDetail() {
         return (
           <ClientDetailBonosPanel
             bonoPacks={clientBonoPacks}
+            onAddSession={handleOpenAddBonoSessionModal}
             onConsume={(bonoPackId) => void handleConsumeBonoSession(bonoPackId)}
             onCreate={handleOpenBonoPackCreateModal}
             onDelete={(bonoPackId) => void handleDeleteBono(bonoPackId)}
@@ -1070,6 +1142,7 @@ export default function ClientDetail() {
       >
         {selectedBonoForAppointment && (
           <AppointmentForm
+            key={`bono-${selectedBonoForAppointment.id}`}
             onSuccess={handleBonoAppointmentSuccess}
             onCancel={handleCloseBonoAppointmentModal}
             fromBono={{
@@ -1081,6 +1154,98 @@ export default function ClientDetail() {
             }}
             initialCabin="LUCY"
           />
+        )}
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(selectedBonoForAddSession)}
+        onClose={handleCloseAddBonoSessionModal}
+        title="¿Añadir una sesión a las disponibles?"
+        maxWidth="md"
+      >
+        {selectedBonoForAddSession && (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Se recuperará la última sesión descontada por error, ya fuera manualmente o desde una cita. No se modificará el total del bono.
+            </p>
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm dark:border-gray-700 dark:bg-gray-800">
+              <div className="grid gap-2">
+                <div className="flex items-center justify-between gap-4">
+                  <span className="shrink-0 text-gray-500 dark:text-gray-400">Cliente</span>
+                  <span className="min-w-0 break-words text-right font-medium text-gray-900 dark:text-white">
+                    {client.firstName} {client.lastName}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="shrink-0 text-gray-500 dark:text-gray-400">Bono</span>
+                  <span className="min-w-0 break-words text-right font-medium text-gray-900 dark:text-white">
+                    {selectedBonoForAddSession.name}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="shrink-0 text-gray-500 dark:text-gray-400">Tratamiento</span>
+                  <span className="min-w-0 break-words text-right font-medium text-gray-900 dark:text-white">
+                    {selectedBonoForAddSession.service?.name || 'Sin tratamiento'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="shrink-0 text-gray-500 dark:text-gray-400">Precio</span>
+                  <span className="min-w-0 text-right font-medium text-gray-900 dark:text-white">
+                    {formatCurrency(Number(selectedBonoForAddSession.price || 0))}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="shrink-0 text-gray-500 dark:text-gray-400">Sesiones usadas</span>
+                  <span className="min-w-0 text-right font-medium text-gray-900 dark:text-white">
+                    {addSessionConsumedCount}/{selectedBonoForAddSession.totalSessions}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="shrink-0 text-gray-500 dark:text-gray-400">Sesión a recuperar</span>
+                  <span className="min-w-0 text-right font-medium text-gray-900 dark:text-white">
+                    {addSessionLastConsumedSession
+                      ? `#${addSessionLastConsumedSession.sessionNumber}${
+                          addSessionLastConsumedSession.consumedAt
+                            ? ` · ${formatDateTime(addSessionLastConsumedSession.consumedAt)}`
+                            : ''
+                        }`
+                      : '-'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="shrink-0 text-gray-500 dark:text-gray-400">Restantes ahora</span>
+                  <span className="min-w-0 text-right font-medium text-gray-900 dark:text-white">
+                    {addSessionRemainingCount}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="shrink-0 text-gray-500 dark:text-gray-400">Restantes tras añadir</span>
+                  <span className="min-w-0 text-right font-medium text-gray-900 dark:text-white">
+                    {addSessionRecoveredRemainingCount}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={handleCloseAddBonoSessionModal}
+                className="btn btn-secondary"
+                disabled={addingBonoSession}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmAddBonoSession()}
+                className="btn btn-primary"
+                disabled={addingBonoSession}
+              >
+                {addingBonoSession ? 'Guardando...' : 'Añadir sesión'}
+              </button>
+            </div>
+          </div>
         )}
       </Modal>
 

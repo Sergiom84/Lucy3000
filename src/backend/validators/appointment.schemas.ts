@@ -184,7 +184,9 @@ export const updateAppointmentBodySchema = z
     message: 'At least one field is required'
   })
   .superRefine((payload, ctx) => {
-    validateAppointmentServiceSelection(payload, ctx)
+    if (payload.serviceId !== undefined || payload.serviceIds !== undefined) {
+      validateAppointmentServiceSelection(payload, ctx)
+    }
   })
 
 export const chargeAppointmentWithBonoBodySchema = z

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  addSessionToBonoPack,
   createBonoPack,
   createBonoAppointment,
   consumeSession,
@@ -577,5 +578,154 @@ describe('bono.controller bono appointments and sessions', () => {
       where: { id: 'session-1' },
       data: { status: 'CONSUMED', consumedAt: expect.any(Date) }
     })
+  })
+
+  it('consumeSession can discount a future reserved session when no unreserved sessions remain', async () => {
+    prismaMock.bonoPack.findUnique
+      .mockResolvedValueOnce({
+        id: 'bono-1',
+        name: 'Bono de 1 sesión',
+        status: 'ACTIVE',
+        sessions: [
+          {
+            id: 'session-1',
+            sessionNumber: 1,
+            status: 'AVAILABLE',
+            consumedAt: null,
+            appointmentId: 'appointment-1',
+            appointment: {
+              id: 'appointment-1',
+              date: new Date('2099-03-01T00:00:00.000Z'),
+              startTime: '10:00',
+              endTime: '10:30',
+              status: 'SCHEDULED',
+              cabin: 'LUCY'
+            }
+          }
+        ],
+        client: { id: 'client-1', firstName: 'Ana', lastName: 'Lopez' }
+      })
+      .mockResolvedValueOnce({
+        id: 'bono-1',
+        sessions: [],
+        service: { id: 'service-1', name: 'Limpieza facial' }
+      })
+
+    prismaMock.bonoSession.update.mockResolvedValue({
+      id: 'session-1',
+      status: 'CONSUMED'
+    })
+    prismaMock.bonoPack.update.mockResolvedValue({ id: 'bono-1', status: 'DEPLETED' })
+    prismaMock.notification.create.mockResolvedValue(undefined)
+
+    const req = createMockRequest({
+      params: { bonoPackId: 'bono-1' }
+    })
+    const res = createMockResponse()
+
+    await consumeSession(req as any, res)
+
+    expect(prismaMock.bonoSession.update).toHaveBeenCalledWith({
+      where: { id: 'session-1' },
+      data: { status: 'CONSUMED', consumedAt: expect.any(Date), appointmentId: null }
+    })
+    expect(prismaMock.bonoPack.update).toHaveBeenCalledWith({
+      where: { id: 'bono-1' },
+      data: { status: 'DEPLETED' }
+    })
+  })
+
+  it('addSessionToBonoPack restores the latest consumed session without increasing totalSessions', async () => {
+    prismaMock.bonoPack.findUnique
+      .mockResolvedValueOnce({
+        id: 'bono-1',
+        name: 'Bono de 2 sesiones',
+        totalSessions: 2,
+        expiryDate: null,
+        status: 'DEPLETED',
+        sessions: [
+          { id: 'session-1', sessionNumber: 1, status: 'CONSUMED', consumedAt: new Date('2026-03-01T10:00:00.000Z'), appointmentId: null, appointment: null },
+          { id: 'session-2', sessionNumber: 2, status: 'CONSUMED', consumedAt: new Date('2026-03-02T10:00:00.000Z'), appointmentId: 'appointment-1', appointment: null }
+        ]
+      })
+      .mockResolvedValueOnce({
+        id: 'bono-1',
+        totalSessions: 2,
+        status: 'ACTIVE',
+        sessions: [
+          { id: 'session-1', sessionNumber: 1, status: 'CONSUMED', consumedAt: new Date('2026-03-01T10:00:00.000Z'), appointmentId: null, appointment: null },
+          { id: 'session-2', sessionNumber: 2, status: 'AVAILABLE', consumedAt: null, appointmentId: null, appointment: null }
+        ],
+        service: { id: 'service-1', name: 'Limpieza facial' }
+      })
+
+    const tx: any = {
+      bonoSession: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 })
+      },
+      bonoPack: {
+        update: vi.fn().mockResolvedValue({ id: 'bono-1', status: 'ACTIVE' })
+      }
+    }
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx))
+
+    const req = createMockRequest({
+      params: { bonoPackId: 'bono-1' }
+    })
+    const res = createMockResponse()
+
+    await addSessionToBonoPack(req as any, res)
+
+    expect(tx.bonoSession.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'session-2',
+        status: 'CONSUMED'
+      },
+      data: {
+        status: 'AVAILABLE',
+        consumedAt: null,
+        appointmentId: null
+      }
+    })
+    expect(tx.bonoPack.update).toHaveBeenCalledWith({
+      where: { id: 'bono-1' },
+      data: {
+        status: 'ACTIVE'
+      }
+    })
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'bono-1',
+        totalSessions: 2,
+        status: 'ACTIVE'
+      })
+    )
+  })
+
+  it('addSessionToBonoPack returns 400 when there are no consumed sessions to restore', async () => {
+    prismaMock.bonoPack.findUnique.mockResolvedValueOnce({
+      id: 'bono-1',
+      name: 'Bono de 2 sesiones',
+      totalSessions: 2,
+      expiryDate: null,
+      status: 'ACTIVE',
+      sessions: [
+        { id: 'session-1', sessionNumber: 1, status: 'AVAILABLE', consumedAt: null, appointmentId: null, appointment: null },
+        { id: 'session-2', sessionNumber: 2, status: 'AVAILABLE', consumedAt: null, appointmentId: null, appointment: null }
+      ]
+    })
+
+    const req = createMockRequest({
+      params: { bonoPackId: 'bono-1' }
+    })
+    const res = createMockResponse()
+
+    await addSessionToBonoPack(req as any, res)
+
+    expect(res.status).toHaveBeenCalledWith(400)
+    expect(res.json).toHaveBeenCalledWith({
+      error: 'No hay sesiones descontadas que recuperar'
+    })
+    expect(prismaMock.$transaction).not.toHaveBeenCalled()
   })
 })

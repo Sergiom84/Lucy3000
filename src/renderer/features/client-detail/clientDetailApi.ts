@@ -78,6 +78,11 @@ export const consumeBonoPack = async (bonoPackId: string) => {
   await api.put(`/bonos/${bonoPackId}/consume`)
 }
 
+export const addBonoPackSession = async (bonoPackId: string) => {
+  const response = await api.post(`/bonos/${bonoPackId}/sessions`)
+  return response.data
+}
+
 export const deleteBonoPack = async (bonoPackId: string) => {
   await api.delete(`/bonos/${bonoPackId}`)
 }
