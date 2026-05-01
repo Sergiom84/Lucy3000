@@ -1,4 +1,4 @@
-import { Suspense, lazy, useMemo, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Calendar as BigCalendar, View } from 'react-big-calendar'
 import moment from 'moment'
@@ -82,6 +82,11 @@ const formatSaleStatusLabel = (status: string | null | undefined) =>
 
 const getSelectionTimeValue = (value: Date) => {
   return getTimeInputValueFromDate(value)
+}
+
+type PendingAppointmentDelete = {
+  id: string
+  closeAppointmentModal: boolean
 }
 
 function CalendarEvent({ event }: { event: any }) {
@@ -179,6 +184,11 @@ export default function Appointments() {
   const [preselectedEndTime, setPreselectedEndTime] = useState<string | undefined>()
   const [initialCabin, setInitialCabin] = useState<'LUCY' | 'TAMARA' | 'CABINA_1' | 'CABINA_2'>('LUCY')
   const [appointmentFormInstance, setAppointmentFormInstance] = useState(0)
+  const activeAppointmentModalRef = useRef({
+    showModal: false,
+    editingAppointmentId: null as string | null
+  })
+  const [pendingAppointmentDelete, setPendingAppointmentDelete] = useState<PendingAppointmentDelete | null>(null)
   const [view, setView] = useState<View>('day')
   const [currentDate, setCurrentDate] = useState(new Date())
   const [showChargeBonoModal, setShowChargeBonoModal] = useState(false)
@@ -205,6 +215,13 @@ export default function Appointments() {
     editingAppointment,
     view
   })
+
+  useEffect(() => {
+    activeAppointmentModalRef.current = {
+      showModal,
+      editingAppointmentId: editingAppointment?.id || null
+    }
+  }, [showModal, editingAppointment?.id])
 
   const handleSelectSlot = ({
     start,
@@ -298,14 +315,30 @@ export default function Appointments() {
     void refreshAppointments()
   }
 
-  const handleDeleteAppointment = async (id: string) => {
-    if (!confirm('¿Estás seguro de eliminar esta cita?')) return
+  const requestDeleteAppointment = (id: string) => {
+    setPendingAppointmentDelete({
+      id,
+      closeAppointmentModal:
+        activeAppointmentModalRef.current.showModal &&
+        activeAppointmentModalRef.current.editingAppointmentId === id
+    })
+  }
+
+  const handleDeleteAppointment = async () => {
+    const appointmentToDelete = pendingAppointmentDelete
+
+    if (!appointmentToDelete) return
+
+    setPendingAppointmentDelete(null)
+
+    if (appointmentToDelete.closeAppointmentModal) {
+      handleCloseModal()
+    }
 
     try {
-      await deleteAppointmentById(id)
-      removeAppointmentLocally(id)
+      await deleteAppointmentById(appointmentToDelete.id)
+      removeAppointmentLocally(appointmentToDelete.id)
       toast.success('Cita eliminada')
-      handleCloseModal()
       void refreshAppointments({ showLoading: false })
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Error al eliminar cita')
@@ -869,7 +902,7 @@ export default function Appointments() {
                       </button>
                     )}
                     <button
-                      onClick={() => handleDeleteAppointment(editingAppointment.id)}
+                      onClick={() => requestDeleteAppointment(editingAppointment.id)}
                       className="btn btn-secondary text-red-600 hover:bg-red-50 dark:hover:bg-red-900 text-sm"
                     >
                       Eliminar cita
@@ -935,6 +968,27 @@ export default function Appointments() {
             preselectedEndTime={preselectedEndTime}
             initialCabin={initialCabin}
           />
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(pendingAppointmentDelete)}
+        onClose={() => setPendingAppointmentDelete(null)}
+        title="Eliminar cita"
+        maxWidth="sm"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-700 dark:text-gray-300">
+            ¿Seguro que quieres eliminar esta cita?
+          </p>
+          <div className="flex justify-end gap-2">
+            <button type="button" className="btn btn-secondary" onClick={() => setPendingAppointmentDelete(null)}>
+              Cancelar
+            </button>
+            <button type="button" className="btn btn-danger" onClick={() => void handleDeleteAppointment()}>
+              Eliminar cita
+            </button>
+          </div>
         </div>
       </Modal>
 

@@ -456,6 +456,48 @@ describe('appointment.controller', () => {
     expect(prismaMock.appointment.delete).not.toHaveBeenCalled()
   })
 
+  it('responds to appointment deletion before Google Calendar deletion finishes', async () => {
+    let resolveCalendarDeletion: (value: { eventId: null; status: 'DISABLED'; error: null }) => void = () => {}
+    const calendarDeletionPromise = new Promise<{ eventId: null; status: 'DISABLED'; error: null }>((resolve) => {
+      resolveCalendarDeletion = resolve
+    })
+    const deleteCalendarSpy = vi
+      .spyOn(googleCalendarService, 'deleteAppointmentEvent')
+      .mockReturnValue(calendarDeletionPromise)
+
+    prismaMock.appointment.findUnique.mockResolvedValue({
+      id: 'appointment-1',
+      clientId: 'client-1',
+      guestName: null,
+      guestPhone: null,
+      googleCalendarEventId: 'event-1',
+      sale: null,
+      bonoSessions: [],
+      client: { email: 'ana@example.com' },
+      service: null
+    })
+    prismaMock.appointment.delete.mockResolvedValue(undefined)
+    prismaMock.appointment.count.mockResolvedValue(0)
+    prismaMock.client.update.mockResolvedValue(undefined)
+
+    const req = createMockRequest({
+      params: { id: 'appointment-1' }
+    })
+    const res = createMockResponse()
+
+    await deleteAppointment(req as any, res)
+
+    expect(prismaMock.appointment.delete).toHaveBeenCalledWith({
+      where: { id: 'appointment-1' }
+    })
+    expect(deleteCalendarSpy).toHaveBeenCalledWith('event-1', 'ana@example.com')
+    expect(res.json).toHaveBeenCalledWith({ message: 'Appointment deleted successfully' })
+
+    resolveCalendarDeletion({ eventId: null, status: 'DISABLED', error: null })
+    await calendarDeletionPromise
+    deleteCalendarSpy.mockRestore()
+  })
+
   it('charges an appointment with a compatible bono and records the client history', async () => {
     prismaMock.appointment.findUnique.mockResolvedValue({
       id: 'appointment-1',

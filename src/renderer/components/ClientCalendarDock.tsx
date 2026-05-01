@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { Calendar as BigCalendar, View } from 'react-big-calendar'
 import moment from 'moment'
 import 'react-big-calendar/lib/css/react-big-calendar.css'
@@ -64,6 +64,11 @@ const cabinLabels: Record<string, string> = {
 
 const formatProfessionalLabel = (professional: string | null | undefined) =>
   professionalLabels[String(professional || '')] || String(professional || '')
+
+type PendingAppointmentDelete = {
+  id: string
+  closeAppointmentModal: boolean
+}
 
 interface ClientCalendarDockProps {
   onClose: () => void
@@ -153,6 +158,11 @@ export default function ClientCalendarDock({
   const [initialCabin, setInitialCabin] = useState<'LUCY' | 'TAMARA' | 'CABINA_1' | 'CABINA_2'>('LUCY')
   const [appointmentFormInstance, setAppointmentFormInstance] = useState(0)
   const [showOnlySelectedClient, setShowOnlySelectedClient] = useState(Boolean(selectedClientId))
+  const activeAppointmentModalRef = useRef({
+    showAppointmentModal: false,
+    editingAppointmentId: null as string | null
+  })
+  const [pendingAppointmentDelete, setPendingAppointmentDelete] = useState<PendingAppointmentDelete | null>(null)
   const activeClientId = showOnlySelectedClient ? selectedClientId : null
 
   useEffect(() => {
@@ -166,6 +176,13 @@ export default function ClientCalendarDock({
   useEffect(() => {
     setShowOnlySelectedClient(Boolean(selectedClientId))
   }, [selectedClientId])
+
+  useEffect(() => {
+    activeAppointmentModalRef.current = {
+      showAppointmentModal,
+      editingAppointmentId: editingAppointment?.id || null
+    }
+  }, [showAppointmentModal, editingAppointment?.id])
 
   useEffect(() => {
     const resizeTimeout = window.setTimeout(() => {
@@ -436,16 +453,32 @@ export default function ClientCalendarDock({
     fetchAppointments()
   }
 
-  const handleDeleteAppointment = async (id: string) => {
-    if (!confirm('Estas seguro de eliminar esta cita?')) return
+  const requestDeleteAppointment = (id: string) => {
+    setPendingAppointmentDelete({
+      id,
+      closeAppointmentModal:
+        activeAppointmentModalRef.current.showAppointmentModal &&
+        activeAppointmentModalRef.current.editingAppointmentId === id
+    })
+  }
+
+  const handleDeleteAppointment = async () => {
+    const appointmentToDelete = pendingAppointmentDelete
+
+    if (!appointmentToDelete) return
+
+    setPendingAppointmentDelete(null)
+
+    if (appointmentToDelete.closeAppointmentModal) {
+      handleCloseAppointmentModal()
+    }
 
     try {
-      await api.delete(`/appointments/${id}`)
+      await api.delete(`/appointments/${appointmentToDelete.id}`)
       setAppointments((currentAppointments) =>
-        currentAppointments.filter((appointment) => appointment.id !== id)
+        currentAppointments.filter((appointment) => appointment.id !== appointmentToDelete.id)
       )
       toast.success('Cita eliminada')
-      handleCloseAppointmentModal()
       void fetchAppointments()
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Error al eliminar cita')
@@ -769,7 +802,7 @@ export default function ClientCalendarDock({
                 })()}
               </div>
               <button
-                onClick={() => handleDeleteAppointment(editingAppointment.id)}
+                onClick={() => requestDeleteAppointment(editingAppointment.id)}
                 className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-600 transition hover:bg-red-100 dark:border-red-900 dark:bg-red-950 dark:hover:bg-red-900"
               >
                 Eliminar
@@ -788,6 +821,27 @@ export default function ClientCalendarDock({
             initialCabin={initialCabin}
             preselectedClientId={selectedClientId || undefined}
           />
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(pendingAppointmentDelete)}
+        onClose={() => setPendingAppointmentDelete(null)}
+        title="Eliminar cita"
+        maxWidth="sm"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-700 dark:text-gray-300">
+            ¿Seguro que quieres eliminar esta cita?
+          </p>
+          <div className="flex justify-end gap-2">
+            <button type="button" className="btn btn-secondary" onClick={() => setPendingAppointmentDelete(null)}>
+              Cancelar
+            </button>
+            <button type="button" className="btn btn-danger" onClick={() => void handleDeleteAppointment()}>
+              Eliminar cita
+            </button>
+          </div>
         </div>
       </Modal>
 

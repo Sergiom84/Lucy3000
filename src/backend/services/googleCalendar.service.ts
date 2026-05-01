@@ -8,6 +8,7 @@ const GOOGLE_CALENDAR_TIMEZONE = 'Europe/Madrid'
 const OAUTH_STATE_SCOPE = 'google-calendar-oauth'
 const OAUTH_STATE_TTL_SECONDS = 60 * 10
 const GOOGLE_CALENDAR_SCOPES = ['https://www.googleapis.com/auth/calendar.events']
+const GOOGLE_CALENDAR_DELETE_TIMEOUT_MS = 10_000
 const GOOGLE_CALENDAR_ENV_KEYS = [
   'GOOGLE_CALENDAR_CLIENT_ID',
   'GOOGLE_CALENDAR_CLIENT_SECRET',
@@ -572,11 +573,17 @@ export class GoogleCalendarService {
     try {
       const { calendar, config: activeConfig } = await this.getAuthorizedCalendar(true)
 
-      await calendar.events.delete({
-        calendarId: activeConfig.calendarId,
-        eventId,
-        sendUpdates: this.getSendUpdates(activeConfig, clientEmail, forceSendUpdates)
-      })
+      await calendar.events.delete(
+        {
+          calendarId: activeConfig.calendarId,
+          eventId,
+          sendUpdates: this.getSendUpdates(activeConfig, clientEmail, forceSendUpdates)
+        },
+        {
+          retry: false,
+          timeout: GOOGLE_CALENDAR_DELETE_TIMEOUT_MS
+        }
+      )
 
       return {
         eventId: null,

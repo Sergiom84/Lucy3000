@@ -3,6 +3,7 @@ import { calculateAppointmentEndTime, deriveAppointmentServiceIds } from '../../
 import { isActiveAppointmentStatus, validateAppointmentSlot } from '../../utils/appointment-validation'
 import { getAppointmentDisplayName } from '../../utils/customer-display'
 import { syncClientCancelledAppointmentCounts } from '../../utils/client-cancellation-counts'
+import { logWarn } from '../../utils/logger'
 import {
   deleteAppointmentCalendarEvent,
   syncCreatedAppointmentCalendar,
@@ -244,12 +245,18 @@ export const deleteAppointmentRecord = async (id: string) => {
   if (Array.isArray(appointment.bonoSessions) && appointment.bonoSessions.some((session) => session.status === 'AVAILABLE')) {
     await releaseReservedBonoSessions(appointment.id)
   }
-  await deleteAppointmentCalendarEvent(appointment)
 
   await prisma.appointment.delete({
     where: { id }
   })
   await syncClientCancelledAppointmentCounts([appointment.clientId])
+
+  void deleteAppointmentCalendarEvent(appointment).catch((error) => {
+    logWarn('Background Google Calendar event deletion failed', {
+      appointmentId: appointment.id,
+      syncError: error instanceof Error ? error.message : String(error)
+    })
+  })
 
   return { message: 'Appointment deleted successfully' }
 }

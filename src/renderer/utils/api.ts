@@ -4,12 +4,17 @@ import { useAuthStore } from '../stores/authStore'
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api'
 const MAX_NETWORK_RETRIES = 4
 const NETWORK_RETRY_DELAY_MS = 500
+const SLOW_REQUEST_WARNING_MS = 2_000
 
 type RetryableAxiosConfig = {
   _networkRetryCount?: number
+  _requestStartedAt?: number
   method?: string
   url?: string
 }
+
+const getRequestDuration = (config: RetryableAxiosConfig | undefined) =>
+  config?._requestStartedAt ? Date.now() - config._requestStartedAt : null
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -22,7 +27,8 @@ const serializeAxiosError = (error: any) => ({
   baseURL: error?.config?.baseURL ?? null,
   params: error?.config?.params ?? null,
   requestData: error?.config?.data ?? null,
-  responseData: error?.response?.data ?? null
+  responseData: error?.response?.data ?? null,
+  durationMs: getRequestDuration(error?.config)
 })
 
 const isBootstrapOrLoginRequest = (url: string | undefined) => {
@@ -52,6 +58,7 @@ const api = axios.create({
 // Request interceptor para agregar el token
 api.interceptors.request.use(
   (config) => {
+    ;(config as RetryableAxiosConfig)._requestStartedAt = Date.now()
     const token = useAuthStore.getState().token
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
@@ -65,7 +72,29 @@ api.interceptors.request.use(
 
 // Response interceptor para manejar errores
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const config = response.config as RetryableAxiosConfig | undefined
+    const durationMs = getRequestDuration(config)
+    const method = config?.method?.toLowerCase()
+
+    if (
+      durationMs !== null &&
+      durationMs >= SLOW_REQUEST_WARNING_MS &&
+      method &&
+      method !== 'get' &&
+      method !== 'head'
+    ) {
+      console.warn('[api] Slow request completed', {
+        method: config?.method ?? null,
+        url: config?.url ?? null,
+        baseURL: response.config.baseURL ?? null,
+        status: response.status,
+        durationMs
+      })
+    }
+
+    return response
+  },
   async (error) => {
     const config = error.config as RetryableAxiosConfig | undefined
     const method = config?.method?.toLowerCase()
