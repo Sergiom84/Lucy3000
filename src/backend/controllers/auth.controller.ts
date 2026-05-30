@@ -109,6 +109,14 @@ export const getBootstrapStatus = async (_req: Request, res: Response) => {
 
 export const bootstrapAdmin = async (req: Request, res: Response) => {
   try {
+    // Gate de seguridad para la API central publica: si BOOTSTRAP_TOKEN esta
+    // definido, solo quien lo conozca puede crear el primer platform admin.
+    // Sin la variable (instalaciones locales/dev) el comportamiento no cambia.
+    const requiredToken = process.env.BOOTSTRAP_TOKEN
+    if (requiredToken && String(req.body.bootstrapToken || '') !== requiredToken) {
+      return res.status(403).json({ error: 'Bootstrap token required' })
+    }
+
     const { email, username, password, name, businessName, businessSlug } = req.body
     const tenantName = String(businessName || DEFAULT_TENANT_NAME).trim() || DEFAULT_TENANT_NAME
     const tenantSlug = buildTenantSlug(businessSlug || tenantName)

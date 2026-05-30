@@ -27,6 +27,7 @@ export const bootstrapAdminBodySchema = z
     email: z.string().trim().email('Invalid email format'),
     username: z.string().trim().min(2, 'Username is too short').max(120, 'Username is too long').optional(),
     password: z.string().min(8, 'Password must be at least 8 characters'),
-    name: z.string().trim().min(2, 'Name is required').max(120, 'Name is too long')
+    name: z.string().trim().min(2, 'Name is required').max(120, 'Name is too long'),
+    bootstrapToken: z.string().max(200).optional()
   })
   .strict()

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-const tenantLicenseStatusSchema = z.enum(['TRIAL', 'ACTIVE', 'BLOCKED', 'CANCELLED'])
+const tenantLicenseStatusSchema = z.enum(['PENDING', 'TRIAL', 'ACTIVE', 'BLOCKED', 'CANCELLED'])
 
 export const createTenantBodySchema = z
   .object({

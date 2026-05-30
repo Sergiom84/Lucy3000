@@ -11,7 +11,7 @@ export type TenantLicenseSnapshot = {
 export type TenantLicenseAccess = {
   allowed: boolean
   status: string
-  reason: 'active' | 'trial-expired' | 'blocked' | 'cancelled' | 'inactive'
+  reason: 'active' | 'trial-expired' | 'blocked' | 'cancelled' | 'pending' | 'inactive'
   trialEndsAt: Date
 }
 
@@ -41,6 +41,15 @@ export const evaluateTenantLicense = (
       allowed: false,
       status: 'CANCELLED',
       reason: 'cancelled',
+      trialEndsAt: license.trialEndsAt
+    }
+  }
+
+  if (license.status === 'PENDING') {
+    return {
+      allowed: false,
+      status: 'PENDING',
+      reason: 'pending',
       trialEndsAt: license.trialEndsAt
     }
   }

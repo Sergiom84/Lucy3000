@@ -134,8 +134,11 @@ export const createTenant = async (req: AuthRequest, res: Response) => {
           slug: normalizedSlug,
           license: {
             create: {
-              status: 'TRIAL',
-              plan: 'trial',
+              // El tenant nace PENDING: el trial no arranca hasta que el
+              // platform admin da el OK (status TRIAL) desde el panel. Esto
+              // evita gastar la prueba durante migracion/configuracion.
+              status: 'PENDING',
+              plan: 'pending',
               trialEndsAt: getTrialEndDate()
             }
           },
@@ -196,6 +199,15 @@ export const updateTenantLicense = async (req: AuthRequest, res: Response) => {
         ...(trialEndsAt ? { trialEndsAt: new Date(trialEndsAt) } : {}),
         ...(blockedAt !== undefined ? { blockedAt: blockedAt ? new Date(blockedAt) : null } : {}),
         ...(cancelledAt !== undefined ? { cancelledAt: cancelledAt ? new Date(cancelledAt) : null } : {}),
+        // Al dar el OK de prueba, el reloj de 7 dias arranca AHORA (no en la
+        // instalacion), salvo que se pase un trialEndsAt explicito.
+        ...(status === 'TRIAL'
+          ? {
+              trialEndsAt: trialEndsAt ? new Date(trialEndsAt) : getTrialEndDate(),
+              blockedAt: null,
+              cancelledAt: null
+            }
+          : {}),
         ...(status === 'ACTIVE' ? { activatedAt: new Date(), blockedAt: null, cancelledAt: null } : {}),
         ...(notes !== undefined ? { notes } : {})
       }
