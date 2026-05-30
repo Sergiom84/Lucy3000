@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { AlertCircle, CheckCircle, FileSpreadsheet } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../utils/api'
+import { invalidateAppointmentClientsCache } from '../utils/appointmentCatalogs'
 import {
   LEGACY_SPREADSHEET_FILE_ACCEPT,
   assertSupportedLegacySpreadsheetFile
@@ -153,6 +154,7 @@ export default function ImportAbonosModal({
       }
 
       setResults(nextResults)
+      invalidateAppointmentClientsCache()
 
       const summaryParts = [
         nextResults.success.count > 0 ? `${nextResults.success.count} abonos importados` : null,

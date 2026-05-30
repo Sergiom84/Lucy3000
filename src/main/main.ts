@@ -13,12 +13,14 @@ import { createRuntimeDataService, type RuntimeDataService } from './runtimeData
 import { createBackupRuntime, type BackupRuntime } from './backupRuntime'
 import { createClientAssetsRuntime, type ClientAssetsRuntime } from './clientAssetsRuntime'
 import { createPrintingRuntime, type PrintingRuntime } from './printing'
+import { createDatabaseConfigService, type DatabaseConfigService } from './databaseConfig'
 import { createMainWindow } from './window'
 import { installAppMenu } from './menu'
 import { registerAppIpcHandlers } from './ipc/app'
 import { registerBackupIpcHandlers } from './ipc/backup'
 import { registerClientAssetIpcHandlers } from './ipc/clientAssets'
 import { registerPrintingIpcHandlers } from './ipc/printing'
+import { registerDatabaseConfigIpcHandlers } from './ipc/databaseConfig'
 import { applyDevelopmentRuntimePaths, getUserDataDir } from './runtimePaths'
 
 let isForcingAppExit = false
@@ -27,6 +29,7 @@ let runtimeDataService: RuntimeDataService | null = null
 let backupRuntime: BackupRuntime | null = null
 let clientAssetsRuntime: ClientAssetsRuntime | null = null
 let printingRuntime: PrintingRuntime | null = null
+let databaseConfigService: DatabaseConfigService | null = null
 
 const isDevelopment = process.env.NODE_ENV === 'development'
 const shouldAutoOpenDevTools = isDevelopment && process.env.ELECTRON_OPEN_DEVTOOLS === '1'
@@ -64,31 +67,45 @@ app.whenReady().then(async () => {
   backupRuntime = createBackupRuntime({ isDevelopment, backendRuntime })
   clientAssetsRuntime = createClientAssetsRuntime()
   printingRuntime = createPrintingRuntime()
+  databaseConfigService = createDatabaseConfigService({ isDevelopment })
 
   registerAppIpcHandlers(runtimeDataService)
   registerBackupIpcHandlers(backupRuntime)
   registerClientAssetIpcHandlers(clientAssetsRuntime)
   registerPrintingIpcHandlers(printingRuntime)
+  registerDatabaseConfigIpcHandlers(databaseConfigService)
 
   clientAssetsRuntime.registerProtocolHandler()
 
-  try {
-    await backendRuntime.ensureBackendReady()
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Backend startup failed'
-    writeMainLog('error', 'Backend unavailable during startup', error)
-    dialog.showErrorBox('Backend unavailable', message)
-    app.quit()
-    return
+  installAppMenu(() => runtimeDataService?.showDatabaseHelpDialog())
+
+  const databaseStatus = databaseConfigService.getStatus()
+  if (!databaseStatus.needsSetup) {
+    try {
+      await backendRuntime.ensureBackendReady()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Backend startup failed'
+      writeMainLog('error', 'Backend unavailable during startup', error)
+      dialog.showErrorBox('Backend unavailable', message)
+      app.quit()
+      return
+    }
+  } else {
+    writeMainLog('warn', 'Backend startup deferred until database setup is completed', {
+      reason: databaseStatus.reason,
+      databaseUrlKind: databaseStatus.databaseUrlKind,
+      legacySqliteExists: databaseStatus.legacySqliteExists
+    })
   }
 
-  installAppMenu(() => runtimeDataService?.showDatabaseHelpDialog())
   createMainWindow({ isDevelopment, shouldAutoOpenDevTools })
 
-  backupRuntime.initializeAutoBackup()
-    .catch((error) => {
-      writeMainLog('error', 'Failed to initialize auto-backup', error)
-    })
+  if (!databaseStatus.needsSetup) {
+    backupRuntime.initializeAutoBackup()
+      .catch((error) => {
+        writeMainLog('error', 'Failed to initialize auto-backup', error)
+      })
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

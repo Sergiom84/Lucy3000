@@ -1,19 +1,33 @@
-# Deployment y Distribución Local
+# Deployment y Distribucion
 
-Estado actualizado: 2026-04-21
+Estado actualizado: 2026-05-26
 
 ## Alcance
 
-Este documento cubre el canal oficial de entrega actual:
-- build local del producto;
-- empaquetado del instalador;
-- comportamiento del runtime instalado.
+Este documento cubre el canal objetivo actual:
+- despliegue central de API y PostgreSQL;
+- uso web/PWA;
+- empaquetado Electron como wrapper opcional para escritorio;
+- control de licencia/trial en servidor.
 
-El canal operativo documentado sigue siendo escritorio local, con foco práctico en Windows.
+El instalador mejora la experiencia de escritorio, pero no protege secretos ni sustituye permisos de backend.
+
+## Infraestructura objetivo
+
+Componentes minimos:
+- API Express en un proveedor estable;
+- PostgreSQL gestionado o administrado;
+- Storage/S3 para fotos, documentos y assets de clienta;
+- backups de base y Storage;
+- variables de entorno por entorno;
+- dominio HTTPS;
+- logs y monitorizacion basica.
+
+Supabase Pro es una opcion razonable cuando haya clientes reales. Supabase Free debe quedarse para demo o piloto. Alternativas validas son Neon, Render/Railway/Fly con Postgres gestionado, o VPS si se acepta mas operacion manual.
 
 ## Pipeline de build
 
-El comando principal es:
+El comando principal sigue siendo:
 
 ```bash
 npm run build
@@ -26,112 +40,141 @@ Ese pipeline ejecuta:
 4. `npm run build:backend`
 5. `electron-builder`
 
-## Qué produce
+`build:prepare-db` ya no crea una SQLite empaquetada por defecto. Solo se activa el flujo legacy si se establece `LUCY3000_PREPARE_SQLITE=1`.
+
+## Que produce
 
 Salida principal:
 - instalador en `release/`;
 - frontend compilado en `dist/`;
 - backend compilado en `dist/backend/`.
 
-`build:prepare-db` deja lista la base empaquetada que se copiará al runtime local cuando haga falta.
-Esa base no debe llevar un administrador precargado.
+El bundle no debe incluir:
+- secretos reales;
+- bases de datos productivas;
+- tokens de Google, Supabase, Storage o pagos;
+- datos de clientes.
 
-## Comportamiento del runtime instalado
+## Variables de entorno
 
-En el primer arranque del `.exe`:
-1. Electron resuelve la carpeta de datos local del usuario.
-2. Busca `lucy3000.db`.
-3. Si no existe, copia la base empaquetada.
-4. Si no existe `jwt-secret.txt`, genera uno.
-5. Arranca el backend empaquetado.
-6. Espera respuesta de `/health`.
-7. Carga la SPA empaquetada.
-
-Si el runtime queda sin usuarios:
-- login entra en modo bootstrap;
-- el primer `ADMIN` se crea desde la propia interfaz.
-
-## Variables de entorno en empaquetado
-
-El runtime empaquetado puede leer `.env` desde:
-- la carpeta del ejecutable;
-- `resources/`;
-- la carpeta de datos local del usuario.
-
-En producción, la ruta más operativa para ajustes por instalación suele ser `userData`.
-
-Variables críticas:
+Variables criticas:
 
 ```env
-DATABASE_URL="file:./prisma/lucy3000.db"
-JWT_SECRET="opcional-en-empaquetado"
+DATABASE_URL="postgresql://usuario:password@host:5432/lucy3000"
+JWT_SECRET="valor-largo-y-secreto"
 PORT=3001
 NODE_ENV=production
 ```
 
-Notas:
-- en empaquetado, `JWT_SECRET` puede generarse automáticamente;
-- Google Calendar requiere además `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET` y `GOOGLE_CALENDAR_REDIRECT_URI`.
+Variables habituales:
 
-## Runtime supportable desde la propia app
+```env
+VITE_API_URL="https://api.tu-dominio.com"
+GOOGLE_CALENDAR_CLIENT_ID="..."
+GOOGLE_CALENDAR_CLIENT_SECRET="..."
+GOOGLE_CALENDAR_REDIRECT_URI="https://api.tu-dominio.com/api/calendar/callback"
+```
 
-La instalación ya permite:
-- abrir carpeta de datos;
-- abrir carpeta de logs;
-- restaurar backups;
-- configurar backups;
-- restablecer instalación local;
-- configurar impresora de tickets;
-- gestionar Google Calendar.
+El cliente nunca debe llevar secretos. `VITE_*` es publico por definicion.
 
-Eso reduce la necesidad de intervención manual sobre ficheros internos.
+## Comportamiento del wrapper Electron
+
+En el primer arranque del `.exe`:
+1. Electron abre la ventana.
+2. Carga la SPA empaquetada o la URL configurada, segun canal.
+3. El renderer autentica contra la API central.
+4. La API valida usuario, tenant y licencia.
+5. La operativa se bloquea o permite desde servidor.
+
+El reloj local y los flags del instalador no deciden el trial.
+
+## Licencias y trial
+
+Regla de producto:
+- al crear un tenant, `trialEndsAt = now + 7 dias`;
+- cada login y operacion sensible se comprueba en servidor;
+- si expira, se bloquea la operativa y se conservan rutas de login, licencia, soporte y administracion;
+- un administrador interno puede activar, cancelar, ampliar prueba o bloquear.
+
+La primera version puede usar activacion manual. Stripe, PayPal o transferencia pueden entrar despues.
+
+## Distribucion Windows
+
+Recomendaciones:
+- generar instalador con `electron-builder`;
+- firmar codigo antes de enviar a clientes reales;
+- valorar NSIS/MSIX/MSI como experiencia de instalacion;
+- asumir que ASAR/MSI/EXE no impiden ingenieria inversa fuerte;
+- mantener toda logica critica y secretos en servidor.
 
 ## Checklist previo a distribuir
 
-### Técnico
-- `npm run build:backend`
-- `npm run build`
-- revisar que no se empaquetan secretos reales
-- revisar que la base empaquetada no contiene usuarios de demo
+### Tecnico
 
-### Funcional mínimo
-- instalación limpia;
-- arranque limpio;
-- bootstrap del primer admin;
+- `npm run build:backend`
+- `npm run test:unit`
+- `npm run test:smoke`
+- typecheck o `npm run build` cuando cambie renderer/Electron
+- revisar que no se empaquetan secretos reales
+- revisar que no se empaqueta una base productiva
+- validar variables de entorno de produccion
+
+### SaaS
+
+- migraciones aplicadas en PostgreSQL;
+- backup y restore probados;
+- Storage configurado con rutas por tenant;
+- HTTPS y CORS correctos;
+- logs disponibles;
+- plan de rollback documentado.
+
+### Funcional minimo
+
+- bootstrap del primer tenant/admin;
 - login;
 - alta de cliente;
 - alta de servicio;
-- creación de cita;
+- creacion de cita;
 - venta;
-- backup manual;
-- restore manual;
-- impresión si el hardware objetivo aplica.
+- caja;
+- Google Calendar si el cliente lo usa;
+- trial activo, expirado, bloqueado y reactivado;
+- usuario de un tenant no ve datos de otro;
+- movil/tablet en flujos principales.
 
 ## Troubleshooting
 
 ### La app no arranca
-- revisar logs del proceso principal;
-- comprobar que el puerto local del backend no esté ocupado;
-- confirmar permisos de escritura sobre la carpeta de datos local.
 
-### La app arranca pero login “no cuadra”
-- puede que exista una instalación local anterior con otra base;
-- abre la carpeta de datos desde la propia app o desde el menú de ayuda;
-- si la instalación debe empezar de cero, usa “Restablecer instalación local”.
+- revisar logs del proceso principal si es Electron;
+- comprobar que la API central responde a `/health`;
+- confirmar `VITE_API_URL` o URL de API configurada;
+- comprobar CORS y HTTPS.
+
+### Login no cuadra
+
+- confirmar `tenantSlug` si el mismo email/usuario existe en varios centros;
+- revisar estado de licencia del tenant;
+- confirmar que el usuario pertenece al tenant correcto.
 
 ### Google Calendar no conecta
-- comprobar el `.env` efectivo de esa instalación;
-- validar `GOOGLE_CALENDAR_REDIRECT_URI`;
-- revisar la pantalla `Settings`, que ya informa variables ausentes.
 
-### Restore problemático
-- usar primero el flujo de backup/restore propio de la app;
-- evitar reemplazar la base SQLite manualmente salvo soporte controlado;
-- recordar que restore de `.db` y restore de carpeta completa no son equivalentes.
+- comprobar el `.env` efectivo del backend;
+- validar `GOOGLE_CALENDAR_REDIRECT_URI`;
+- confirmar que el callback conserva `tenantId`;
+- revisar la pantalla `Settings`, que informa variables ausentes.
+
+### Restore o importacion legacy problematica
+
+- usar el asistente SQL solo para datos soportados;
+- hacer copia/snapshot antes de importar;
+- validar que la importacion corre en el tenant correcto;
+- recordar que restore de `.db` y restore SaaS no son equivalentes.
 
 ## Fuera de alcance
 
 Este documento no cubre:
-- despliegues remotos como canal oficial;
-- uso multiusuario sobre servidor remoto;
-- automatizaciones de infraestructura fuera del instalador.
+- modo offline con resolucion de conflictos;
+- multi-base por cliente;
+- secretos dentro del instalador;
+- produccion comercial sobre planes Free sin backup/SLA adecuados.

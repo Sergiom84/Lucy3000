@@ -1,75 +1,90 @@
 # Lucy3000
 
-Aplicación de escritorio para gestión de estética con backend local embebido.
+Lucy3000 es una app de gestion de estetica orientada a SaaS multi-equipo: una API central, una base PostgreSQL compartida y clientes web/PWA, con Electron como wrapper opcional para escritorio.
 
 ## Estado actual
-- Topología oficial: Electron + React/Vite + Express + Prisma + SQLite local.
-- Canal oficial de entrega: instalador de escritorio generado con `npm run build`.
-- Supabase queda como soporte histórico o flujos puntuales de recuperación, no como dependencia operativa del runtime actual.
-- El primer administrador ya no viene precargado: se crea por bootstrap desde login.
 
-## Estado de la refactorización
-- `src/main/main.ts` ya es composition root; el runtime de Electron está separado en módulos e IPC por dominio.
-- `src/backend/controllers/*` actúa como capa HTTP fina y la lógica de negocio hotspot vive en `src/backend/modules/*`.
-- `src/backend/db.ts` crea Prisma y orquesta compatibilidad; los guards SQLite viven en `src/backend/db/compat/*`.
-- `src/renderer/pages/*` se conserva como entrypoint de routing; la lógica de pantallas grandes vive en `src/renderer/features/*`.
+- Topologia oficial: React/Vite + Express + Prisma + PostgreSQL multi-tenant.
+- Electron se mantiene como canal opcional de escritorio, no como propietario de los datos.
+- Cada centro vive en un `Tenant`; los datos de negocio se aislan por `tenantId`.
+- El alta inicial crea el primer centro, su licencia de prueba y el primer `ADMIN`.
+- Supabase encaja como proveedor inicial de Postgres/Storage/infra, pero el backend sigue siendo el duenio de la logica y de los permisos.
+- La antigua ruta SQLite queda como legado de importacion, restore o soporte puntual.
+
+## Estado de la refactorizacion
+
+- `src/main/main.ts` es composition root; el runtime de Electron esta separado en modulos e IPC por dominio.
+- `src/backend/controllers/*` actua como capa HTTP fina y la logica de negocio vive en `src/backend/modules/*`.
+- `src/backend/db.ts` crea Prisma, aplica el contexto tenant-aware y solo ejecuta compatibilidad SQLite cuando `DATABASE_URL` es `file:`.
+- `src/backend/tenant/*` centraliza contexto multi-tenant y evaluacion de licencia.
+- `src/renderer/pages/*` se conserva como entrypoint de routing; la logica de pantallas grandes vive en `src/renderer/features/*`.
 - `src/shared/electron.ts` centraliza contratos IPC compartidos entre `main`, `preload` y renderer.
 
-## Qué hace hoy la app
+## Que hace hoy la app
+
 - Dashboard operativo.
-- Gestión de clientes con historial, saldo, ranking y assets locales.
-- Agenda de citas con:
-  - citas normales o de clienta invitada;
-  - leyendas de color;
-  - múltiples servicios por cita;
-  - bloqueos de agenda;
-  - notas diarias.
-- Servicios y productos con categorías e importación `.xlsx`.
+- Gestion de clientes con historial, saldo, ranking y assets.
+- Agenda de citas con clienta invitada, leyendas, multiples servicios, bloqueos y notas diarias.
+- Servicios y productos con categorias e importacion `.xlsx`.
 - Ventas, cobros pendientes, caja y arqueos.
 - Bonos, packs, sesiones y saldo a cuenta.
-- Usuarios y cuentas internas.
+- Usuarios, cuentas internas, roles y tenant asociado.
+- Licencia por centro con prueba de 7 dias, bloqueo y estados de suscripcion.
 - Reportes y presupuestos.
-- Backups locales y restore desde escritorio.
-- Integración opcional con Google Calendar.
+- Integracion opcional con Google Calendar aislada por tenant.
 - Asistente admin para analizar e importar un `01dat.sql` o `01dat.sqlx` legacy, siempre que el contenido sea SQL plano.
 
-## Autenticación y roles
+## Autenticacion, tenants y licencias
+
 - Login normal: `POST /api/auth/login`
 - Bootstrap inicial:
   - `GET /api/auth/bootstrap-status`
   - `POST /api/auth/bootstrap-admin`
-- Roles observados en código:
-  - `ADMIN`
-  - `MANAGER`
-  - `EMPLOYEE`
-- Páginas admin-only en renderer:
-  - `Reports`
-  - `Accounts`
-  - `Sql`
+- Licencia del centro actual:
+  - `GET /api/tenants/current/license`
+- Administracion interna de centros:
+  - `GET /api/tenants`
+  - `POST /api/tenants`
+  - `PUT /api/tenants/:id/license`
+
+Roles observados en codigo:
+- `ADMIN`
+- `MANAGER`
+- `EMPLOYEE`
+
+Páginas admin-only en renderer:
+- `Reports`
+- `Accounts`
+- `Sql`
+
+La licencia se valida en servidor en login y en operaciones autenticadas. Cuando un trial expira o una licencia queda bloqueada, el backend limita el acceso operativo y conserva rutas necesarias para login, estado de licencia, soporte y administracion.
 
 ## Desarrollo local
 
 ### Requisitos
+
 - Node.js 18 o superior.
 - npm.
-- Windows es el entorno de referencia para scripts operativos y build del instalador.
+- Una base PostgreSQL accesible, local o gestionada.
+- Windows sigue siendo el entorno de referencia para scripts operativos y build del instalador.
 
 ### Arranque
-1. Instala dependencias:
 
-```bash
-npm install
-```
+1. Crea `.env` a partir de `.env.example`.
 
-2. Crea `.env` a partir de `.env.example`.
-
-3. Ajusta como mínimo:
+2. Ajusta como minimo:
 
 ```env
-DATABASE_URL="file:./prisma/lucy3000.db"
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/lucy3000"
 JWT_SECRET="cambia-este-valor"
 PORT=3001
 NODE_ENV=development
+```
+
+3. Instala dependencias:
+
+```bash
+npm install
 ```
 
 4. Genera Prisma y aplica migraciones:
@@ -85,10 +100,7 @@ npm run prisma:migrate
 npm run dev
 ```
 
-6. Si no existe ningún usuario, crea el primer `ADMIN` desde login.
-
-Nota:
-la URL SQLite anterior se resuelve relativa a `prisma/schema.prisma`, así que el fichero termina en `prisma/prisma/lucy3000.db`.
+6. Si no existe ningun usuario, crea el primer centro y el primer `ADMIN` desde login.
 
 ## Scripts npm
 
@@ -108,6 +120,7 @@ npm run prisma:studio
 ```
 
 ## Scripts operativos fuera de npm
+
 Se ejecutan directamente desde `scripts/`:
 - `scripts/analyze-backup.ps1`
 - `scripts/restore-backup.ps1`
@@ -117,70 +130,77 @@ Se ejecutan directamente desde `scripts/`:
 - `scripts/kill-dev-ports.ps1`
 - `scripts/prepare-packaged-db.js`
 
+`build:prepare-db` ya no prepara una SQLite empaquetada salvo que se fuerce con `LUCY3000_PREPARE_SQLITE=1`.
+
 ## Variables de entorno
 
-### Críticas
+### Criticas
+
 - `DATABASE_URL`
 - `JWT_SECRET`
 - `PORT`
 - `NODE_ENV`
 
 ### Opcionales
+
 - `VITE_API_URL`
 - `GOOGLE_CALENDAR_CLIENT_ID`
 - `GOOGLE_CALENDAR_CLIENT_SECRET`
 - `GOOGLE_CALENDAR_REDIRECT_URI`
 - `WHATSAPP_*`
-- `SUPABASE_*` solo para soporte histórico o recuperación
+- `SUPABASE_*` para infra, soporte historico o recuperacion
 
 ## Arquitectura resumida
+
 - `src/main/main.ts`: composition root del proceso principal de Electron.
-- `src/main/*Runtime.ts` y `src/main/ipc/*`: runtimes técnicos e IPC por dominio.
+- `src/main/*Runtime.ts` y `src/main/ipc/*`: runtimes tecnicos e IPC por dominio.
 - `src/preload.ts`: bridge seguro con `contextBridge`.
 - `src/shared/electron.ts`: contratos IPC compartidos.
 - `src/renderer/pages/*`: entrypoints de routing.
 - `src/renderer/features/*`: feature containers, hooks, adapters y componentes presentacionales.
 - `src/backend/controllers/*`: adaptadores HTTP finos.
-- `src/backend/modules/*`: lógica de negocio por dominio.
-- `src/backend/db.ts` y `src/backend/db/compat/*`: bootstrap Prisma y compatibilidad SQLite.
-- `prisma/schema.prisma`: modelo de datos real.
-- `prisma/migrations/*`: migraciones versionadas.
+- `src/backend/modules/*`: logica de negocio por dominio.
+- `src/backend/tenant/*`: contexto de tenant y licencias.
+- `src/backend/db.ts` y `src/backend/db/compat/*`: bootstrap Prisma, scoping multi-tenant y compatibilidad SQLite legacy.
+- `prisma/schema.prisma`: modelo persistente real.
+- `prisma/migrations/*`: migraciones PostgreSQL versionadas.
+- `prisma/migrations_sqlite_legacy/*`: historico SQLite conservado para referencia.
 
-## Importaciones y restauración
-- Flujo operativo diario:
-  - importadores `.xlsx` desde `Settings`;
-  - backups locales desde `Settings`.
-- Flujo legado aparte:
-  - asistente SQL admin para `01dat.sql` o `01dat.sqlx` en formato SQL plano;
-  - scripts PowerShell históricos de PostgreSQL/Supabase.
+## Importaciones, backups y restauracion
+
+- La base productiva SaaS es PostgreSQL; backups de produccion deben hacerse en el proveedor de base de datos o con snapshots/dumps controlados.
+- Los assets de clienta deben ir a Storage/S3 equivalente, no dentro de la base.
+- El asistente SQL admin sigue siendo un flujo legacy parcial para `01dat.sql` o `01dat.sqlx`.
+- Los backups locales de Electron quedan como soporte de escritorio/legacy, no como backup operativo del SaaS.
 
 El asistente SQL no cubre ventas, caja ni referencias legacy de fotos.
 
-## Build y distribución
+## Build y distribucion
 
 ```bash
 npm run build
 ```
 
 Ese pipeline:
-1. prepara la base empaquetada;
+1. omite la preparacion de SQLite empaquetada por defecto;
 2. compila renderer y backend;
 3. genera el instalador en `release/`.
 
-En producción de escritorio, Electron:
-- crea o reutiliza la base SQLite en la carpeta local del usuario;
-- genera `jwt-secret.txt` si no existe;
-- arranca el backend empaquetado;
-- espera a `/health`;
-- carga la SPA empaquetada.
+En produccion, la proteccion real esta en el servidor:
+- no incluir secretos en el cliente;
+- validar tenant, usuario, rol y licencia en la API;
+- firmar el instalador cuando se distribuya a clientes;
+- usar Electron/NSIS/MSIX solo como experiencia de instalacion, no como barrera de secreto.
 
-## Documentación relacionada
+## Documentacion relacionada
+
 - [ROADMAP.md](ROADMAP.md): prioridades y deuda activa.
-- [ARCHITECTURE.md](ARCHITECTURE.md): topología y módulos.
-- [BACKUP_RESTORE.md](BACKUP_RESTORE.md): backups locales, restore y flujos legacy.
-- [DEPLOYMENT.md](DEPLOYMENT.md): build y distribución del instalador.
-- [GOOGLE_CALENDAR_SETUP.md](GOOGLE_CALENDAR_SETUP.md): integración opcional con Google Calendar.
-- [AGENTS.md](AGENTS.md): instrucciones operativas para agentes y mantenimiento técnico.
+- [ARCHITECTURE.md](ARCHITECTURE.md): topologia y modulos.
+- [BACKUP_RESTORE.md](BACKUP_RESTORE.md): backups SaaS, restore y flujos legacy.
+- [DEPLOYMENT.md](DEPLOYMENT.md): despliegue central y wrapper de escritorio.
+- [GOOGLE_CALENDAR_SETUP.md](GOOGLE_CALENDAR_SETUP.md): integracion opcional con Google Calendar.
+- [AGENTS.md](AGENTS.md): instrucciones operativas para agentes y mantenimiento tecnico.
 
-## Regla práctica
-Si un markdown y el código discrepan, usa el código como referencia final y corrige la documentación antes de cerrar el cambio.
+## Regla practica
+
+Si un markdown y el codigo discrepan, usa el codigo como referencia final y corrige la documentacion antes de cerrar el cambio.

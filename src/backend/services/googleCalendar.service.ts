@@ -19,11 +19,13 @@ const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 type AuthenticatedCalendarUser = {
   id: string
   role: string
+  tenantId: string
 }
 
 type OAuthStatePayload = {
   sub: string
   role: string
+  tenantId: string
   scope: typeof OAUTH_STATE_SCOPE
 }
 
@@ -360,6 +362,7 @@ export class GoogleCalendarService {
       {
         sub: user.id,
         role: user.role,
+        tenantId: user.tenantId,
         scope: OAUTH_STATE_SCOPE
       } satisfies OAuthStatePayload,
       getJwtSecret(),
@@ -384,7 +387,8 @@ export class GoogleCalendarService {
 
     return {
       id: payload.sub,
-      role: payload.role
+      role: payload.role,
+      tenantId: payload.tenantId
     }
   }
 

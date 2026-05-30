@@ -3,6 +3,7 @@ import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router
 import { Toaster } from 'react-hot-toast'
 import { useAuthStore } from './stores/authStore'
 import api from './utils/api'
+import type { DatabaseConfigStatus } from '../shared/electron'
 
 const Layout = lazy(() => import('./components/Layout'))
 const Login = lazy(() => import('./pages/Login'))
@@ -19,6 +20,7 @@ const Settings = lazy(() => import('./pages/Settings'))
 const ClientRanking = lazy(() => import('./pages/ClientRanking'))
 const Accounts = lazy(() => import('./pages/Accounts'))
 const Sql = lazy(() => import('./pages/Sql'))
+const DatabaseSetup = lazy(() => import('./pages/DatabaseSetup'))
 
 function RouteLoader() {
   return (
@@ -38,16 +40,82 @@ function AdminOnlyRoute({ children }: { children: JSX.Element }) {
   return children
 }
 
+function AppToaster() {
+  return (
+    <Toaster
+      position="top-right"
+      toastOptions={{
+        duration: 3000,
+        style: {
+          background: '#363636',
+          color: '#fff',
+        },
+        success: {
+          duration: 3000,
+          iconTheme: {
+            primary: '#10b981',
+            secondary: '#fff',
+          },
+        },
+        error: {
+          duration: 4000,
+          iconTheme: {
+            primary: '#ef4444',
+            secondary: '#fff',
+          },
+        },
+      }}
+    />
+  )
+}
+
 function App() {
   const { isAuthenticated, token, updateUser, logout } = useAuthStore()
   const [authReady, setAuthReady] = useState(false)
+  const [databaseStatus, setDatabaseStatus] = useState<DatabaseConfigStatus | null>(null)
+  const [databaseStatusReady, setDatabaseStatusReady] = useState(false)
   const Router = window.location.protocol === 'file:' ? HashRouter : BrowserRouter
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadDatabaseStatus = async () => {
+      if (!window.electronAPI?.databaseConfig) {
+        setDatabaseStatusReady(true)
+        return
+      }
+
+      try {
+        const status = await window.electronAPI.databaseConfig.getStatus()
+        if (!cancelled) {
+          setDatabaseStatus(status)
+        }
+      } finally {
+        if (!cancelled) {
+          setDatabaseStatusReady(true)
+        }
+      }
+    }
+
+    void loadDatabaseStatus()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
 
     const validateSession = async () => {
       setAuthReady(false)
+
+      if (!databaseStatusReady || databaseStatus?.needsSetup) {
+        if (!cancelled && databaseStatus?.needsSetup) {
+          setAuthReady(true)
+        }
+        return
+      }
 
       if (!token) {
         if (!cancelled) {
@@ -77,38 +145,26 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [token, updateUser, logout])
+  }, [databaseStatusReady, databaseStatus?.needsSetup, token, updateUser, logout])
 
-  if (!authReady) {
+  if (!databaseStatusReady || !authReady) {
     return <RouteLoader />
+  }
+
+  if (databaseStatus?.needsSetup) {
+    return (
+      <>
+        <AppToaster />
+        <Suspense fallback={<RouteLoader />}>
+          <DatabaseSetup initialStatus={databaseStatus} />
+        </Suspense>
+      </>
+    )
   }
 
   return (
     <Router>
-      <Toaster
-        position="top-right"
-        toastOptions={{
-          duration: 3000,
-          style: {
-            background: '#363636',
-            color: '#fff',
-          },
-          success: {
-            duration: 3000,
-            iconTheme: {
-              primary: '#10b981',
-              secondary: '#fff',
-            },
-          },
-          error: {
-            duration: 4000,
-            iconTheme: {
-              primary: '#ef4444',
-              secondary: '#fff',
-            },
-          },
-        }}
-      />
+      <AppToaster />
 
       <Suspense fallback={<RouteLoader />}>
         <Routes>

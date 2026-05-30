@@ -9,7 +9,9 @@ export default function Login() {
   const navigate = useNavigate()
   const { login, bootstrapChecked, bootstrapRequired, setBootstrapStatus } = useAuthStore()
   const [identifier, setIdentifier] = useState('')
+  const [tenantSlug, setTenantSlug] = useState('')
   const [password, setPassword] = useState('')
+  const [bootstrapBusinessName, setBootstrapBusinessName] = useState('')
   const [bootstrapName, setBootstrapName] = useState('')
   const [bootstrapUsername, setBootstrapUsername] = useState('')
   const [bootstrapEmail, setBootstrapEmail] = useState('')
@@ -53,13 +55,29 @@ export default function Login() {
     setLoading(true)
 
     try {
-      const response = await api.post('/auth/login', { identifier, password })
+      const response = await api.post('/auth/login', {
+        identifier,
+        password,
+        tenantSlug: tenantSlug || undefined
+      })
       const { token, user } = response.data
-      
+
       login(user, token)
-      toast.success('¡Bienvenido!')
+      if (user?.license?.status === 'TRIAL_EXPIRED' || user?.license?.status === 'BLOCKED') {
+        toast.error('La licencia de este centro no esta activa')
+      } else {
+        toast.success('¡Bienvenido!')
+      }
       navigate('/')
     } catch (error: any) {
+      if (error.response?.status === 402 && error.response?.data?.token && error.response?.data?.user) {
+        const { token, user } = error.response.data
+        login(user, token)
+        toast.error('La licencia de este centro no esta activa')
+        navigate('/')
+        return
+      }
+
       toast.error(error.response?.data?.error || 'Error al iniciar sesión')
     } finally {
       setLoading(false)
@@ -78,6 +96,7 @@ export default function Login() {
 
     try {
       const response = await api.post('/auth/bootstrap-admin', {
+        businessName: bootstrapBusinessName || undefined,
         name: bootstrapName,
         username: bootstrapUsername || undefined,
         email: bootstrapEmail,
@@ -134,7 +153,22 @@ export default function Login() {
           {isBootstrapMode ? (
             <form onSubmit={handleBootstrapSubmit} className="space-y-5">
               <div className="rounded-lg bg-amber-50 p-4 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-                Este es un arranque limpio. Crea aqui el primer administrador y Lucy3000 quedara lista para uso normal.
+                Este es un arranque limpio. Crea aqui el primer centro y su administrador.
+              </div>
+
+              <div>
+                <label className="label">
+                  <Sparkles className="w-4 h-4 inline mr-2" />
+                  Nombre del centro
+                </label>
+                <input
+                  type="text"
+                  value={bootstrapBusinessName}
+                  onChange={(e) => setBootstrapBusinessName(e.target.value)}
+                  className="input"
+                  placeholder="Lucy Estetica"
+                  required
+                />
               </div>
 
               <div>
@@ -178,6 +212,20 @@ export default function Login() {
                   className="input"
                   placeholder="admin@tu-negocio.com"
                   required
+                />
+              </div>
+
+              <div>
+                <label className="label">
+                  <Sparkles className="w-4 h-4 inline mr-2" />
+                  Centro
+                </label>
+                <input
+                  type="text"
+                  value={tenantSlug}
+                  onChange={(e) => setTenantSlug(e.target.value)}
+                  className="input"
+                  placeholder="Opcional si el correo es unico"
                 />
               </div>
 

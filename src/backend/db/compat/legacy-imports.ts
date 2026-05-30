@@ -74,9 +74,14 @@ const scoreStoredBonoTemplateNameMatch = (
 const readStoredBonoTemplatesForBackfill = async ({
   prisma
 }: SqliteCompatibilityRuntime): Promise<StoredBonoTemplateRow[]> => {
-  const setting = await prisma.setting.findUnique({
-    where: { key: 'bono_templates_catalog' }
-  })
+  const setting =
+    typeof (prisma.setting as any).findFirst === 'function'
+      ? await prisma.setting.findFirst({
+          where: { key: 'bono_templates_catalog' }
+        })
+      : await (prisma.setting as any).findUnique({
+          where: { key: 'bono_templates_catalog' }
+        })
 
   if (!setting) {
     return []

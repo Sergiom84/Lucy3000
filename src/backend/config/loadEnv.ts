@@ -30,6 +30,19 @@ const findEnvFile = (filename: string): string | null => {
   return null
 }
 
+const normalizeFileDatabaseUrl = (databaseUrl?: string) => {
+  if (!databaseUrl?.startsWith('file:')) {
+    return
+  }
+
+  const rawPath = databaseUrl.slice('file:'.length)
+  if (!rawPath || path.isAbsolute(rawPath)) {
+    return
+  }
+
+  process.env.DATABASE_URL = `file:${path.resolve(process.cwd(), rawPath).replace(/\\/g, '/')}`
+}
+
 const baseEnvPath = findEnvFile('.env')
 if (baseEnvPath) {
   dotenv.config({ path: baseEnvPath })
@@ -41,3 +54,5 @@ if (process.env.NODE_ENV !== 'production') {
     dotenv.config({ path: devEnvPath, override: true })
   }
 }
+
+normalizeFileDatabaseUrl(process.env.DATABASE_URL)

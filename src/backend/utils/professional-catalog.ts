@@ -1,4 +1,5 @@
 import { prisma } from '../db'
+import { getSettingByKey, saveSettingByKey } from './settings'
 
 const PROFESSIONALS_SETTING_KEY = 'center_professionals'
 
@@ -80,10 +81,7 @@ const loadLegacyProfessionalNames = async () => {
 }
 
 export const getProfessionalCatalog = async (options?: { includeLegacyFallback?: boolean }) => {
-  const setting = await prisma.setting.findUnique({
-    where: { key: PROFESSIONALS_SETTING_KEY },
-    select: { value: true }
-  })
+  const setting = await getSettingByKey(PROFESSIONALS_SETTING_KEY)
 
   const storedNames = parseStoredProfessionalNames(setting?.value)
   if (storedNames.length > 0 || options?.includeLegacyFallback === false) {
@@ -96,17 +94,10 @@ export const getProfessionalCatalog = async (options?: { includeLegacyFallback?:
 export const saveProfessionalCatalog = async (names: unknown[]) => {
   const normalizedNames = uniqueProfessionalNames(names)
 
-  await prisma.setting.upsert({
-    where: { key: PROFESSIONALS_SETTING_KEY },
-    update: {
-      value: JSON.stringify(normalizedNames),
-      description: 'Profesionales configurados para agenda, citas e importaciones'
-    },
-    create: {
-      key: PROFESSIONALS_SETTING_KEY,
-      value: JSON.stringify(normalizedNames),
-      description: 'Profesionales configurados para agenda, citas e importaciones'
-    }
+  await saveSettingByKey({
+    key: PROFESSIONALS_SETTING_KEY,
+    value: JSON.stringify(normalizedNames),
+    description: 'Profesionales configurados para agenda, citas e importaciones'
   })
 
   return normalizedNames

@@ -189,6 +189,7 @@ class AppointmentReminderService {
 
       await prisma.notification.create({
         data: {
+          tenantId: appointment.tenantId,
           type: WHATSAPP_SENT_NOTIFICATION_TYPE,
           title,
           message: `Recordatorio WhatsApp enviado a ${clientName} para ${serviceLabel} (${appointment.startTime}).`,

@@ -36,7 +36,7 @@ export const fetchSalesCatalog = async (): Promise<SalesCatalogState> => {
 }
 
 export const fetchSalesClients = async (): Promise<Client[]> => {
-  const nextClients = await loadAppointmentClients()
+  const nextClients = await loadAppointmentClients({ forceRefresh: true })
   return nextClients as Client[]
 }
 

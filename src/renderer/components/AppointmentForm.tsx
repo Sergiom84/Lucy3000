@@ -387,10 +387,10 @@ function SearchableSelect({
       return
     }
 
-    if (selectedOption && !isOpen) {
+    if (selectedOption && (!isOpen || query.trim() === '')) {
       setQuery(selectedOption.label)
     }
-  }, [value, selectedOption, isOpen])
+  }, [value, selectedOption, isOpen, query])
 
   useEffect(() => {
     if (disabled) {

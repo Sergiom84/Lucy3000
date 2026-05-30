@@ -3,12 +3,13 @@
 
 generator client {
   provider      = "prisma-client-js"
+  output        = "../node_modules/.prisma/client-sqlite"
   binaryTargets = ["native", "windows", "debian-openssl-3.0.x"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider = "sqlite"
+  url      = env("SQLITE_DATABASE_URL")
 }
 
 // ============================================
@@ -80,7 +81,7 @@ model TenantLicense {
 
 model User {
   id            String   @id @default(uuid())
-  tenantId      String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId      String   @default("local")
   email         String
   username      String?
   password      String
@@ -112,7 +113,7 @@ model User {
 
 model Client {
   id              String    @id @default(uuid())
-  tenantId        String    @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId        String    @default("local")
   firstName       String
   lastName        String
   email           String?
@@ -192,7 +193,7 @@ model Client {
 
 model ClientHistory {
   id          String   @id @default(uuid())
-  tenantId    String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId    String   @default("local")
   clientId    String
   date        DateTime @default(now())
   service     String
@@ -214,7 +215,7 @@ model ClientHistory {
 
 model Service {
   id              String   @id @default(uuid())
-  tenantId        String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId        String   @default("local")
   name            String
   description     String?
   price           Decimal
@@ -249,7 +250,7 @@ model Service {
 
 model Appointment {
   id                       String   @id @default(uuid())
-  tenantId                 String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId                 String   @default("local")
   clientId                 String?
   guestName                String?
   guestPhone               String?
@@ -286,7 +287,7 @@ model Appointment {
 }
 
 model AppointmentService {
-  tenantId      String @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId      String @default("local")
   appointmentId String
   serviceId     String
   sortOrder     Int
@@ -302,7 +303,7 @@ model AppointmentService {
 
 model AppointmentLegend {
   id        String   @id @default(uuid())
-  tenantId  String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId  String   @default("local")
   name      String
   color     String
   sortOrder Int      @default(0)
@@ -317,7 +318,7 @@ model AppointmentLegend {
 
 model AgendaBlock {
   id                       String   @id @default(uuid())
-  tenantId                 String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId                 String   @default("local")
   professional             String
   calendarInviteEmail      String?
   cabin                    String   @default("LUCY")
@@ -341,7 +342,7 @@ model AgendaBlock {
 
 model AgendaDayNote {
   id          String   @id @default(uuid())
-  tenantId    String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId    String   @default("local")
   dayKey       String
   text         String
   isCompleted  Boolean  @default(false)
@@ -357,7 +358,7 @@ model AgendaDayNote {
 
 model DashboardReminder {
   id          String   @id @default(uuid())
-  tenantId    String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId    String   @default("local")
   text        String
   isCompleted Boolean  @default(false)
   completedAt DateTime?
@@ -376,7 +377,7 @@ model DashboardReminder {
 
 model Product {
   id              String   @id @default(uuid())
-  tenantId        String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId        String   @default("local")
   name            String
   description     String?
   sku             String
@@ -407,7 +408,7 @@ model Product {
 
 model StockMovement {
   id          String   @id @default(uuid())
-  tenantId    String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId    String   @default("local")
   productId   String
   type        String
   quantity    Int
@@ -429,7 +430,7 @@ model StockMovement {
 
 model Sale {
   id              String   @id @default(uuid())
-  tenantId        String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId        String   @default("local")
   clientId        String?
   appointmentId   String?  @unique
   userId          String
@@ -465,7 +466,7 @@ model Sale {
 
 model PendingPayment {
   id                  String   @id @default(uuid())
-  tenantId            String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId            String   @default("local")
   saleId               String   @unique
   clientId             String
   amount               Decimal
@@ -487,7 +488,7 @@ model PendingPayment {
 
 model PendingPaymentCollection {
   id                String   @id @default(uuid())
-  tenantId          String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId          String   @default("local")
   pendingPaymentId  String
   saleId            String
   clientId          String
@@ -513,7 +514,7 @@ model PendingPaymentCollection {
 
 model SaleItem {
   id          String  @id @default(uuid())
-  tenantId    String  @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId    String  @default("local")
   saleId      String
   productId   String?
   serviceId   String?
@@ -538,7 +539,7 @@ model SaleItem {
 
 model CashRegister {
   id              String   @id @default(uuid())
-  tenantId        String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId        String   @default("local")
   date            DateTime @default(now())
   openingBalance  Decimal
   openingDenominations      String?
@@ -567,7 +568,7 @@ model CashRegister {
 
 model CashCount {
   id              String   @id @default(uuid())
-  tenantId        String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId        String   @default("local")
   cashRegisterId  String
   userId          String
   expectedTotal   Decimal
@@ -590,7 +591,7 @@ model CashCount {
 
 model CashMovement {
   id              String   @id @default(uuid())
-  tenantId        String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId        String   @default("local")
   cashRegisterId  String
   userId          String
   saleId          String?  @unique
@@ -614,7 +615,7 @@ model CashMovement {
 
 model AccountBalanceMovement {
   id            String   @id @default(uuid())
-  tenantId      String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId      String   @default("local")
   clientId      String
   saleId        String?
   type          String
@@ -646,7 +647,7 @@ model AccountBalanceMovement {
 
 model Notification {
   id          String   @id @default(uuid())
-  tenantId    String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId    String   @default("local")
   type        String
   title       String
   message     String
@@ -666,7 +667,7 @@ model Notification {
 
 model Setting {
   id          String   @id @default(uuid())
-  tenantId    String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId    String   @default("local")
   key         String
   value       String
   description String?
@@ -684,7 +685,7 @@ model Setting {
 
 model GoogleCalendarConfig {
   id                String   @id @default(uuid())
-  tenantId          String   @unique @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId          String   @unique @default("local")
   refreshToken      String
   calendarId        String   @default("primary")
   enabled           Boolean  @default(false)
@@ -703,7 +704,7 @@ model GoogleCalendarConfig {
 
 model BonoPack {
   id             String   @id @default(uuid())
-  tenantId       String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId       String   @default("local")
   clientId       String
   name           String
   serviceId      String?
@@ -732,7 +733,7 @@ model BonoPack {
 
 model BonoSession {
   id             String    @id @default(uuid())
-  tenantId       String    @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId       String    @default("local")
   bonoPackId     String
   sessionNumber  Int
   status         String    @default("AVAILABLE")
@@ -756,7 +757,7 @@ model BonoSession {
 
 model Quote {
   id              String   @id @default(uuid())
-  tenantId        String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId        String   @default("local")
   quoteNumber     String
   clientId        String
   professional    String   @default("LUCY")
@@ -781,7 +782,7 @@ model Quote {
 
 model QuoteItem {
   id          String  @id @default(uuid())
-  tenantId    String  @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  tenantId    String  @default("local")
   quoteId     String
   productId   String?
   serviceId   String?

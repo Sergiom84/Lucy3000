@@ -28,6 +28,7 @@ import {
   type SqliteCompatibilityRuntime,
   type SqliteTableInfoRow
 } from './helpers'
+import { ensureLocalTenantSupport } from './tenant'
 import {
   ensurePendingPaymentCollectionsTable,
   ensurePendingPaymentsTable
@@ -36,6 +37,7 @@ import {
 type SqliteCompatibilityStep = (runtime: SqliteCompatibilityRuntime) => Promise<void>
 
 const sqliteCompatibilitySteps: SqliteCompatibilityStep[] = [
+  ensureLocalTenantSupport,
   ensureUsersUsernameColumn,
   ensureClientCancelledAppointmentCountColumn,
   ensureAccountBalancePaymentMethodColumn,

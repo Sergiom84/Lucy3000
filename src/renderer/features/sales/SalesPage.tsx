@@ -1732,7 +1732,7 @@ export default function Sales() {
                   <button
                     onClick={() => {
                       setClientModalOpen(true)
-                      if (clients.length === 0 && !clientsLoading) {
+                      if (!clientsLoading) {
                         void loadClients()
                       }
                     }}

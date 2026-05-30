@@ -9,6 +9,10 @@ const electronAPI: ElectronAPI = {
   resetRuntimeData: () => ipcRenderer.invoke('app:resetRuntimeData'),
   relaunch: () => ipcRenderer.invoke('app:relaunch'),
   quit: () => ipcRenderer.invoke('app:quit'),
+  databaseConfig: {
+    getStatus: () => ipcRenderer.invoke('databaseConfig:getStatus'),
+    configure: (payload) => ipcRenderer.invoke('databaseConfig:configure', payload)
+  },
   logs: {
     getFilePath: () => ipcRenderer.invoke('logs:getFilePath'),
     openFolder: () => ipcRenderer.invoke('logs:openFolder')

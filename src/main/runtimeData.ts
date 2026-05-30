@@ -79,16 +79,16 @@ export const createRuntimeDataService = (options: {
 
     const result = await showMessageBox({
       type: 'info',
-      title: 'Lucy3000 - BD local',
-      message: 'Importante sobre la base de datos local',
+      title: 'Lucy3000 - datos locales',
+      message: 'Datos locales de soporte',
       detail: [
-        'Reinstalar Lucy3000 no borra la base local del equipo.',
-        'Si el login no entra, puede que estés abriendo una instalación antigua con usuarios ya existentes.',
+        'Lucy3000 SaaS usa una base PostgreSQL central.',
+        'Esta carpeta conserva logs, configuración del wrapper y datos legacy de instalaciones antiguas.',
         '',
-        `Base local activa: ${runtimeInfo.dbPath}`,
+        `Ruta legacy de BD local: ${runtimeInfo.dbPath}`,
         `Carpeta de datos: ${runtimeInfo.userDataPath}`
       ].join('\n'),
-      buttons: ['Abrir carpeta de datos', 'Restablecer instalación local', 'Cerrar'],
+      buttons: ['Abrir carpeta de datos', 'Restablecer datos locales', 'Cerrar'],
       defaultId: 0,
       cancelId: 2,
       noLink: true
@@ -105,10 +105,10 @@ export const createRuntimeDataService = (options: {
 
     const confirmation = await showMessageBox({
       type: 'warning',
-      title: 'Confirmar restablecimiento',
-      message: 'Esto archivará la BD local actual y reiniciará la app.',
+      title: 'Confirmar restablecimiento local',
+      message: 'Esto archivará datos locales legacy y reiniciará la app.',
       detail:
-        'Lucy3000 moverá la base activa a una copia de seguridad dentro de la carpeta de datos y volverá al bootstrap del primer administrador.',
+        'Lucy3000 moverá la base local antigua, si existe, a una copia de seguridad dentro de la carpeta de datos. No modifica la base SaaS central.',
       buttons: ['Cancelar', 'Restablecer'],
       defaultId: 1,
       cancelId: 0,
@@ -121,14 +121,14 @@ export const createRuntimeDataService = (options: {
 
     const resetResult = await performRuntimeDataReset()
     if (!resetResult.success) {
-      dialog.showErrorBox('No se pudo restablecer la BD local', resetResult.error || 'Error desconocido')
+      dialog.showErrorBox('No se pudieron restablecer los datos locales', resetResult.error || 'Error desconocido')
       return
     }
 
     if (resetResult.requiresRelaunch) {
       const completed = await showMessageBox({
         type: 'info',
-        title: 'BD local restablecida',
+        title: 'Datos locales restablecidos',
         message: 'Lucy3000 se reiniciará para aplicar el cambio.',
         detail: resetResult.backupPath
           ? `Copia de seguridad creada en:\n${resetResult.backupPath}`

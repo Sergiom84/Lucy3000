@@ -1,6 +1,7 @@
 import { Request, Response } from 'express'
 import { prisma } from '../db'
 import { buildInclusiveDateRange } from '../utils/date-range'
+import { getSettingByKey } from '../utils/settings'
 import {
   buildCommercialPaymentMethodResponse,
   buildTopProducts,
@@ -24,10 +25,7 @@ const buildBonoTemplateKey = (description: unknown, serviceId: unknown, price: u
   `${normalizeLookupValue(description)}::${normalizeLookupValue(serviceId)}::${roundCurrency(Number(price) || 0)}`
 
 const readBonoTemplateKeys = async () => {
-  const setting = await prisma.setting.findUnique({
-    where: { key: BONO_TEMPLATES_SETTING_KEY },
-    select: { value: true }
-  })
+  const setting = await getSettingByKey(BONO_TEMPLATES_SETTING_KEY)
 
   if (!setting?.value) return new Set<string>()
 

@@ -7,6 +7,18 @@ interface User {
   username?: string | null
   name: string
   role: string
+  tenantId?: string
+  tenant?: {
+    id: string
+    name: string
+    slug: string
+  } | null
+  license?: {
+    status: string
+    reason: string
+    trialEndsAt: string
+  } | null
+  isPlatformAdmin?: boolean
 }
 
 interface AuthState {

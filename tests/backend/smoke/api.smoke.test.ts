@@ -335,6 +335,9 @@ const createSqlImportTx = () => ({
     count: vi.fn().mockResolvedValue(0)
   },
   setting: {
+    findFirst: vi.fn().mockResolvedValue(null),
+    create: vi.fn().mockResolvedValue(undefined),
+    update: vi.fn().mockResolvedValue(undefined),
     upsert: vi.fn().mockResolvedValue(undefined)
   }
 })
@@ -384,13 +387,34 @@ describe('API smoke tests', () => {
 
   it('POST /api/auth/bootstrap-admin creates the first admin and returns auth payload', async () => {
     const tx: any = {
+      tenant: {
+        create: vi.fn().mockResolvedValue({
+          id: 'tenant-1',
+          name: 'Lucy3000',
+          slug: 'lucy3000'
+        })
+      },
       user: {
         count: vi.fn().mockResolvedValue(0),
         create: vi.fn().mockResolvedValue({
           id: 'admin-1',
+          tenantId: 'tenant-1',
           email: 'owner@example.com',
           name: 'Owner',
-          role: 'ADMIN'
+          role: 'ADMIN',
+          isPlatformAdmin: true,
+          tenant: {
+            id: 'tenant-1',
+            name: 'Lucy3000',
+            slug: 'lucy3000',
+            license: {
+              status: 'TRIAL',
+              plan: 'trial',
+              trialEndsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+              blockedAt: null,
+              cancelledAt: null
+            }
+          }
         })
       }
     }
@@ -418,6 +442,9 @@ describe('API smoke tests', () => {
 
   it('POST /api/auth/bootstrap-admin returns 409 when bootstrap was already completed', async () => {
     const tx: any = {
+      tenant: {
+        create: vi.fn()
+      },
       user: {
         count: vi.fn().mockResolvedValue(1),
         create: vi.fn()

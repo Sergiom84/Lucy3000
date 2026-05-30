@@ -15,6 +15,7 @@ import {
   salePaymentMethodLabel
 } from '../../utils/tickets'
 import { buildClientPendingSummary, type PendingPaymentRow } from '../../utils/clientPendingPayments'
+import { invalidateAppointmentClientsCache } from '../../utils/appointmentCatalogs'
 import toast from 'react-hot-toast'
 import Modal from '../../components/Modal'
 import ClientForm from '../../components/ClientForm'
@@ -856,6 +857,7 @@ export default function ClientDetail() {
         notes: accountBalanceDraft.notes.trim() || null
       })
       toast.success('Abono registrado correctamente')
+      invalidateAppointmentClientsCache()
       setAccountBalanceDraft({
         description: '',
         amount: '',

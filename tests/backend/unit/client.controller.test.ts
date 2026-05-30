@@ -120,7 +120,7 @@ describe('client.controller list ordering', () => {
     expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1)
     const sql = prismaMock.$queryRaw.mock.calls[0][0]?.sql || ''
     expect(sql).toContain('CAST(TRIM(c."externalCode") AS INTEGER)')
-    expect(sql).toContain(`NOT GLOB '*[^0-9]*'`)
+    expect(sql).toContain(`~ '^[0-9]+$'`)
   })
 
   it('getClients summary counts clients with pending amount even without debt alert flag', async () => {

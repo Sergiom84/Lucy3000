@@ -5,7 +5,8 @@ const userRoleSchema = z.enum(['ADMIN', 'MANAGER', 'EMPLOYEE'])
 export const loginBodySchema = z
   .object({
     identifier: z.string().trim().min(1, 'User or email is required').max(120, 'User or email is too long'),
-    password: z.string().min(1, 'Password is required')
+    password: z.string().min(1, 'Password is required'),
+    tenantSlug: z.string().trim().min(1).max(80).optional()
   })
   .strict()
 
@@ -21,6 +22,8 @@ export const registerBodySchema = z
 
 export const bootstrapAdminBodySchema = z
   .object({
+    businessName: z.string().trim().min(2, 'Business name is required').max(120, 'Business name is too long').optional(),
+    businessSlug: z.string().trim().min(2, 'Business slug is too short').max(80, 'Business slug is too long').optional(),
     email: z.string().trim().email('Invalid email format'),
     username: z.string().trim().min(2, 'Username is too short').max(120, 'Username is too long').optional(),
     password: z.string().min(8, 'Password must be at least 8 characters'),
