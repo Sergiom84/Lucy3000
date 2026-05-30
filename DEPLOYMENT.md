@@ -112,7 +112,30 @@ Requisitos del hosting del front (Vercel, Netlify, Cloudflare Pages, etc.):
 Supabase no sirve SPA estatica; usar un host de estaticos para el front y un
 proveedor aparte (Render/Railway/Fly/VPS) para la API.
 
-### Desplegar el front en Cloudflare Pages
+### Desplegar en Render (canal elegido)
+
+Todo va a Render: la API como Web Service Node y el front como Static Site. El
+repo incluye `render.yaml` (Blueprint) que define ambos.
+
+Pasos:
+1. En el dashboard de Render, crear/elegir el **workspace** (la API de Render no
+   crea workspaces; es solo dashboard) y conectar el repo `Sergiom84/Lucy3000`.
+2. New > Blueprint > seleccionar el repo. Render lee `render.yaml` y crea
+   `lucy3000-api` y `lucy3000-web`.
+3. Rellenar los secretos (`sync:false`):
+   - `lucy3000-api`: `DATABASE_URL` (Session Pooler de Supabase), `BOOTSTRAP_TOKEN`.
+     `JWT_SECRET` se autogenera.
+   - `lucy3000-web`: `VITE_API_URL` = URL publica de `lucy3000-api` (visible tras
+     el primer deploy de la API).
+4. La API corre `prisma migrate deploy` en `preDeployCommand`; el front se sirve
+   con SPA fallback (`routes` rewrite a `/index.html`).
+5. Crear el primer platform admin: `POST https://<api>/api/auth/bootstrap-admin`
+   con el `bootstrapToken` correcto.
+
+Region `frankfurt` (cercana a Espana). Plan `starter` para la API (always-on);
+el static site no tiene coste de computo.
+
+### Desplegar el front en Cloudflare Pages (alternativa)
 
 El repo ya trae lo necesario: `wrangler.toml` (`pages_build_output_dir = dist`),
 `public/_redirects` con el fallback SPA y los scripts `build:web` / `deploy:web`.
