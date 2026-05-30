@@ -1,6 +1,6 @@
 import { Response } from 'express'
 import bcrypt from 'bcryptjs'
-import { prisma } from '../db'
+import { getServerNow, prisma } from '../db'
 import type { AuthRequest } from '../middleware/auth.middleware'
 import { evaluateTenantLicense, getTrialEndDate } from '../tenant/license'
 
@@ -76,7 +76,7 @@ export const getCurrentTenantLicense = async (req: AuthRequest, res: Response) =
       return res.status(404).json({ error: 'Tenant license not found' })
     }
 
-    const license = evaluateTenantLicense(tenant.license)
+    const license = evaluateTenantLicense(tenant.license, await getServerNow())
     res.json({
       tenant: {
         id: tenant.id,
@@ -99,6 +99,55 @@ export const getCurrentTenantLicense = async (req: AuthRequest, res: Response) =
     res.status(500).json({ error: 'Internal server error' })
   }
 }
+// El propio admin del tenant arranca su prueba de 7 dias (boton "Si" del
+// pop-up). Solo permitido desde PENDING y dentro de la gracia; el reloj se
+// fija con la hora de la base (Supabase), no la del PC.
+export const startCurrentTenantTrial = async (req: AuthRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId
+    if (!tenantId) {
+      return res.status(401).json({ error: 'Tenant context is required' })
+    }
+
+    const license = await prisma.tenantLicense.findUnique({ where: { tenantId } })
+    if (!license) {
+      return res.status(404).json({ error: 'Tenant license not found' })
+    }
+
+    if (license.status !== 'PENDING') {
+      return res.status(409).json({ error: 'Trial can only be started from a pending license' })
+    }
+
+    const now = await getServerNow()
+    const access = evaluateTenantLicense(license, now)
+    if (access.reason === 'pending-expired') {
+      return res.status(403).json({ error: 'Trial grace period has expired', reason: 'pending-expired' })
+    }
+
+    const trialEndsAt = getTrialEndDate(now)
+    const updated = await prisma.tenantLicense.update({
+      where: { tenantId },
+      data: {
+        status: 'TRIAL',
+        plan: 'trial',
+        trialEndsAt,
+        blockedAt: null,
+        cancelledAt: null
+      }
+    })
+
+    const updatedAccess = evaluateTenantLicense(updated, now)
+    res.json({
+      status: updatedAccess.status,
+      reason: updatedAccess.reason,
+      trialEndsAt: updated.trialEndsAt
+    })
+  } catch (error) {
+    console.error('Start tenant trial error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
 export const getTenants = async (_req: AuthRequest, res: Response) => {
   try {
     const tenants = await prisma.tenant.findMany({

@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express'
 import jwt from 'jsonwebtoken'
-import { prisma } from '../db'
+import { getServerNow, prisma } from '../db'
 import { runWithTenantContext } from '../tenant/context'
 import { evaluateTenantLicense } from '../tenant/license'
 import { getJwtSecret } from '../utils/jwt'
@@ -20,7 +20,10 @@ export interface AuthRequest extends Request {
 
 const LICENSE_BYPASS_PATHS = new Set([
   '/api/auth/me',
-  '/api/tenants/current/license'
+  '/api/tenants/current/license',
+  // El cliente puede arrancar su prueba estando PENDING (licencia no activa),
+  // por eso este endpoint no debe bloquearse por el gate de licencia.
+  '/api/tenants/current/start-trial'
 ])
 
 const isLicenseBypassRequest = (req: Request) => {
@@ -89,7 +92,7 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
       return res.status(403).json({ error: 'Tenant is not active' })
     }
 
-    const licenseAccess = evaluateTenantLicense(user.tenant.license)
+    const licenseAccess = evaluateTenantLicense(user.tenant.license, await getServerNow())
 
     req.user = {
       id: user.id,

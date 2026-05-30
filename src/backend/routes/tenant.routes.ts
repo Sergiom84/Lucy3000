@@ -3,6 +3,7 @@ import {
   createTenant,
   getCurrentTenantLicense,
   getTenants,
+  startCurrentTenantTrial,
   updateTenantLicense
 } from '../controllers/tenant.controller'
 import { authMiddleware, platformAdminMiddleware } from '../middleware/auth.middleware'
@@ -18,6 +19,7 @@ const router = Router()
 router.use(authMiddleware)
 
 router.get('/current/license', getCurrentTenantLicense)
+router.post('/current/start-trial', startCurrentTenantTrial)
 
 router.use(platformAdminMiddleware)
 

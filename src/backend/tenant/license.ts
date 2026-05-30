@@ -6,16 +6,29 @@ export type TenantLicenseSnapshot = {
   trialEndsAt: Date
   blockedAt?: Date | null
   cancelledAt?: Date | null
+  createdAt?: Date | null
 }
 
 export type TenantLicenseAccess = {
   allowed: boolean
   status: string
-  reason: 'active' | 'trial-expired' | 'blocked' | 'cancelled' | 'pending' | 'inactive'
+  reason:
+    | 'active'
+    | 'trial-expired'
+    | 'blocked'
+    | 'cancelled'
+    | 'pending'
+    | 'pending-expired'
+    | 'inactive'
   trialEndsAt: Date
 }
 
 export const TRIAL_DAYS = 7
+
+// Dias que un tenant PENDING puede quedarse sin arrancar la prueba antes de
+// bloquearse del todo. Permite instalar, configurar y posponer el "Si" del
+// pop-up varios dias (peor caso: dia 9). El dia 10 ya no deja entrar.
+export const PENDING_GRACE_DAYS = 9
 
 export const getTrialEndDate = (startedAt = new Date()) => {
   const trialEndsAt = new Date(startedAt)
@@ -46,10 +59,16 @@ export const evaluateTenantLicense = (
   }
 
   if (license.status === 'PENDING') {
+    let pendingExpired = false
+    if (license.createdAt) {
+      const graceEnd = new Date(license.createdAt)
+      graceEnd.setDate(graceEnd.getDate() + PENDING_GRACE_DAYS)
+      pendingExpired = graceEnd.getTime() < now.getTime()
+    }
     return {
       allowed: false,
       status: 'PENDING',
-      reason: 'pending',
+      reason: pendingExpired ? 'pending-expired' : 'pending',
       trialEndsAt: license.trialEndsAt
     }
   }
