@@ -6,19 +6,21 @@
   "author": "Sergio Hernández Lara",
   "license": "MIT",
   "scripts": {
-    "postinstall": "prisma generate",
+    "postinstall": "npm run prisma:generate",
     "predev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/kill-dev-ports.ps1",
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:electron\"",
     "dev:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-backend.ps1",
     "dev:electron": "vite",
     "build": "npm run build:prepare-db && tsc && vite build && npm run build:backend && electron-builder",
+    "build:web": "vite build",
+    "deploy:web": "wrangler pages deploy",
     "build:backend": "tsc -p tsconfig.backend.json",
     "build:prepare-db": "node scripts/prepare-packaged-db.js",
     "test": "vitest run",
     "test:unit": "vitest run tests/backend/unit",
     "test:smoke": "vitest run tests/backend/smoke",
     "preview": "vite preview",
-    "prisma:generate": "prisma generate",
+    "prisma:generate": "prisma generate && prisma generate --schema prisma/schema.sqlite.prisma",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio"
   },
@@ -78,7 +80,8 @@
     "vite": "^5.0.10",
     "vite-plugin-electron": "^0.28.1",
     "vite-plugin-electron-renderer": "^0.14.5",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "wrangler": "^4.0.0"
   },
   "build": {
     "appId": "com.lucy3000.accounting",
@@ -90,7 +93,12 @@
       "dist/**/*",
       "node_modules/**/*",
       "node_modules/.prisma/**/*",
-      "prisma/**/*",
+      "prisma/schema.prisma",
+      "prisma/schema.sqlite.prisma",
+      "prisma/migrations/**/*",
+      "prisma/migrations_sqlite_legacy/**/*",
+      "prisma/packaged/**/*",
+      "prisma/migrations/migration_lock.toml",
       "package.json"
     ],
     "asarUnpack": [
@@ -98,7 +106,12 @@
       "node_modules/.prisma/**/*",
       "node_modules/@prisma/client/**/*",
       "node_modules/@prisma/engines/**/*",
-      "prisma/**/*"
+      "prisma/schema.prisma",
+      "prisma/schema.sqlite.prisma",
+      "prisma/migrations/**/*",
+      "prisma/migrations_sqlite_legacy/**/*",
+      "prisma/packaged/**/*",
+      "prisma/migrations/migration_lock.toml"
     ],
     "extraResources": [
       {
@@ -106,12 +119,28 @@
         "to": "app.asar.unpacked/node_modules/.prisma/client"
       },
       {
+        "from": "node_modules/.prisma/client-sqlite",
+        "to": "app.asar.unpacked/node_modules/.prisma/client-sqlite"
+      },
+      {
         "from": "prisma/schema.prisma",
         "to": "prisma/schema.prisma"
       },
       {
+        "from": "prisma/schema.sqlite.prisma",
+        "to": "prisma/schema.sqlite.prisma"
+      },
+      {
+        "from": "prisma/packaged",
+        "to": "prisma/packaged"
+      },
+      {
         "from": "prisma/migrations",
         "to": "prisma/migrations"
+      },
+      {
+        "from": "prisma/migrations_sqlite_legacy",
+        "to": "prisma/migrations_sqlite_legacy"
       }
     ],
     "win": {

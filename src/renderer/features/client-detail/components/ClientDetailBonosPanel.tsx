@@ -3,6 +3,7 @@ import type { ClientDetailBonoPack } from '../types'
 
 type ClientDetailBonosPanelProps = {
   bonoPacks: ClientDetailBonoPack[]
+  onAddSession: (bonoPackId: string) => void
   onConsume: (bonoPackId: string) => void
   onCreate: () => void
   onDelete: (bonoPackId: string) => void
@@ -12,6 +13,7 @@ type ClientDetailBonosPanelProps = {
 
 export default function ClientDetailBonosPanel({
   bonoPacks,
+  onAddSession,
   onConsume,
   onCreate,
   onDelete,
@@ -37,6 +39,7 @@ export default function ClientDetailBonosPanel({
               <BonoCard
                 key={bonoPack.id}
                 bonoPack={bonoPack}
+                onAddSession={onAddSession}
                 onConsume={onConsume}
                 onDelete={onDelete}
                 onEdit={onEdit}

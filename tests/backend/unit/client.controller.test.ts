@@ -120,7 +120,7 @@ describe('client.controller list ordering', () => {
     expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1)
     const sql = prismaMock.$queryRaw.mock.calls[0][0]?.sql || ''
     expect(sql).toContain('CAST(TRIM(c."externalCode") AS INTEGER)')
-    expect(sql).toContain(`NOT GLOB '*[^0-9]*'`)
+    expect(sql).toContain(`~ '^[0-9]+$'`)
   })
 
   it('getClients summary counts clients with pending amount even without debt alert flag', async () => {
@@ -739,7 +739,54 @@ describe('client.controller gender validation', () => {
 
 describe('client.controller google calendar reconciliation', () => {
   beforeEach(() => {
+    vi.restoreAllMocks()
     resetPrismaMock()
+  })
+
+  it('does not query Google Calendar for past active appointments when opening a client file', async () => {
+    const initialClient = {
+      id: 'client-1',
+      firstName: 'Ana',
+      lastName: 'Lopez',
+      appointments: [
+        {
+          id: 'appointment-1',
+          status: 'SCHEDULED',
+          googleCalendarEventId: 'event-1',
+          serviceId: 'service-1',
+          cabin: 'LUCY',
+          startTime: '10:00',
+          endTime: '10:30',
+          date: new Date('2000-06-15T00:00:00.000Z'),
+          service: { id: 'service-1', name: 'Limpieza facial' },
+          user: { name: 'Lucy' },
+          sale: null
+        }
+      ],
+      sales: [],
+      pendingPayments: [],
+      clientHistory: [],
+      bonoPacks: [],
+      linkedClient: null,
+      relatedClients: []
+    }
+
+    prismaMock.client.findUnique.mockResolvedValueOnce(initialClient)
+    const getAppointmentEventState = vi.spyOn(googleCalendarService, 'getAppointmentEventState')
+
+    const req = createMockRequest({
+      params: {
+        id: 'client-1'
+      }
+    })
+    const res = createMockResponse()
+
+    await getClientById(req as any, res)
+
+    expect(getAppointmentEventState).not.toHaveBeenCalled()
+    expect(prismaMock.appointment.update).not.toHaveBeenCalled()
+    expect(prismaMock.client.findUnique).toHaveBeenCalledTimes(1)
+    expect(res.json).toHaveBeenCalledWith(initialClient)
   })
 
   it('marks active appointments as cancelled when Google Calendar event was cancelled externally', async () => {

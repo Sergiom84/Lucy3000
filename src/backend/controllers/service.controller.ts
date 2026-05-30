@@ -4,6 +4,7 @@ import { prisma } from '../db'
 import type { AuthRequest } from '../middleware/auth.middleware'
 import { loadWorkbookFromBuffer, worksheetToObjects } from '../utils/spreadsheet'
 import { notifyAdminsAboutResourceCreation } from '../utils/notifications'
+import { getSettingByKey } from '../utils/settings'
 
 const buildSearchTerms = (value: string) =>
   value
@@ -32,9 +33,7 @@ const isForeignKeyConstraintError = (error: unknown) =>
 const hasLinkedBonoTemplates = async (serviceIds: string[]) => {
   if (serviceIds.length === 0) return false
 
-  const setting = await prisma.setting.findUnique({
-    where: { key: BONO_TEMPLATES_SETTING_KEY }
-  })
+  const setting = await getSettingByKey(BONO_TEMPLATES_SETTING_KEY)
 
   if (!setting?.value) return false
 

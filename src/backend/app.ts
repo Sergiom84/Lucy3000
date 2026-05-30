@@ -27,6 +27,7 @@ import bonoRoutes from './routes/bono.routes'
 import calendarRoutes from './routes/calendar.routes'
 import quoteRoutes from './routes/quote.routes'
 import sqlRoutes from './routes/sql.routes'
+import tenantRoutes from './routes/tenant.routes'
 
 export const app = express()
 
@@ -98,6 +99,7 @@ app.use('/api/bonos', bonoRoutes)
 app.use('/api/calendar', calendarRoutes)
 app.use('/api/quotes', quoteRoutes)
 app.use('/api/sql', sqlRoutes)
+app.use('/api/tenants', tenantRoutes)
 
 // Static frontend build (Vite)
 const clientDir = path.resolve(__dirname, '..')

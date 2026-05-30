@@ -2,6 +2,8 @@ import { prisma } from '../../db'
 import { calculateAppointmentEndTime, deriveAppointmentServiceIds } from '../../utils/appointment-services'
 import { isActiveAppointmentStatus, validateAppointmentSlot } from '../../utils/appointment-validation'
 import { getAppointmentDisplayName } from '../../utils/customer-display'
+import { syncClientCancelledAppointmentCounts } from '../../utils/client-cancellation-counts'
+import { logWarn } from '../../utils/logger'
 import {
   deleteAppointmentCalendarEvent,
   syncCreatedAppointmentCalendar,
@@ -51,13 +53,15 @@ export const createAppointmentRecord = async (payload: Record<string, unknown>) 
   }
 
   const selectedServiceIds = selectedServices.map((service) => service.id)
-  const computedEndTime = calculateAppointmentEndTime(
-    String(payload.startTime || ''),
-    selectedServices.reduce((total, service) => total + Math.max(0, Number(service.duration || 0)), 0)
-  )
+  const requestedEndTime =
+    String(payload.endTime || '').trim() ||
+    calculateAppointmentEndTime(
+      String(payload.startTime || ''),
+      selectedServices.reduce((total, service) => total + Math.max(0, Number(service.duration || 0)), 0)
+    )
   const data = buildAppointmentPayload(payload, {
     serviceId: selectedServiceIds[0],
-    endTime: computedEndTime
+    endTime: requestedEndTime
   })
   const resolvedProfessional = await resolveProfessionalName(data.userId, data.professional)
 
@@ -91,6 +95,7 @@ export const createAppointmentRecord = async (payload: Record<string, unknown>) 
     },
     include: appointmentInclude
   })
+  await syncClientCancelledAppointmentCounts([createdAppointment.clientId])
   const appointment = await syncCreatedAppointmentCalendar(createdAppointment)
 
   if (data.reminder) {
@@ -133,14 +138,18 @@ export const updateAppointmentRecord = async (id: string, payload: Record<string
 
   const serviceSelectionChanged = payload.serviceId !== undefined || payload.serviceIds !== undefined
   const shouldRecalculateEndTime = serviceSelectionChanged || payload.startTime !== undefined
+  const requestedEndTime =
+    payload.endTime !== undefined
+      ? String(payload.endTime)
+      : shouldRecalculateEndTime
+        ? calculateAppointmentEndTime(
+            String(payload.startTime || existing.startTime),
+            selectedServices.reduce((total, service) => total + Math.max(0, Number(service.duration || 0)), 0)
+          )
+        : undefined
   const updateData = buildAppointmentUpdatePayload(payload, {
     serviceId: selectedServices[0].id,
-    endTime: shouldRecalculateEndTime
-      ? calculateAppointmentEndTime(
-          String(payload.startTime || existing.startTime),
-          selectedServices.reduce((total, service) => total + Math.max(0, Number(service.duration || 0)), 0)
-        )
-      : undefined
+    endTime: requestedEndTime
   })
   const partyValidationError = validateAppointmentPartyUpdate(existing, updateData)
 
@@ -204,6 +213,7 @@ export const updateAppointmentRecord = async (id: string, payload: Record<string
   } else if (serviceSelectionChanged || registeredClientChanged) {
     await releaseReservedBonoSessions(updatedAppointment.id)
   }
+  await syncClientCancelledAppointmentCounts([existing.clientId, updatedAppointment.clientId])
   const appointment = await syncUpdatedAppointmentCalendar(updatedAppointment)
 
   return appointment
@@ -235,10 +245,17 @@ export const deleteAppointmentRecord = async (id: string) => {
   if (Array.isArray(appointment.bonoSessions) && appointment.bonoSessions.some((session) => session.status === 'AVAILABLE')) {
     await releaseReservedBonoSessions(appointment.id)
   }
-  await deleteAppointmentCalendarEvent(appointment)
 
   await prisma.appointment.delete({
     where: { id }
+  })
+  await syncClientCancelledAppointmentCounts([appointment.clientId])
+
+  void deleteAppointmentCalendarEvent(appointment).catch((error) => {
+    logWarn('Background Google Calendar event deletion failed', {
+      appointmentId: appointment.id,
+      syncError: error instanceof Error ? error.message : String(error)
+    })
   })
 
   return { message: 'Appointment deleted successfully' }

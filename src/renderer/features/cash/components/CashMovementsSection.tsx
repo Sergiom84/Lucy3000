@@ -10,6 +10,18 @@ type CashMovementsSectionProps = {
   onRefresh: () => void | Promise<void>
 }
 
+const formatMovementDate = (value: Date | string) => {
+  try {
+    return new Intl.DateTimeFormat('es-ES', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    }).format(new Date(value))
+  } catch {
+    return ''
+  }
+}
+
 export default function CashMovementsSection({
   analyticsLoading,
   analyticsRows,
@@ -46,13 +58,14 @@ export default function CashMovementsSection({
                 <th className="px-4 py-3 text-left min-w-[7rem]">Pago</th>
                 <th className="px-4 py-3 text-left min-w-[8rem]">Importe</th>
                 <th className="px-4 py-3 text-left min-w-[12rem]">Profesional</th>
+                <th className="px-4 py-3 text-left min-w-[8rem]">Fecha</th>
                 <th className="px-4 py-3 text-left min-w-[8rem]">Nº venta</th>
               </tr>
             </thead>
             <tbody>
               {analyticsRows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-8 text-gray-500 dark:text-gray-400">
+                  <td colSpan={7} className="text-center py-8 text-gray-500 dark:text-gray-400">
                     No hay resultados para los filtros seleccionados.
                   </td>
                 </tr>
@@ -66,6 +79,7 @@ export default function CashMovementsSection({
                       {formatCurrency(Number(row.amount))}
                     </td>
                     <td className="px-4 py-3">{row.professionalName}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">{formatMovementDate(row.date)}</td>
                     <td className="px-4 py-3 font-mono text-xs whitespace-nowrap">{row.saleNumber}</td>
                   </tr>
                 ))

@@ -1,0 +1,802 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../node_modules/.prisma/client-sqlite"
+  binaryTargets = ["native", "windows", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("SQLITE_DATABASE_URL")
+}
+
+// ============================================
+// SAAS / MULTI-TENANT
+// ============================================
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  status    String   @default("ACTIVE")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  license                  TenantLicense?
+  users                    User[]
+  clients                  Client[]
+  clientHistory            ClientHistory[]
+  services                 Service[]
+  appointments             Appointment[]
+  appointmentServices      AppointmentService[]
+  appointmentLegends       AppointmentLegend[]
+  agendaBlocks             AgendaBlock[]
+  agendaDayNotes           AgendaDayNote[]
+  dashboardReminders       DashboardReminder[]
+  products                 Product[]
+  stockMovements           StockMovement[]
+  sales                    Sale[]
+  pendingPayments          PendingPayment[]
+  pendingPaymentCollections PendingPaymentCollection[]
+  saleItems                SaleItem[]
+  cashRegisters            CashRegister[]
+  cashCounts               CashCount[]
+  cashMovements            CashMovement[]
+  accountBalanceMovements  AccountBalanceMovement[]
+  notifications            Notification[]
+  settings                 Setting[]
+  googleCalendarConfig     GoogleCalendarConfig?
+  bonoPacks                BonoPack[]
+  bonoSessions             BonoSession[]
+  quotes                   Quote[]
+  quoteItems               QuoteItem[]
+
+  @@map("tenants")
+}
+
+model TenantLicense {
+  id          String   @id @default(uuid())
+  tenantId    String   @unique
+  status      String   @default("TRIAL")
+  plan        String   @default("trial")
+  trialEndsAt DateTime
+  activatedAt DateTime?
+  blockedAt   DateTime?
+  cancelledAt DateTime?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([status, trialEndsAt])
+  @@map("tenant_licenses")
+}
+
+// ============================================
+// USUARIOS Y AUTENTICACION
+// ============================================
+
+model User {
+  id            String   @id @default(uuid())
+  tenantId      String   @default("local")
+  email         String
+  username      String?
+  password      String
+  name          String
+  role          String   @default("EMPLOYEE")
+  isPlatformAdmin Boolean @default(false)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relaciones
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  appointments  Appointment[]
+  cashMovements CashMovement[]
+  cashCounts    CashCount[]
+  pendingPaymentCollections PendingPaymentCollection[]
+  sales         Sale[]
+
+  @@unique([tenantId, email])
+  @@unique([tenantId, username])
+  @@unique([id, tenantId])
+  @@index([tenantId, role])
+  @@map("users")
+}
+
+// ============================================
+// CLIENTES
+// ============================================
+
+model Client {
+  id              String    @id @default(uuid())
+  tenantId        String    @default("local")
+  firstName       String
+  lastName        String
+  email           String?
+  phone           String
+  birthDate       DateTime?
+  address         String?
+  city            String?
+  postalCode      String?
+  province        String?
+  landlinePhone   String?
+  mobilePhone     String?
+  fullName        String?
+  externalCode    String?
+  dni             String?
+  gender          String?
+  registrationDate DateTime?
+  esthetician     String?
+  clientBrand     String?
+  appliedTariff   String?
+  text9A          String?
+  text9B          String?
+  text15          String?
+  text25          String?
+  text100         String?
+  integer1        Int?
+  integer2        Int?
+  gifts           String?
+  birthDay        Int?
+  birthMonthNumber Int?
+  birthMonthName  String?
+  birthYear       Int?
+  lastVisit       DateTime?
+  serviceCount    Int?
+  activeTreatmentCount Int?
+  activeTreatmentNames String?
+  bondCount       Int?
+  giftVoucher     String?
+  billedAmount    Decimal?
+  pendingAmount   Decimal?
+  debtAlertEnabled Boolean  @default(false)
+  linkedClientReference String?
+  relationshipType String?
+  linkedClientId  String?
+  discountProfile String?
+  webKey          String?
+  notes           String?
+  allergies       String?
+  photoUrl        String?
+  loyaltyPoints   Int       @default(0)
+  totalSpent      Decimal   @default(0)
+  cancelledAppointmentCount Int      @default(0)
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  accountBalance  Decimal?
+
+  // Relaciones
+  appointments    Appointment[]
+  sales           Sale[]
+  pendingPayments PendingPayment[]
+  pendingPaymentCollections PendingPaymentCollection[]
+  clientHistory   ClientHistory[]
+  bonoPacks       BonoPack[]
+  accountBalanceMovements AccountBalanceMovement[]
+  quotes          Quote[]
+  linkedClient    Client?   @relation("ClientLink", fields: [linkedClientId], references: [id], onDelete: SetNull)
+  relatedClients  Client[]  @relation("ClientLink")
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, email])
+  @@unique([id, tenantId])
+  @@index([tenantId, isActive, createdAt])
+  @@index([tenantId, lastVisit])
+  @@map("clients")
+}
+
+model ClientHistory {
+  id          String   @id @default(uuid())
+  tenantId    String   @default("local")
+  clientId    String
+  date        DateTime @default(now())
+  service     String
+  notes       String?
+  photoUrl    String?
+  amount      Decimal
+
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, clientId, date])
+  @@map("client_history")
+}
+
+// ============================================
+// SERVICIOS
+// ============================================
+
+model Service {
+  id              String   @id @default(uuid())
+  tenantId        String   @default("local")
+  name            String
+  description     String?
+  price           Decimal
+  duration        Int      // en minutos
+  category        String
+  serviceCode     String?
+  taxRate         Decimal?
+  requiresProduct Boolean?
+  commission      String?
+  promo           String?
+  legacyRole      String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relaciones
+  appointments    Appointment[]
+  appointmentServices AppointmentService[]
+  saleItems       SaleItem[]
+  bonoPacks       BonoPack[]
+  quoteItems      QuoteItem[]
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, category, isActive])
+  @@map("services")
+}
+
+// ============================================
+// CITAS
+// ============================================
+
+model Appointment {
+  id                       String   @id @default(uuid())
+  tenantId                 String   @default("local")
+  clientId                 String?
+  guestName                String?
+  guestPhone               String?
+  userId                   String
+  serviceId                String
+  cabin                    String   @default("LUCY")
+  professional             String   @default("LUCY")
+  date                     DateTime
+  startTime                String
+  endTime                  String
+  status                   String   @default("SCHEDULED")
+  notes                    String?
+  reminder                 Boolean  @default(true)
+  googleCalendarEventId    String?  @unique
+  googleCalendarSyncStatus String   @default("DISABLED")
+  googleCalendarSyncError  String?
+  googleCalendarSyncedAt   DateTime?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  client      Client?  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id])
+  service     Service  @relation(fields: [serviceId], references: [id])
+  appointmentServices AppointmentService[]
+  bonoSessions       BonoSession[]
+  sale               Sale?
+  tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, googleCalendarEventId])
+  @@index([tenantId, date, startTime])
+  @@index([tenantId, status, date])
+  @@map("appointments")
+}
+
+model AppointmentService {
+  tenantId      String @default("local")
+  appointmentId String
+  serviceId     String
+  sortOrder     Int
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  service     Service     @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+
+  @@id([tenantId, appointmentId, serviceId])
+  @@unique([tenantId, appointmentId, sortOrder])
+  @@map("appointment_services")
+}
+
+model AppointmentLegend {
+  id        String   @id @default(uuid())
+  tenantId  String   @default("local")
+  name      String
+  color     String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, sortOrder])
+  @@map("appointment_legends")
+}
+
+model AgendaBlock {
+  id                       String   @id @default(uuid())
+  tenantId                 String   @default("local")
+  professional             String
+  calendarInviteEmail      String?
+  cabin                    String   @default("LUCY")
+  date                     DateTime
+  startTime                String
+  endTime                  String
+  notes                    String?
+  googleCalendarEventId    String?  @unique
+  googleCalendarSyncStatus String   @default("DISABLED")
+  googleCalendarSyncError  String?
+  googleCalendarSyncedAt   DateTime?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+  tenant                   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, googleCalendarEventId])
+  @@index([tenantId, date, startTime])
+  @@map("agenda_blocks")
+}
+
+model AgendaDayNote {
+  id          String   @id @default(uuid())
+  tenantId    String   @default("local")
+  dayKey       String
+  text         String
+  isCompleted  Boolean  @default(false)
+  completedAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, dayKey, createdAt])
+  @@map("agenda_day_notes")
+}
+
+model DashboardReminder {
+  id          String   @id @default(uuid())
+  tenantId    String   @default("local")
+  text        String
+  isCompleted Boolean  @default(false)
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, isCompleted, createdAt])
+  @@map("dashboard_reminders")
+}
+
+// ============================================
+// PRODUCTOS Y ALMACEN
+// ============================================
+
+model Product {
+  id              String   @id @default(uuid())
+  tenantId        String   @default("local")
+  name            String
+  description     String?
+  sku             String
+  barcode         String?
+  category        String
+  brand           String?
+  price           Decimal
+  cost            Decimal
+  stock           Int      @default(0)
+  minStock        Int      @default(5)
+  maxStock        Int?
+  unit            String   @default("unidad")
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relaciones
+  stockMovements  StockMovement[]
+  saleItems       SaleItem[]
+  quoteItems      QuoteItem[]
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, sku])
+  @@unique([id, tenantId])
+  @@index([tenantId, category, isActive])
+  @@map("products")
+}
+
+model StockMovement {
+  id          String   @id @default(uuid())
+  tenantId    String   @default("local")
+  productId   String
+  type        String
+  quantity    Int
+  reason      String?
+  reference   String?
+  date        DateTime @default(now())
+
+  product     Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  tenant      Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, productId, date])
+  @@map("stock_movements")
+}
+
+// ============================================
+// VENTAS
+// ============================================
+
+model Sale {
+  id              String   @id @default(uuid())
+  tenantId        String   @default("local")
+  clientId        String?
+  appointmentId   String?  @unique
+  userId          String
+  professional    String   @default("LUCY")
+  saleNumber      String
+  date            DateTime @default(now())
+  subtotal        Decimal
+  discount        Decimal  @default(0)
+  tax             Decimal  @default(0)
+  total           Decimal
+  paymentMethod   String
+  paymentBreakdown String?
+  showInOfficialCash Boolean @default(true)
+  status          String   @default("COMPLETED")
+  notes           String?
+
+  client          Client?       @relation(fields: [clientId], references: [id])
+  appointment     Appointment?  @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  user            User          @relation(fields: [userId], references: [id])
+  items           SaleItem[]
+  pendingPayment  PendingPayment?
+  cashMovement    CashMovement?
+  accountBalanceMovements AccountBalanceMovement[]
+  pendingPaymentCollections PendingPaymentCollection[]
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, saleNumber])
+  @@unique([id, tenantId])
+  @@index([tenantId, date])
+  @@index([tenantId, clientId, date])
+  @@map("sales")
+}
+
+model PendingPayment {
+  id                  String   @id @default(uuid())
+  tenantId            String   @default("local")
+  saleId               String   @unique
+  clientId             String
+  amount               Decimal
+  status               String   @default("OPEN")
+  settledAt            DateTime?
+  settledPaymentMethod String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  sale   Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  collections PendingPaymentCollection[]
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, clientId, status, createdAt])
+  @@map("pending_payments")
+}
+
+model PendingPaymentCollection {
+  id                String   @id @default(uuid())
+  tenantId          String   @default("local")
+  pendingPaymentId  String
+  saleId            String
+  clientId          String
+  userId            String
+  amount            Decimal
+  paymentMethod     String
+  showInOfficialCash Boolean @default(true)
+  operationDate     DateTime @default(now())
+  createdAt         DateTime @default(now())
+
+  pendingPayment PendingPayment @relation(fields: [pendingPaymentId], references: [id], onDelete: Cascade)
+  sale           Sale           @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  client         Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Restrict)
+  tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, pendingPaymentId, operationDate])
+  @@index([tenantId, saleId, operationDate])
+  @@index([tenantId, clientId, operationDate])
+  @@map("pending_payment_collections")
+}
+
+model SaleItem {
+  id          String  @id @default(uuid())
+  tenantId    String  @default("local")
+  saleId      String
+  productId   String?
+  serviceId   String?
+  description String
+  quantity    Int
+  price       Decimal
+  subtotal    Decimal
+
+  sale        Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product     Product? @relation(fields: [productId], references: [id])
+  service     Service? @relation(fields: [serviceId], references: [id])
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, saleId])
+  @@map("sale_items")
+}
+
+// ============================================
+// CAJA
+// ============================================
+
+model CashRegister {
+  id              String   @id @default(uuid())
+  tenantId        String   @default("local")
+  date            DateTime @default(now())
+  openingBalance  Decimal
+  openingDenominations      String?
+  closingBalance  Decimal?
+  expectedBalance Decimal?
+  difference      Decimal?
+  countedTotal              Decimal?
+  countedDenominations      String?
+  arqueoDifference          Decimal?
+  nextDayFloat              Decimal?
+  nextDayFloatDenominations String?
+  withdrawalAmount          Decimal?
+  status          String   @default("OPEN")
+  notes           String?
+  openedAt        DateTime @default(now())
+  closedAt        DateTime?
+
+  movements       CashMovement[]
+  cashCounts      CashCount[]
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, status, date])
+  @@map("cash_registers")
+}
+
+model CashCount {
+  id              String   @id @default(uuid())
+  tenantId        String   @default("local")
+  cashRegisterId  String
+  userId          String
+  expectedTotal   Decimal
+  countedTotal    Decimal
+  difference      Decimal
+  denominations   String
+  isBlind         Boolean  @default(false)
+  appliedAsClose  Boolean  @default(false)
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  cashRegister    CashRegister @relation(fields: [cashRegisterId], references: [id], onDelete: Cascade)
+  user            User         @relation(fields: [userId], references: [id])
+  tenant          Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, cashRegisterId, createdAt])
+  @@map("cash_counts")
+}
+
+model CashMovement {
+  id              String   @id @default(uuid())
+  tenantId        String   @default("local")
+  cashRegisterId  String
+  userId          String
+  saleId          String?  @unique
+  type            String
+  paymentMethod   String?
+  amount          Decimal
+  category        String
+  description     String
+  reference       String?
+  date            DateTime @default(now())
+
+  cashRegister    CashRegister @relation(fields: [cashRegisterId], references: [id], onDelete: Cascade)
+  user            User         @relation(fields: [userId], references: [id])
+  sale            Sale?        @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  tenant          Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, cashRegisterId, date])
+  @@map("cash_movements")
+}
+
+model AccountBalanceMovement {
+  id            String   @id @default(uuid())
+  tenantId      String   @default("local")
+  clientId      String
+  saleId        String?
+  type          String
+  paymentMethod String?
+  operationDate DateTime @default(now())
+  description   String
+  referenceItem String?
+  legacyRef     String?
+  importSource  String?
+  amount        Decimal
+  balanceAfter  Decimal
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  client        Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  sale          Sale?    @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, clientId, operationDate])
+  @@index([tenantId, saleId])
+  @@unique([tenantId, clientId, legacyRef, importSource])
+  @@map("account_balance_movements")
+}
+
+// ============================================
+// NOTIFICACIONES
+// ============================================
+
+model Notification {
+  id          String   @id @default(uuid())
+  tenantId    String   @default("local")
+  type        String
+  title       String
+  message     String
+  isRead      Boolean  @default(false)
+  priority    String   @default("NORMAL")
+  createdAt   DateTime @default(now())
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, isRead, createdAt])
+  @@map("notifications")
+}
+
+// ============================================
+// CONFIGURACION
+// ============================================
+
+model Setting {
+  id          String   @id @default(uuid())
+  tenantId    String   @default("local")
+  key         String
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, key])
+  @@unique([id, tenantId])
+  @@map("settings")
+}
+
+// ============================================
+// INTEGRACION GOOGLE CALENDAR
+// ============================================
+
+model GoogleCalendarConfig {
+  id                String   @id @default(uuid())
+  tenantId          String   @unique @default("local")
+  refreshToken      String
+  calendarId        String   @default("primary")
+  enabled           Boolean  @default(false)
+  sendClientInvites Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@map("google_calendar_config")
+}
+
+// ============================================
+// BONOS Y PACKS
+// ============================================
+
+model BonoPack {
+  id             String   @id @default(uuid())
+  tenantId       String   @default("local")
+  clientId       String
+  name           String
+  serviceId      String?
+  bonoTemplateId String?
+  legacyRef      String?
+  importSource   String?
+  totalSessions  Int
+  price          Decimal
+  purchaseDate   DateTime @default(now())
+  expiryDate     DateTime?
+  status         String   @default("ACTIVE")
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  client         Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  service        Service? @relation(fields: [serviceId], references: [id])
+  sessions       BonoSession[]
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, clientId, legacyRef, importSource])
+  @@index([tenantId, clientId, status])
+  @@map("bono_packs")
+}
+
+model BonoSession {
+  id             String    @id @default(uuid())
+  tenantId       String    @default("local")
+  bonoPackId     String
+  sessionNumber  Int
+  status         String    @default("AVAILABLE")
+  consumedAt     DateTime?
+  appointmentId  String?
+  notes          String?
+
+  bonoPack       BonoPack     @relation(fields: [bonoPackId], references: [id], onDelete: Cascade)
+  appointment    Appointment? @relation(fields: [appointmentId], references: [id])
+  tenant         Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, bonoPackId, sessionNumber])
+  @@index([tenantId, appointmentId])
+  @@map("bono_sessions")
+}
+
+// ============================================
+// PRESUPUESTOS
+// ============================================
+
+model Quote {
+  id              String   @id @default(uuid())
+  tenantId        String   @default("local")
+  quoteNumber     String
+  clientId        String
+  professional    String   @default("LUCY")
+  date            DateTime @default(now())
+  validUntil      DateTime
+  subtotal        Decimal
+  discount        Decimal  @default(0)
+  total           Decimal
+  status          String   @default("ISSUED")
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  client          Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  items           QuoteItem[]
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, quoteNumber])
+  @@unique([id, tenantId])
+  @@index([tenantId, clientId, date])
+  @@map("quotes")
+}
+
+model QuoteItem {
+  id          String  @id @default(uuid())
+  tenantId    String  @default("local")
+  quoteId     String
+  productId   String?
+  serviceId   String?
+  description String
+  quantity    Int
+  price       Decimal
+  subtotal    Decimal
+
+  quote       Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  product     Product? @relation(fields: [productId], references: [id])
+  service     Service? @relation(fields: [serviceId], references: [id])
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@index([tenantId, quoteId])
+  @@map("quote_items")
+}

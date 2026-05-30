@@ -1,57 +1,64 @@
 # AGENTS.md
 
 ## Contexto del proyecto
-Lucy3000 es una app de escritorio para gestión de estética.
-La topología real actual es Electron + React/Vite + Express + Prisma + SQLite local.
-Supabase sigue apareciendo en scripts y documentación histórica, pero no es la base operativa del runtime distribuido.
+
+Lucy3000 es una app de gestion de estetica en transicion a SaaS web/PWA multi-equipo.
+La topologia real actual es React/Vite + Express + Prisma + PostgreSQL multi-tenant, con Electron como wrapper opcional para escritorio.
+Supabase es una opcion de infraestructura para Postgres/Storage, no una autorizacion directa desde el frontend.
+SQLite queda como legado de migracion, importacion o soporte puntual.
 
 ## Fuentes de verdad
-Cuando una instrucción o documento entre en conflicto, usa este orden:
+
+Cuando una instruccion o documento entre en conflicto, usa este orden:
 1. `ROADMAP.md`
 2. `README.md`
 3. `BACKUP_RESTORE.md`
 4. `ARCHITECTURE.md`
-5. `package.json`, `prisma/schema.prisma`, `src/backend/app.ts`, `src/main/main.ts`, `src/backend/db/compat/index.ts`, `src/shared/electron.ts`
+5. `package.json`, `prisma/schema.prisma`, `src/backend/app.ts`, `src/main/main.ts`, `src/backend/db.ts`, `src/shared/electron.ts`
 
-Si algo documentado contradice al código, manda el código.
+Si algo documentado contradice al codigo, manda el codigo.
 
-## Stack técnico
+## Stack tecnico
+
 - Runtime: Node.js 18+.
-- Desktop: Electron + `vite-plugin-electron`.
-- Frontend: React 18, TypeScript, Vite, Tailwind, Zustand, Axios.
+- Web/desktop: React 18, TypeScript, Vite, Tailwind, Zustand, Axios; Electron + `vite-plugin-electron` como wrapper.
 - Backend: Express + TypeScript + Zod.
-- Datos: Prisma ORM + SQLite.
+- Datos: Prisma ORM + PostgreSQL.
+- Legacy: SQLite solo para compatibilidad, migracion o restore antiguo.
 - Tests: Vitest + Supertest, con suites en backend, `tests/main` y `tests/renderer/unit`.
 
 ## Estructura importante
-- `src/main/main.ts`: composition root del proceso principal de Electron; compone runtimes y registra arranque.
+
+- `src/main/main.ts`: composition root del proceso principal de Electron.
 - `src/main/backendRuntime.ts`: arranque, parada y healthcheck del backend empaquetado.
-- `src/main/runtimeData.ts`: paths, apertura de carpeta de datos y reset local.
-- `src/main/backupRuntime.ts`: operaciones de backup, restore y auto-backup.
-- `src/main/clientAssetsRuntime.ts`: assets locales de cliente y protocolo seguro.
-- `src/main/printing.ts`: impresión PDF y tickets.
+- `src/main/runtimeData.ts`: paths, apertura de carpeta de datos y reset local legacy.
+- `src/main/backupRuntime.ts`: operaciones legacy de backup, restore y auto-backup.
+- `src/main/clientAssetsRuntime.ts`: assets locales legacy y protocolo seguro.
+- `src/main/printing.ts`: impresion PDF y tickets.
 - `src/main/ipc/*`: registro de `ipcMain.handle(...)` por dominio.
-- `src/main/backup.ts`: snapshots y restore del runtime local.
 - `src/preload.ts`: bridge seguro con `contextBridge`.
 - `src/shared/electron.ts`: contratos IPC compartidos entre `main`, `preload` y renderer.
 - `src/renderer/App.tsx`: routing principal; usa `HashRouter` en `file://` y `BrowserRouter` en dev.
 - `src/renderer/pages/*`: entrypoints de routing y wrappers ligeros.
-- `src/renderer/features/*`: lógica de pantallas grandes, hooks, adapters y componentes puros.
+- `src/renderer/features/*`: logica de pantallas grandes, hooks, adapters y componentes puros.
 - `src/renderer/utils/api.ts`: cliente HTTP oficial para la API.
 - `src/backend/app.ts`: middlewares, rutas API y fallback SPA.
 - `src/backend/server.ts`: arranque HTTP.
 - `src/backend/routes/*`: endpoints y middleware.
 - `src/backend/controllers/*`: adaptadores HTTP finos.
-- `src/backend/modules/*`: lógica de negocio por dominio.
-- `src/backend/services/*`: Google Calendar, recordatorios, import SQL, sincronización de agenda.
+- `src/backend/modules/*`: logica de negocio por dominio.
+- `src/backend/services/*`: Google Calendar, recordatorios, import SQL, sincronizacion de agenda.
+- `src/backend/tenant/*`: contexto multi-tenant y evaluacion de licencias.
 - `src/backend/validators/*`: contratos Zod.
-- `src/backend/db.ts`: cliente Prisma y orquestación de compatibilidad SQLite.
-- `src/backend/db/compat/*`: guards de compatibilidad SQLite por dominio o versión lógica.
+- `src/backend/db.ts`: cliente Prisma, middleware tenant-aware y compatibilidad SQLite legacy condicional.
+- `src/backend/db/compat/*`: guards de compatibilidad SQLite por dominio o version logica.
 - `src/shared/*`: utilidades compartidas de tickets y matching.
 - `prisma/schema.prisma`: modelo persistente real.
-- `prisma/migrations/*`: migraciones versionadas.
+- `prisma/migrations/*`: migraciones PostgreSQL versionadas.
+- `prisma/migrations_sqlite_legacy/*`: migraciones SQLite antiguas archivadas.
 
 ## Scripts oficiales de npm
+
 - `npm run dev`
 - `npm run dev:backend`
 - `npm run dev:electron`
@@ -68,6 +75,7 @@ Si algo documentado contradice al código, manda el código.
 No hay scripts `npm run backup:*` ni `npm run db:rebuild` en `package.json`.
 
 ## Scripts operativos fuera de npm
+
 Se ejecutan directamente desde PowerShell:
 - `scripts/analyze-backup.ps1`
 - `scripts/restore-backup.ps1`
@@ -78,18 +86,22 @@ Se ejecutan directamente desde PowerShell:
 - `scripts/prepare-packaged-db.js`
 
 ## Flujo local recomendado
-1. `npm install`
-2. Crear `.env` a partir de `.env.example`
+
+1. Crear `.env` a partir de `.env.example`
+2. `npm install`
 3. Revisar `DATABASE_URL`, `JWT_SECRET`, `PORT`, `NODE_ENV`
 4. `npm run prisma:generate`
 5. `npm run prisma:migrate`
 6. `npm run dev`
-7. Si no existe ningún usuario, crear el primer `ADMIN` desde login
+7. Si no existe ningun usuario, crear el primer centro y el primer `ADMIN` desde login
+
+`DATABASE_URL` debe ser PostgreSQL, por ejemplo `postgresql://postgres:postgres@localhost:5432/lucy3000`.
 
 ## Entorno y secretos
-- El backend carga `.env` y, fuera de producción, después `.env.development`.
+
+- El backend carga `.env` y, fuera de produccion, despues `.env.development`.
 - En empaquetado, Electron puede leer `.env` junto al `.exe`, en `resources/` o en `userData`.
-- Variables críticas:
+- Variables criticas:
   - `DATABASE_URL`
   - `JWT_SECRET`
   - `PORT`
@@ -100,17 +112,23 @@ Se ejecutan directamente desde PowerShell:
   - `GOOGLE_CALENDAR_CLIENT_SECRET`
   - `GOOGLE_CALENDAR_REDIRECT_URI`
   - `WHATSAPP_*`
-  - `SUPABASE_*` solo para flujos históricos, restore o soporte puntual
+  - `SUPABASE_*` para infra, soporte historico o recuperacion
 
-Nota importante sobre SQLite en desarrollo:
-`DATABASE_URL="file:./prisma/lucy3000.db"` se resuelve relativo a `prisma/schema.prisma`, así que el fichero acaba en `prisma/prisma/lucy3000.db`.
+No incluir secretos en renderer, instalador, ASAR, `.env.example`, dumps ni documentacion.
 
-## Estado funcional observado en código
-- Login con bootstrap del primer administrador:
+## Estado funcional observado en codigo
+
+- Login con bootstrap del primer tenant y administrador:
   - `GET /api/auth/bootstrap-status`
   - `POST /api/auth/bootstrap-admin`
+- Licencia del tenant actual:
+  - `GET /api/tenants/current/license`
+- Administracion interna de tenants:
+  - `GET /api/tenants`
+  - `POST /api/tenants`
+  - `PUT /api/tenants/:id/license`
 - Roles disponibles: `ADMIN`, `MANAGER`, `EMPLOYEE`.
-- Páginas activas en renderer:
+- Paginas activas en renderer:
   - `Dashboard`
   - `Clients`
   - `ClientDetail`
@@ -124,141 +142,122 @@ Nota importante sobre SQLite en desarrollo:
   - `Accounts` solo admin
   - `Reports` solo admin
   - `Sql` solo admin
-- `Settings` centraliza:
-  - impresora de tickets;
-  - Google Calendar;
-  - backups;
-  - logs y carpeta de datos local;
-  - reseteo de instalación local;
-  - importadores `.xlsx`.
+- `Settings` centraliza impresora, Google Calendar, backups legacy, logs, carpeta de datos local, reset local e importadores `.xlsx`.
 - Hay un asistente SQL admin para analizar e importar `01dat.sql`, pero no sustituye al flujo diario ni cubre ventas, caja ni referencias legacy de fotos.
 
+## Convenciones multi-tenant
+
+- Todo dato de negocio nuevo debe tener `tenantId` obligatorio.
+- Las unicidades de negocio deben ser compuestas por tenant cuando aplique.
+- Las consultas raw deben filtrar por `tenantId` explicitamente.
+- Los procesos background sin request deben pasar contexto con `runWithTenantContext(...)` o escribir `tenantId` de forma explicita.
+- El frontend no debe hablar directo con Supabase para datos sensibles.
+- La licencia/trial se comprueba en servidor, no en reloj local ni instalador.
+- Supabase RLS puede aniadirse como segunda capa, pero la autorizacion diaria vive en la API.
+
 ## Convenciones de backend
+
 Para endpoints nuevos o cambios de contrato:
 1. Definir o ajustar esquema Zod en `src/backend/validators`.
 2. Aplicar `validateRequest(...)` en la ruta.
-3. Aplicar `authMiddleware` y `adminMiddleware` cuando corresponda.
-4. Mantener códigos HTTP y mensajes claros.
-5. Mantener `src/backend/controllers/*` como capa fina y mover reglas de negocio a `src/backend/modules/<dominio>` o a un servicio enfocado.
-6. No introducir un patrón repository genérico sobre Prisma.
-7. Añadir o actualizar tests relevantes.
+3. Aplicar `authMiddleware`, `adminMiddleware` o `platformAdminMiddleware` cuando corresponda.
+4. Mantener tenant y licencia en contexto.
+5. Mantener codigos HTTP y mensajes claros.
+6. Mantener `src/backend/controllers/*` como capa fina y mover reglas de negocio a `src/backend/modules/<dominio>` o a un servicio enfocado.
+7. No introducir un patron repository generico sobre Prisma.
+8. Aniadir o actualizar tests relevantes.
 
 Estado actual de seguridad:
-- Públicos:
+- Publicos:
   - `POST /api/auth/login`
   - `GET /api/auth/bootstrap-status`
   - `POST /api/auth/bootstrap-admin`
   - `GET /api/calendar/callback`
-- Solo admin en backend:
+- Solo plataforma/admin segun ruta:
   - `POST /api/auth/register`
   - `/api/users/*`
+  - `/api/tenants/*` salvo `/current/license`
   - `/api/calendar/*` salvo callback
   - `/api/sql/*`
-- Muchos módulos de negocio siguen protegidos solo por autenticación, no por rol fino.
+- Muchos modulos de negocio siguen protegidos solo por autenticacion, no por rol fino.
 
 ## Convenciones de Electron
-- Mantener `src/main/main.ts` como composition root; no reinyectar lógica de negocio en handlers inline.
-- Registrar nuevos canales IPC en `src/main/ipc/*`, conservando nombres de canal y payloads salvo cambio explícito de contrato.
+
+- Mantener `src/main/main.ts` como composition root; no reinyectar logica de negocio en handlers inline.
+- Registrar nuevos canales IPC en `src/main/ipc/*`, conservando nombres de canal y payloads salvo cambio explicito de contrato.
 - Cuando un contrato IPC ya sea estable, tiparlo o reutilizarlo desde `src/shared/electron.ts`.
-- Reutilizar `src/main/backup.ts` como servicio técnico de snapshots y restore; no duplicar esa lógica en `main.ts`.
+- Reutilizar `src/main/backup.ts` como servicio tecnico de snapshots legacy; no duplicar esa logica en `main.ts`.
+- No asumir que Electron protege secretos. ASAR/EXE/MSI son distribucion, no seguridad.
 
 ## Convenciones de frontend
+
 - Consumir backend solo mediante `src/renderer/utils/api.ts` o adapters de dominio construidos sobre ese cliente.
 - El token JWT se gestiona en `authStore`.
+- El usuario autenticado puede incluir tenant, licencia e indicador de plataforma.
 - Mantener `src/renderer/pages/*` como shells de routing cuando exista `src/renderer/features/*` para ese dominio.
 - En pantallas grandes, mover carga, filtros, acciones y estado derivado a hooks y adapters; dejar el JSX pesado en componentes puros.
-- Mantener Zustand solo para estado global real; no convertir estado local de pantalla en store global por defecto.
+- Mantener Zustand solo para estado global real.
 - Mantener consistencia con utilidades globales de `src/renderer/styles/index.css`.
 - Si cambia un payload de API, actualizar frontend, validadores y tests.
-- En nuevas pantallas o modales, no añadir texto explicativo bajo títulos salvo necesidad funcional clara.
-- En botones nuevos, evitar iconografía decorativa junto al texto salvo instrucción explícita.
 
 ## Testing
+
 - Framework: Vitest.
 - Hay suites en:
   - `tests/backend/unit`
   - `tests/backend/smoke`
   - `tests/main`
   - `tests/renderer/unit`
-- Patrón frecuente en backend: mock de Prisma con `vi.mock('../../../src/backend/db', ...)`.
-- Recomendación mínima:
+- Patron frecuente en backend: mock de Prisma con `vi.mock('../../../src/backend/db', ...)`.
+- Recomendacion minima:
   - cambio en controller o servicio: test unitario;
-  - cambio de contrato o ruteo crítico: smoke test;
-  - cambio en bridge Electron o utilidades de renderer: test específico si existe suite cercana.
+  - cambio de contrato o ruteo critico: smoke test;
+  - cambio en tenant/licencia: test de aislamiento y estados;
+  - cambio en bridge Electron o utilidades de renderer: test especifico si existe suite cercana.
 
 ## Prisma y base de datos
+
 - No editar `dist/*`, `release/*` ni generar SQL manual para cambios persistentes normales.
-- Flujo estándar:
+- Flujo estandar:
   1. editar `prisma/schema.prisma`;
   2. `npm run prisma:generate`;
   3. `npm run prisma:migrate`;
   4. comprobar carpeta nueva en `prisma/migrations`.
-- El esquema actual ya incluye, entre otros:
-  - `AppointmentService`
-  - `AppointmentLegend`
-  - `AgendaBlock`
-  - `AgendaDayNote`
-  - `DashboardReminder`
-  - `PendingPayment`
-  - `PendingPaymentCollection`
-  - `CashCount`
-  - `GoogleCalendarConfig`
-  - campos legacy de importación en bonos y saldo
+- SQLite legacy vive en `prisma/migrations_sqlite_legacy/*` y `src/backend/db/compat/*`.
+- No seguir creciendo compatibility migrations SQLite salvo decision explicita.
 
-## Compatibility migrations SQLite
-`src/backend/db.ts` ya solo debe bootstrapear Prisma y orquestar compatibilidad.
-Los guards viven en `src/backend/db/compat/*`.
-Hoy cubren, entre otros:
-- `users.username`
-- `account_balance_movements.paymentMethod`
-- `sales.paymentBreakdown`
-- columnas de cierre y arqueo en `cash_registers`
-- refs legacy en `account_balance_movements`
-- `bonoTemplateId` y refs legacy en `bono_packs`
-- soporte de clienta invitada en `appointments`
-- `appointment_services`
-- `appointment_legends`
-- `agenda_blocks`
-- `agenda_day_notes`
-- `dashboard_reminders`
-- `pending_payments`
-- `pending_payment_collections`
-- múltiples sesiones de bono por cita
-- leyendas por defecto de agenda
+## Backup, restore y recuperacion
 
-No deben seguir creciendo sin una decisión explícita: lo normal es migrar por Prisma.
+- El flujo operativo SaaS es backup de PostgreSQL y Storage en proveedor central.
+- El runtime local conserva backup/restore desde `Settings` como soporte legacy.
+- La restauracion SQL admin es un flujo aparte y parcial.
+- Los scripts PowerShell heredados de PostgreSQL/Supabase siguen existiendo para soporte historico.
 
-## Backup, restore y recuperación
-- El flujo operativo diario es el backup de escritorio desde `Settings`, no scripts externos.
-- El runtime local soporta:
-  - backup manual completo;
-  - restore desde snapshot completo o `.db`;
-  - listado de backups;
-  - carpeta configurable;
-  - auto-backup semanal simple.
-- La restauración SQL admin es un flujo aparte.
-- Los scripts PowerShell heredados de PostgreSQL/Supabase siguen existiendo solo para soporte histórico.
+## Que no tocar sin necesidad
 
-## Qué no tocar sin necesidad
 - No editar manualmente:
   - `dist/`
   - `release/`
   - `node_modules/`
 - No versionar secretos ni `.env*` reales.
 - No romper scripts PowerShell sin dejar alternativa equivalente.
-- No usar `.claude/worktrees/*` como fuente de verdad; son copias auxiliares, no el proyecto activo.
+- No usar `.claude/worktrees/*` como fuente de verdad; son copias auxiliares.
 
 ## Riesgos y deuda activa
-- Endurecimiento de permisos por rol todavía incompleto.
-- Las compatibility migrations SQLite ahora están separadas, pero deben consolidarse cuando ya no hagan falta guards runtime.
-- El asistente SQL tiene alcance deliberadamente parcial.
-- El auto-backup guarda `cronExpression`, pero la ejecución real sigue siendo un `setInterval` semanal.
-- Hay documentación histórica en carpetas auxiliares que puede no coincidir con el root actual.
 
-## Checklist mínimo antes de cerrar cambios
+- Endurecimiento de permisos por rol todavia incompleto.
+- Consultas raw y procesos background requieren vigilancia extra para aislamiento por tenant.
+- Migracion real desde SQLite antigua a PostgreSQL tenant-aware pendiente de validacion con copias reales.
+- Assets de clienta deben moverse a Storage/S3 para SaaS.
+- El asistente SQL tiene alcance deliberadamente parcial.
+- El auto-backup local es legacy y no sustituye backup SaaS.
+- Hay documentacion historica en carpetas auxiliares que puede no coincidir con el root actual.
+
+## Checklist minimo antes de cerrar cambios
+
 1. El cambio sigue siendo coherente con `README.md`, `ROADMAP.md`, `BACKUP_RESTORE.md` y `ARCHITECTURE.md`.
 2. Si toca backend, validar `npm run build:backend`.
-3. Si toca desktop o empaquetado, validar `npm run build`.
+3. Si toca desktop o empaquetado, validar `npm run build` o justificar por que no.
 4. Si cambia contrato API o IPC, actualizar validator/tipos + ruta/controller o handler + frontend/preload + tests.
-5. Si cambia modelo de datos, dejar migración Prisma versionada.
+5. Si cambia modelo de datos, dejar migracion Prisma versionada.
 6. No incluir secretos, dumps ni artefactos generados.

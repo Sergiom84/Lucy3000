@@ -1,44 +1,43 @@
 # Arquitectura de Lucy3000
 
-Estado actualizado: 2026-04-23
+Estado actualizado: 2026-05-26
 
-## Topología oficial
+## Topologia oficial
 
-Lucy3000 se distribuye como aplicación de escritorio con backend local embebido.
+Lucy3000 se esta convirtiendo en una aplicacion SaaS web/PWA multi-tenant. Electron queda como wrapper opcional para escritorio y capacidades locales, pero la fuente de verdad vive en la API central.
 
 ```text
-Electron Main
-    |
-    +-- arranca backend empaquetado
-    +-- expone bridge seguro al renderer
-    +-- gestiona backups, logs, impresión y assets
+Browser / PWA / Electron Wrapper
     |
     v
 React Renderer
     |
     v
-Express API local
+Express API central
+    |
+    +-- Auth, tenant, licencia y reglas de negocio
     |
     v
 Prisma
     |
     v
-SQLite local por instalación
+PostgreSQL compartido por tenants
+    |
+    +-- Storage/S3 para fotos y assets
 ```
 
-En desarrollo puede ejecutarse por piezas, pero el producto real se usa como escritorio local.
+Google Calendar y otros servicios externos se integran desde el backend y siempre con contexto de tenant.
 
 ## Capas principales
 
 ### 1. Electron
 
-Responsabilidades:
-- crear la ventana principal;
-- iniciar el backend empaquetado;
-- localizar o crear la base SQLite en `userData`;
-- generar `jwt-secret.txt` si falta;
-- exponer logs, backups, impresión y carpeta de datos;
-- servir el protocolo seguro de assets de cliente.
+Responsabilidades actuales:
+- crear la ventana principal cuando se usa el canal escritorio;
+- iniciar o apuntar al backend segun entorno;
+- exponer bridge seguro al renderer;
+- gestionar logs, impresion y utilidades locales;
+- conservar flujos legacy de backup/restore mientras se migra a SaaS.
 
 Archivos clave:
 - `src/main/main.ts`
@@ -55,26 +54,20 @@ Archivos clave:
 - `src/preload.ts`
 - `src/shared/electron.ts`
 
-`src/main/main.ts` ya no debe actuar como contenedor de lógica:
+`src/main/main.ts` no debe actuar como contenedor de logica:
 - compone runtimes;
 - registra IPC;
-- arranca backend y ventana;
-- delega el resto en módulos específicos.
-
-El runtime de escritorio también permite:
-- abrir carpeta de datos;
-- abrir logs;
-- restaurar backups;
-- resetear la instalación local y volver al bootstrap inicial.
+- arranca backend y ventana cuando aplica;
+- delega el resto en modulos especificos.
 
 ### 2. Preload
 
 El bridge expuesto en `src/preload.ts` cubre:
-- versión y paths de la app;
+- version y paths de la app;
 - logs;
-- backups;
-- impresión PDF y tickets;
-- assets locales de cliente;
+- backups legacy;
+- impresion PDF y tickets;
+- assets locales legacy;
 - relanzado y cierre controlado de la app.
 
 Los contratos compartidos del bridge viven en `src/shared/electron.ts`, de forma que `main`, `preload` y renderer compartan tipos estables.
@@ -84,16 +77,16 @@ Esto mantiene `contextIsolation` y evita acceso directo del renderer a Node.
 ### 3. Renderer React
 
 Responsabilidades:
-- navegación y UI de negocio;
-- estado de autenticación y tema;
-- consumo de la API solo mediante `src/renderer/utils/api.ts`;
-- uso del bridge Electron cuando existe.
+- navegacion y UI de negocio;
+- estado de autenticacion, tenant y licencia;
+- consumo de la API mediante `src/renderer/utils/api.ts`;
+- uso del bridge Electron solo cuando existe.
 
 Estructura actual:
 - `src/renderer/pages/*` se usa como capa de routing y wrappers ligeros;
 - `src/renderer/features/*` contiene containers, hooks, adapters y componentes puros para pantallas grandes;
 - `src/renderer/components/*` mantiene piezas compartidas entre features;
-- `Settings`, `Sales`, `Cash`, `ClientDetail`, `Appointments` y `Sql` ya siguen ese patrón.
+- `Settings`, `Sales`, `Cash`, `ClientDetail`, `Appointments` y `Sql` siguen ese patron.
 
 Rutas activas:
 - `/`
@@ -114,27 +107,31 @@ Rutas activas:
 Detalles relevantes:
 - usa `BrowserRouter` en dev y `HashRouter` en `file://`;
 - las rutas pesadas se cargan con `React.lazy`;
-- el login soporta bootstrap del primer admin;
-- `Settings` concentra impresora, backups, logs, Google Calendar e importaciones.
+- el login soporta bootstrap del primer tenant/admin;
+- `Settings` concentra impresora, backups legacy, logs, Google Calendar e importaciones.
 
 ### 4. Backend Express
 
 Responsabilidades:
-- exponer la API REST local;
+- exponer la API REST central;
 - validar requests con Zod;
 - autenticar con JWT;
+- cargar tenant y licencia del usuario;
+- aplicar aislamiento por tenant;
 - ejecutar reglas de negocio;
-- servir la SPA compilada como fallback.
+- servir la SPA compilada como fallback cuando aplica.
 
 Estructura actual:
 - `src/backend/routes/*` conserva endpoints y middleware;
-- `src/backend/controllers/*` actúa como adaptador HTTP fino;
-- `src/backend/modules/*` concentra lógica de negocio por dominio;
+- `src/backend/controllers/*` actua como adaptador HTTP fino;
+- `src/backend/modules/*` concentra logica de negocio por dominio;
 - `src/backend/services/*` queda para integraciones o procesos transversales;
-- no se ha introducido un repository genérico sobre Prisma.
+- `src/backend/tenant/*` concentra contexto multi-tenant y licencias;
+- no se ha introducido un repository generico sobre Prisma.
 
 Rutas montadas en `src/backend/app.ts`:
 - `/api/auth`
+- `/api/tenants`
 - `/api/users`
 - `/api/clients`
 - `/api/appointments`
@@ -153,40 +150,42 @@ Rutas montadas en `src/backend/app.ts`:
 - `/api/sql`
 - `/health`
 
-## Módulos de negocio actuales
+## Multi-tenant y licencias
 
-Los módulos reales que la documentación debe reflejar son:
-- autenticación y bootstrap inicial;
-- usuarios internos y cuentas;
-- clientes, historial y assets locales;
-- agenda, citas, bloques, notas y leyendas;
-- servicios y productos;
-- stock y movimientos;
-- ventas;
-- cobros pendientes;
-- caja y arqueos;
-- bonos, packs, sesiones y saldo a cuenta;
-- dashboard y recordatorios;
-- ranking y reportes;
-- presupuestos;
-- backups y restore local;
-- Google Calendar;
-- restauración SQL legacy asistida.
+### Contexto tenant
 
-Hotspots ya extraídos a módulos específicos:
-- `appointments`;
-- `bonos`;
-- `sales`;
-- `cash`;
-- `clients`.
+El backend usa `AsyncLocalStorage` en `src/backend/tenant/context.ts` para asociar cada request a:
+- `tenantId`;
+- `userId`;
+- `isPlatformAdmin`;
+- `licenseStatus`.
 
-## Autenticación y permisos
+`src/backend/db.ts` instala middleware Prisma para inyectar `tenantId` en creaciones y filtrar consultas de modelos de negocio. Las consultas raw y procesos background deben pasar contexto explicito o incluir `tenantId` manualmente.
+
+### Licencias
+
+`src/backend/tenant/license.ts` evalua:
+- `TRIAL`;
+- `ACTIVE`;
+- `TRIAL_EXPIRED`;
+- `BLOCKED`;
+- `CANCELLED`.
+
+Reglas actuales:
+- al crear un tenant se genera una prueba de 7 dias;
+- login y operaciones autenticadas consultan tenant/licencia en servidor;
+- un centro bloqueado o expirado no debe depender del reloj local del cliente;
+- el frontend puede mostrar el estado, pero no decide permisos.
+
+## Autenticacion y permisos
 
 ### Flujo de login
 
 ```text
-Login UI -> POST /api/auth/login -> JWT -> authStore
+Login UI -> POST /api/auth/login -> JWT con tenantId -> authStore
 ```
+
+El login admite `tenantSlug` opcional para resolver usuarios con el mismo identificador en distintos centros.
 
 ### Flujo de bootstrap
 
@@ -194,7 +193,7 @@ Login UI -> POST /api/auth/login -> JWT -> authStore
 Login UI -> GET /api/auth/bootstrap-status
           -> si required=true
           -> POST /api/auth/bootstrap-admin
-          -> usuario ADMIN + JWT
+          -> Tenant + TenantLicense + usuario ADMIN + JWT
 ```
 
 Roles observados:
@@ -203,14 +202,17 @@ Roles observados:
 - `EMPLOYEE`
 
 Estado actual de permisos:
-- `register`, `users`, `calendar` y `sql` ya tienen guard admin explícito;
-- muchos módulos de negocio siguen siendo `auth only`.
+- `register`, `users`, `calendar` y `sql` ya tienen guard admin explicito;
+- `/api/tenants` combina ruta de licencia para usuario autenticado y administracion de plataforma;
+- muchos modulos de negocio siguen siendo `auth only` y necesitan permisos finos.
 
 ## Persistencia
 
 ### Modelo principal
 
 `prisma/schema.prisma` incluye, entre otros:
+- `Tenant`
+- `TenantLicense`
 - `User`
 - `Client`
 - `ClientHistory`
@@ -239,97 +241,117 @@ Estado actual de permisos:
 - `Quote`
 - `QuoteItem`
 
+Los datos de negocio llevan `tenantId` obligatorio. Las unicidades que antes eran globales se han movido a unicidades compuestas por tenant cuando aplica.
+
 ### Migraciones Prisma
 
-Las migraciones versionadas viven en `prisma/migrations/*`.
-Las más recientes cubren:
-- leyendas de cita;
-- bloqueos y notas de agenda;
-- múltiples servicios por cita;
-- usernames;
-- recordatorios de dashboard;
-- cobros pendientes;
-- arqueos de caja;
-- vínculo de packs con catálogo de bonos.
+Las migraciones PostgreSQL versionadas viven en `prisma/migrations/*`.
+La base actual parte de una migracion baseline multi-tenant.
+
+Las migraciones SQLite anteriores se han movido a `prisma/migrations_sqlite_legacy/*` para referencia y soporte de migracion.
 
 ### Compatibility migrations SQLite
 
-`src/backend/db.ts` ya no concentra la compatibilidad:
+`src/backend/db.ts`:
 - crea el cliente Prisma;
 - reutiliza la instancia global en desarrollo;
-- orquesta la ejecución de `src/backend/db/compat/*`.
+- instala scoping multi-tenant;
+- ejecuta `src/backend/db/compat/*` solo si `DATABASE_URL` empieza por `file:`.
 
-Las compatibility migrations SQLite viven en `src/backend/db/compat/*`.
-Hoy cubren:
-- `users.username`;
-- `account_balance_movements.paymentMethod`;
-- `sales.paymentBreakdown`;
-- columnas de cierre y arqueo en `cash_registers`;
-- refs legacy en saldo;
-- refs legacy y `bonoTemplateId` en bonos;
-- soporte de clienta invitada;
-- `appointment_services`;
-- `appointment_legends`;
-- `agenda_blocks`;
-- `agenda_day_notes`;
-- `dashboard_reminders`;
-- `pending_payments`;
-- `pending_payment_collections`;
-- múltiples sesiones de bono por cita;
-- leyendas por defecto.
+La compatibilidad SQLite queda como soporte legacy y no debe seguir creciendo salvo decision explicita.
 
-Son útiles para continuidad, pero no deben sustituir al flujo normal de Prisma.
+## Modulos de negocio actuales
+
+Los modulos reales que la documentacion debe reflejar son:
+- autenticacion y bootstrap inicial;
+- tenants, licencias y usuarios internos;
+- clientes, historial y assets;
+- agenda, citas, bloques, notas y leyendas;
+- servicios y productos;
+- stock y movimientos;
+- ventas;
+- cobros pendientes;
+- caja y arqueos;
+- bonos, packs, sesiones y saldo a cuenta;
+- dashboard y recordatorios;
+- ranking y reportes;
+- presupuestos;
+- Google Calendar;
+- importacion SQL legacy asistida.
+
+Hotspots ya extraidos a modulos especificos:
+- `appointments`;
+- `bonos`;
+- `sales`;
+- `cash`;
+- `clients`.
 
 ## Flujos de escritorio relevantes
 
 ### Arranque empaquetado
-1. Electron arranca.
-2. Busca o crea `lucy3000.db` en `userData`.
-3. Genera `jwt-secret.txt` si no existe.
-4. Lee `.env` compatible desde carpeta del `.exe`, `resources/` o `userData`.
-5. Lanza el backend empaquetado con `ELECTRON_RUN_AS_NODE=1`.
-6. Espera a `/health`.
-7. Carga la SPA.
 
-### Backups
-- manuales y automáticos desde Electron;
+1. Electron arranca.
+2. Lee configuracion y `.env` compatible desde carpeta del `.exe`, `resources/` o `userData`.
+3. Lanza el backend empaquetado o apunta a la API configurada segun el canal.
+4. Espera a `/health`.
+5. Carga la SPA.
+
+La preparacion de SQLite empaquetada esta desactivada por defecto.
+
+### Backups legacy
+
+- manuales y automaticos desde Electron;
 - snapshot de seguridad antes de restore;
 - soporte de backup completo con assets y backup antiguo `.db`.
 
-### Assets de cliente
-- Electron expone un protocolo seguro para previsualización;
-- los ficheros viven fuera del bundle, en carpetas locales del usuario.
+Estos flujos no sustituyen backups SaaS de PostgreSQL y Storage.
 
-### Impresión
+### Assets de cliente
+
+- En legacy, Electron expone un protocolo seguro para previsualizacion.
+- En SaaS, las fotos y documentos deben moverse a Storage/S3 con rutas por tenant.
+
+### Impresion
+
 - modo Windows con impresora instalada;
 - modo ESC/POS por red;
-- generación de PDF desde ventana oculta.
+- generacion de PDF desde ventana oculta.
 
 ## Integraciones opcionales
 
 ### Google Calendar
+
 - OAuth iniciado desde `Settings`;
-- callback público en `/api/calendar/callback`;
-- sincronización de citas y bloqueos de agenda;
+- callback publico en `/api/calendar/callback`;
+- estado OAuth con `tenantId`;
+- sincronizacion de citas y bloqueos de agenda;
 - sync manual completa desde `Settings`;
 - disconnect limpia el estado local, no garantiza borrar eventos remotos ya existentes.
 
 ### WhatsApp
-Existen servicios y variables `WHATSAPP_*` para recordatorios, pero no es el eje de la topología principal.
+
+Existen servicios y variables `WHATSAPP_*` para recordatorios, pero no es el eje de la topologia principal.
 
 ## Testing
 
-El proyecto ya no tiene solo tests de backend.
-Hay suites en:
+El proyecto tiene suites en:
 - `tests/backend/*`
 - `tests/main/*`
 - `tests/renderer/unit/*`
+
+Para cambios SaaS/multi-tenant, las pruebas clave son:
+- scoping por tenant;
+- login ambiguo por centro;
+- trial activo, expirado, bloqueado y reactivado;
+- consultas raw y procesos background con `tenantId`;
+- pantallas principales en movil/tablet.
 
 ## Regla de mantenimiento
 
 Si cambia un flujo real, el cambio debe mantenerse coherente en estas capas:
 1. validador Zod;
 2. ruta/controller o servicio backend;
-3. frontend o preload afectado;
-4. documentación raíz;
-5. test relevante cuando aplique.
+3. scoping de tenant/licencia cuando aplique;
+4. frontend o preload afectado;
+5. documentacion raiz;
+6. test relevante.

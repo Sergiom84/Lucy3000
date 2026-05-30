@@ -271,4 +271,45 @@ describe('googleCalendar.service', () => {
       error: null
     })
   })
+
+  it('bounds event deletion with a timeout and disables retries', async () => {
+    const service = new GoogleCalendarService()
+    const config = {
+      id: 'calendar-config-1',
+      refreshToken: 'refresh-token',
+      calendarId: 'primary',
+      enabled: true,
+      sendClientInvites: true
+    }
+    const deleteEvent = vi.fn().mockResolvedValue({})
+
+    vi.spyOn(service as any, 'getStoredConfig').mockResolvedValue(config)
+    vi.spyOn(service as any, 'getAuthorizedCalendar').mockResolvedValue({
+      config,
+      calendar: {
+        events: {
+          delete: deleteEvent
+        }
+      }
+    })
+
+    const result = await service.deleteAppointmentEvent('event-1', 'ana@example.com')
+
+    expect(deleteEvent).toHaveBeenCalledWith(
+      {
+        calendarId: 'primary',
+        eventId: 'event-1',
+        sendUpdates: 'all'
+      },
+      {
+        retry: false,
+        timeout: 10_000
+      }
+    )
+    expect(result).toEqual({
+      eventId: null,
+      status: 'DISABLED',
+      error: null
+    })
+  })
 })

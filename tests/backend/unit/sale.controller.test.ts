@@ -1136,6 +1136,205 @@ describe('sale.controller', () => {
     )
   })
 
+  it('updates payment method for a completed direct sale and syncs its cash movement', async () => {
+    const tx: any = {
+      sale: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValueOnce({
+            id: 'sale-1',
+            clientId: 'client-1',
+            userId: 'user-1',
+            appointmentId: null,
+            saleNumber: 'V-000100',
+            total: 80,
+            status: 'COMPLETED',
+            paymentMethod: 'CASH',
+            showInOfficialCash: true,
+            paymentBreakdown: null,
+            notes: null,
+            client: { firstName: 'Ana', lastName: 'Lopez' },
+            appointment: null,
+            items: [],
+            pendingPayment: null,
+            accountBalanceMovements: []
+          })
+          .mockResolvedValueOnce({
+            id: 'sale-1',
+            saleNumber: 'V-000100',
+            total: 80,
+            paymentMethod: 'CARD',
+            client: { firstName: 'Ana', lastName: 'Lopez' },
+            appointment: null,
+            items: [],
+            cashMovement: { id: 'movement-1' }
+          }),
+        update: vi.fn().mockResolvedValue({
+          id: 'sale-1',
+          client: { firstName: 'Ana', lastName: 'Lopez' },
+          appointment: null
+        })
+      },
+      cashMovement: {
+        findUnique: vi.fn().mockResolvedValue({ id: 'movement-1' }),
+        update: vi.fn().mockResolvedValue(undefined)
+      }
+    }
+
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx))
+
+    const req = createMockRequest({
+      params: { id: 'sale-1' },
+      body: { paymentMethod: 'CARD' }
+    })
+    const res = createMockResponse()
+
+    await updateSale(req as any, res)
+
+    expect(tx.sale.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'sale-1' },
+        data: expect.objectContaining({
+          status: 'COMPLETED',
+          paymentMethod: 'CARD',
+          showInOfficialCash: true
+        })
+      })
+    )
+    expect(tx.cashMovement.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { saleId: 'sale-1' },
+        data: expect.objectContaining({
+          paymentMethod: 'CARD',
+          amount: 80,
+          reference: 'V-000100'
+        })
+      })
+    )
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ id: 'sale-1', paymentMethod: 'CARD' }))
+  })
+
+  it('moves a private cash sale into official cash when corrected to card', async () => {
+    const tx: any = {
+      sale: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValueOnce({
+            id: 'sale-1',
+            clientId: 'client-1',
+            userId: 'user-1',
+            appointmentId: null,
+            saleNumber: 'V-000100',
+            total: 80,
+            status: 'COMPLETED',
+            paymentMethod: 'CASH',
+            showInOfficialCash: false,
+            paymentBreakdown: null,
+            notes: null,
+            client: { firstName: 'Ana', lastName: 'Lopez' },
+            appointment: null,
+            items: [],
+            pendingPayment: null,
+            accountBalanceMovements: []
+          })
+          .mockResolvedValueOnce({
+            id: 'sale-1',
+            saleNumber: 'V-000100',
+            total: 80,
+            paymentMethod: 'CARD',
+            showInOfficialCash: true,
+            client: { firstName: 'Ana', lastName: 'Lopez' },
+            appointment: null,
+            items: [],
+            cashMovement: { id: 'movement-1' }
+          }),
+        update: vi.fn().mockResolvedValue({
+          id: 'sale-1',
+          client: { firstName: 'Ana', lastName: 'Lopez' },
+          appointment: null
+        })
+      },
+      cashMovement: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue(undefined)
+      },
+      cashRegister: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'cash-1' })
+      }
+    }
+
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx))
+
+    const req = createMockRequest({
+      params: { id: 'sale-1' },
+      body: { paymentMethod: 'CARD' }
+    })
+    const res = createMockResponse()
+
+    await updateSale(req as any, res)
+
+    expect(tx.sale.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          paymentMethod: 'CARD',
+          showInOfficialCash: true
+        })
+      })
+    )
+    expect(tx.cashMovement.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          cashRegisterId: 'cash-1',
+          saleId: 'sale-1',
+          paymentMethod: 'CARD',
+          amount: 80
+        })
+      })
+    )
+  })
+
+  it('blocks payment method correction for completed sales with stored payment breakdowns', async () => {
+    const tx: any = {
+      sale: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'sale-1',
+          clientId: 'client-1',
+          userId: 'user-1',
+          appointmentId: null,
+          saleNumber: 'V-000100',
+          total: 80,
+          status: 'COMPLETED',
+          paymentMethod: 'CASH',
+          showInOfficialCash: true,
+          paymentBreakdown: JSON.stringify([{ amount: 40, paymentMethod: 'CASH' }]),
+          notes: null,
+          client: { firstName: 'Ana', lastName: 'Lopez' },
+          appointment: null,
+          items: [],
+          pendingPayment: null,
+          accountBalanceMovements: []
+        }),
+        update: vi.fn()
+      }
+    }
+
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx))
+
+    const req = createMockRequest({
+      params: { id: 'sale-1' },
+      body: { paymentMethod: 'CARD' }
+    })
+    const res = createMockResponse()
+
+    await updateSale(req as any, res)
+
+    expect(res.status).toHaveBeenCalledWith(400)
+    expect(res.json).toHaveBeenCalledWith({
+      error: 'Payment method correction is only available for completed sales with a single direct payment'
+    })
+    expect(tx.sale.update).not.toHaveBeenCalled()
+  })
+
   it('auto-consumes account balance when payment method is ABONO and usage payload is omitted', async () => {
     const tx: any = {
       $executeRaw: vi.fn().mockResolvedValue(undefined),

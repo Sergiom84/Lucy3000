@@ -1,8 +1,13 @@
-export type Period = 'DAY' | 'WEEK' | 'MONTH' | 'YEAR'
+export type Period = 'DAY' | 'WEEK' | 'MONTH' | 'YEAR' | 'CUSTOM'
 export type PrivateRangePreset = 'DAY' | 'WEEK' | 'MONTH' | 'CUSTOM'
 export type CashMovementType = 'INCOME' | 'EXPENSE' | 'WITHDRAWAL' | 'DEPOSIT'
 export type CommercialPaymentMethod = 'CASH' | 'CARD' | 'BIZUM' | 'ABONO'
 export type CashMovementPaymentMethod = CommercialPaymentMethod | 'OTHER' | ''
+
+export type CashDateRange = {
+  startDate: string
+  endDate: string
+}
 
 export type CashRegister = {
   id: string
@@ -143,6 +148,61 @@ export type CashRanking = Partial<Record<CashRankingKey, CashRankingBucket>>
 export type CashRankingGroup = {
   key: CashRankingKey
   title: string
+}
+
+export type CashOverviewSalesRow = {
+  id: string
+  description: string
+  itemType: 'SERVICE' | 'PRODUCT'
+  quantity: number
+  amount: number
+}
+
+export type CashOverviewProfessionalRow = {
+  name: string
+  services: number
+  amount: number
+}
+
+export type CashOverviewDateRange = CashDateRange
+
+export type CashOverview = {
+  range: {
+    period: Period
+    startDate: string
+    endDate: string
+  }
+  summary: {
+    billing: {
+      billed: number
+      totalCollected: number
+    }
+    paymentMethods: {
+      cash: number
+      card: number
+      other: number
+      pendingCurrent: number
+      accountBalance: number
+    }
+    serviceTypes: {
+      withDiscounts: number
+      freeOfChargeCount: number
+      topUps: number
+      pendingCollections: number
+      amortizedCount: number
+    }
+    cash: {
+      openingBalance: number
+      manualMovements: number
+      currentCash: number
+    }
+  }
+  salesAndServices: CashOverviewSalesRow[]
+  distribution: {
+    servicesAmount: number
+    productsAmount: number
+  }
+  professionals: CashOverviewProfessionalRow[]
 }
 
 export type CashHistoryEntry = {

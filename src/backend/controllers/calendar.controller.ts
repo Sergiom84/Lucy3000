@@ -2,6 +2,7 @@ import { Request, Response } from 'express'
 import { AuthRequest } from '../middleware/auth.middleware'
 import { appointmentCalendarSyncService } from '../services/appointmentCalendarSync.service'
 import { googleCalendarService } from '../services/googleCalendar.service'
+import { runWithTenantContext } from '../tenant/context'
 import { logError, logWarn } from '../utils/logger'
 
 const CALLBACK_MESSAGE_SOURCE = 'lucy3000-google-calendar-oauth'
@@ -128,7 +129,8 @@ export const getAuthUrl = async (req: Request, res: Response) => {
 
     const authUrl = googleCalendarService.buildAuthUrl({
       id: authReq.user.id,
-      role: authReq.user.role
+      role: authReq.user.role,
+      tenantId: authReq.user.tenantId
     })
 
     res.json({ authUrl })
@@ -160,7 +162,13 @@ export const handleCallback = async (req: Request, res: Response) => {
       return res.status(403).type('html').send(renderCallbackPage(false, 'Solo un usuario administrador puede conectar Google Calendar.'))
     }
 
-    await googleCalendarService.saveTokens(code)
+    await runWithTenantContext(
+      {
+        tenantId: authUser.tenantId,
+        userId: authUser.id
+      },
+      () => googleCalendarService.saveTokens(code)
+    )
 
     res
       .type('html')

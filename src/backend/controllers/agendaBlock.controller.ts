@@ -305,22 +305,30 @@ export const deleteAgendaBlock = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Agenda block not found' })
     }
 
-    const deleteSyncResult = await googleCalendarService.deleteAppointmentEvent(
-      agendaBlock.googleCalendarEventId,
-      agendaBlock.calendarInviteEmail || null,
-      Boolean(agendaBlock.calendarInviteEmail)
-    )
-
-    if (deleteSyncResult.error) {
-      logWarn('Google Calendar event deletion failed while deleting agenda block', {
-        agendaBlockId: agendaBlock.id,
-        syncError: deleteSyncResult.error
-      })
-    }
-
     await prisma.agendaBlock.delete({
       where: { id }
     })
+
+    void googleCalendarService
+      .deleteAppointmentEvent(
+        agendaBlock.googleCalendarEventId,
+        agendaBlock.calendarInviteEmail || null,
+        Boolean(agendaBlock.calendarInviteEmail)
+      )
+      .then((deleteSyncResult) => {
+        if (deleteSyncResult.error) {
+          logWarn('Google Calendar event deletion failed while deleting agenda block', {
+            agendaBlockId: agendaBlock.id,
+            syncError: deleteSyncResult.error
+          })
+        }
+      })
+      .catch((error) => {
+        logWarn('Background Google Calendar event deletion failed while deleting agenda block', {
+          agendaBlockId: agendaBlock.id,
+          syncError: error instanceof Error ? error.message : String(error)
+        })
+      })
 
     res.json({ message: 'Agenda block deleted successfully' })
   } catch (error) {

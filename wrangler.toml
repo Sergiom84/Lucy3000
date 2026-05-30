@@ -1,0 +1,7 @@
+# Configuracion de Cloudflare Pages para el front web/PWA de Lucy3000.
+# Solo sirve los estaticos compilados por Vite en dist/. La API central
+# (Express + Prisma + PostgreSQL) se despliega aparte; el front la consume
+# por VITE_API_URL definido en tiempo de build.
+name = "lucy3000"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-05-30"

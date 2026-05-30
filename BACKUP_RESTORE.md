@@ -1,19 +1,91 @@
-# Backup y Restauración
+# Backup y Restauracion
 
-Estado actualizado: 2026-04-23
+Estado actualizado: 2026-05-26
 
 ## Alcance
 
 En el repositorio conviven tres flujos distintos y no deben mezclarse:
-1. backup y restore del runtime local actual;
+1. backup SaaS de PostgreSQL y Storage;
 2. restore legacy asistido desde la pantalla `SQL`;
-3. scripts históricos de PostgreSQL/Supabase.
+3. backup/restore local de Electron para instalaciones antiguas o soporte puntual.
 
-## 1. Runtime local actual
+## 1. Backup SaaS actual
 
-El flujo operativo normal del producto es el backup de escritorio gestionado por Electron.
+La fuente de verdad del producto multi-equipo es PostgreSQL. En produccion, el backup operativo debe vivir en la infraestructura central:
+- snapshots o backups gestionados del proveedor PostgreSQL;
+- dumps controlados por entorno;
+- backups de Storage/S3 para fotos y documentos;
+- retencion y restauracion probadas por tenant o por instancia completa.
 
-### Qué expone la app
+Si se usa Supabase, Neon, Render, Railway, Fly o VPS, la decision de backup debe documentarse junto al despliegue real. Supabase Free puede valer para demo o piloto, pero no debe tratarse como canal comercial estable.
+
+### Que debe cubrir
+
+- tenants y licencias;
+- usuarios y roles;
+- clientas, historial, saldo y ranking;
+- servicios, productos y stock;
+- citas, agenda, bloqueos y notas;
+- bonos y sesiones;
+- ventas, cobros pendientes, caja y arqueos;
+- ajustes y configuracion de Google Calendar;
+- assets en Storage/S3.
+
+### Recomendaciones operativas
+
+- automatizar backups diarios como minimo;
+- probar restore antes de vender el servicio;
+- medir tamano de base, Storage y egress con datos equivalentes a 6 o 7 centros;
+- mantener exportacion por tenant para soporte, baja o portabilidad;
+- no guardar fotos o documentos binarios dentro de PostgreSQL.
+
+## 2. Restore SQL legacy asistido
+
+La pantalla `SQL` es un flujo admin aparte.
+No sustituye al backup diario y no es una restauracion universal de todo el negocio.
+
+### Que hace
+
+- analiza un `01dat.sql` o `01dat.sqlx` en formato SQL plano;
+- muestra un wizard por bloques de datos;
+- permite revisar, seleccionar y editar filas antes del commit;
+- registra eventos de importacion;
+- importa a la base del tenant actual unicamente lo soportado.
+
+La UI del asistente vive bajo `src/renderer/features/sql/*`; la ruta visible sigue siendo `/sql`.
+
+### Que puede restaurar
+
+Segun el codigo actual, el asistente cubre:
+- clientes;
+- tratamientos;
+- productos;
+- catalogo de bonos;
+- bonos de clientes;
+- saldo o abonos de clientes;
+- citas;
+- bloqueos de agenda;
+- notas de agenda;
+- consentimientos y firmas como assets generados.
+
+### Que no cubre
+
+- ventas;
+- caja;
+- referencias legacy de fotos;
+- una reconstruccion total y fiel de todo el sistema antiguo.
+
+### Reglas del flujo
+
+- requiere rol administrador;
+- debe ejecutarse con contexto de tenant;
+- esta pensado para rescatar datos legacy parciales;
+- asume que el destino esta preparado para recibir esa importacion;
+- no debe saltarse validaciones ni scoping multi-tenant.
+
+## 3. Backup/restore local de Electron legacy
+
+El runtime de escritorio conserva operaciones de backup local porque eran el flujo normal de la etapa SQLite y siguen siendo utiles para soporte.
 
 Desde `Settings` y el runtime de Electron existen estas operaciones:
 - crear backup manual completo;
@@ -22,115 +94,36 @@ Desde `Settings` y el runtime de Electron existen estas operaciones:
 - elegir carpeta de backups;
 - activar o desactivar auto-backup;
 - abrir carpeta de datos local;
-- resetear la instalación local.
+- resetear la instalacion local.
 
-La orquestación actual vive en:
+La orquestacion vive en:
 - `src/main/main.ts` como composition root;
 - `src/main/backupRuntime.ts` como runtime de backup y restore;
-- `src/main/backup.ts` como servicio técnico de snapshots y restauración.
+- `src/main/backup.ts` como servicio tecnico de snapshots y restauracion.
 
-### Qué incluye un backup completo
+### Que incluye un backup local completo
 
-Cada snapshot puede incluir:
+Cada snapshot legacy puede incluir:
 - la base SQLite activa;
 - ficheros `-wal` y `-shm` si existen;
 - assets locales de cliente en disco.
 
-Esto cubre la operativa diaria de:
-- clientes;
-- servicios;
-- productos;
-- citas;
-- bonos;
-- saldo a cuenta;
-- ventas;
-- caja;
-- configuraciones persistidas en la base.
+Este flujo no cubre por si solo el SaaS central ni reemplaza backups de PostgreSQL/Storage.
 
-### Comportamiento actual
+### Comportamiento legacy
 
 - los backups manuales usan prefijo `lucy3000-backup-<timestamp>`;
-- los automáticos usan `lucy3000-auto-backup-<timestamp>`;
+- los automaticos usan `lucy3000-auto-backup-<timestamp>`;
 - antes de restaurar se crea `lucy3000-pre-restore-backup-<timestamp>`;
-- el reset local crea `lucy3000-reset-backup-<timestamp>.db` si existía BD previa;
+- el reset local crea `lucy3000-reset-backup-<timestamp>.db` si existia BD previa;
 - en empaquetado, Electron pausa el backend mientras snapshota o restaura;
-- se conservan los últimos 10 backups manuales;
-- se conservan los últimos 4 auto-backups;
+- se conservan los ultimos 10 backups manuales;
+- se conservan los ultimos 4 auto-backups;
 - el auto-backup real es semanal mediante `setInterval`.
 
-### Dónde vive la información
+## Scripts historicos PostgreSQL/Supabase
 
-- base productiva empaquetada: carpeta de datos local del usuario;
-- backups: carpeta configurable desde `Settings`;
-- assets de cliente: carpetas locales del usuario, fuera del bundle.
-
-### Restore soportado
-
-Lucy3000 distingue dos fuentes:
-- carpeta de backup completo creada por la propia app;
-- fichero `.db` antiguo.
-
-Si restauras una carpeta completa:
-- se restaura base + assets soportados.
-
-Si restauras solo un `.db`:
-- se restaura la base;
-- los assets locales no se tocan.
-
-### Recomendaciones operativas
-
-- usa el restore de la propia app, no sustituyas la BD “en caliente”;
-- si necesitas copia externa, apunta la carpeta de backups a OneDrive, Google Drive o similar;
-- tras un restore que requiera relanzado, deja que la app se reinicie;
-- usa “Restablecer instalación local” solo cuando quieras volver al bootstrap del primer administrador.
-
-## 2. Restore SQL legacy asistido
-
-La pantalla `SQL` es un flujo admin aparte.
-No sustituye al backup diario y no es una restauración universal de todo el negocio.
-
-### Qué hace
-
-- analiza un `01dat.sql` o `01dat.sqlx` en formato SQL plano;
-- muestra un wizard por bloques de datos;
-- permite revisar, seleccionar y editar filas antes del commit;
-- registra eventos de importación;
-- crea un backup local de seguridad antes de escribir;
-- importa a la BD vacía únicamente lo soportado.
-
-La UI del asistente vive hoy bajo `src/renderer/features/sql/*`; la ruta visible sigue siendo `/sql`.
-
-### Qué puede restaurar
-
-Según el código actual, el asistente cubre:
-- clientes;
-- tratamientos;
-- productos;
-- catálogo de bonos;
-- bonos de clientes;
-- saldo o abonos de clientes;
-- citas;
-- bloqueos de agenda;
-- notas de agenda;
-- consentimientos y firmas como assets generados.
-
-### Qué no cubre
-
-- ventas;
-- caja;
-- referencias legacy de fotos;
-- una reconstrucción total y fiel de todo el sistema antiguo.
-
-### Reglas del flujo
-
-- requiere rol administrador;
-- está pensado para escritorio, no para navegador puro;
-- asume base de negocio funcionalmente vacía antes del commit;
-- usa el bridge de Electron para el backup previo y para guardar assets generados.
-
-## 3. Scripts históricos PostgreSQL/Supabase
-
-Estos scripts siguen en el repo para soporte o recuperación puntual, pero no forman parte del uso diario del producto.
+Estos scripts siguen en el repo para soporte o recuperacion puntual.
 
 Scripts disponibles:
 - `scripts/analyze-backup.ps1`
@@ -141,19 +134,22 @@ Scripts disponibles:
 
 Se ejecutan directamente, no desde `npm run`.
 
-## Cuándo usar cada flujo
+## Cuando usar cada flujo
 
-- Backup local de escritorio:
-  para operación diaria, soporte y restore habitual.
+- Backup SaaS:
+  para produccion, clientes reales y recuperacion operativa.
 - Pantalla `SQL`:
-  para rescatar datos legacy parciales desde `01dat.sql` o `01dat.sqlx` con revisión manual, siempre que el contenido sea SQL plano.
+  para rescatar datos legacy parciales desde `01dat.sql` o `01dat.sqlx` con revision manual.
+- Backup local de Electron:
+  para instalaciones antiguas, soporte puntual o migracion desde SQLite.
 - Scripts PostgreSQL/Supabase:
-  para auditoría histórica o soporte sobre backups remotos heredados.
+  para auditoria historica o soporte sobre backups remotos heredados.
 
-## Qué no hacer
+## Que no hacer
 
-- no documentes Supabase como base activa del producto actual;
+- no uses backup local de Electron como backup principal del SaaS;
 - no uses el asistente SQL como si fuera backup diario;
-- no reemplaces la SQLite local por fuera del flujo de restore salvo soporte muy controlado;
-- no mezcles restore `.db`, restore SQL y scripts históricos como si fuesen equivalentes;
-- no toques migraciones históricas ya aplicadas para “arreglar” un restore puntual.
+- no reemplaces datos de otro tenant durante importaciones;
+- no guardes secretos ni credenciales de proveedor dentro del cliente;
+- no confies en MSI/EXE/ASAR como barrera real de proteccion;
+- no toques migraciones historicas ya aplicadas para arreglar un restore puntual.

@@ -2,6 +2,7 @@ import { Request, Response } from 'express'
 import { AuthRequest } from '../../middleware/auth.middleware'
 import { getAnalyticsRows, getCashRankingData } from './analytics'
 import { toCashHttpError } from './errors'
+import { getCashOverviewData } from './overview'
 import { getPrivateNoTicketCashSalesData } from './privateCash'
 import {
   addCashMovementData,
@@ -60,6 +61,15 @@ export const getCashSummary = async (req: Request, res: Response) => {
     res.json(summary)
   } catch (error) {
     handleCashError(res, 'Get cash summary error', error)
+  }
+}
+
+export const getCashOverview = async (req: Request, res: Response) => {
+  try {
+    const overview = await getCashOverviewData(req.query)
+    res.json(overview)
+  } catch (error) {
+    handleCashError(res, 'Get cash overview error', error)
   }
 }
 

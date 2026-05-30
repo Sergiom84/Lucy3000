@@ -1,20 +1,26 @@
+import { Pencil } from 'lucide-react'
 import { formatCurrency, formatDateTime } from '../../../utils/format'
+import { salePaymentMethodLabel } from '../../../utils/tickets'
 import type { ClientDetailSale } from '../types'
 
 type ClientDetailSalesPanelProps = {
+  canEditSalePaymentMethod: (sale: ClientDetailSale) => boolean
   getSaleDisplayStatus: (sale: ClientDetailSale) => string
   getSaleDisplayStatusBadgeClassName: (sale: ClientDetailSale) => string
   getSaleDisplayStatusLabel: (sale: ClientDetailSale) => string
   getSaleTreatmentLabel: (sale: ClientDetailSale) => string
+  onEditPaymentMethod: (sale: ClientDetailSale) => void
   onPrintSale: (saleId: string) => void
   sales: ClientDetailSale[]
 }
 
 export default function ClientDetailSalesPanel({
+  canEditSalePaymentMethod,
   getSaleDisplayStatus,
   getSaleDisplayStatusBadgeClassName,
   getSaleDisplayStatusLabel,
   getSaleTreatmentLabel,
+  onEditPaymentMethod,
   onPrintSale,
   sales
 }: ClientDetailSalesPanelProps) {
@@ -46,6 +52,9 @@ export default function ClientDetailSalesPanel({
                 </th>
                 <th className="text-center py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
                   Estado
+                </th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
+                  Pago
                 </th>
                 <th className="text-right py-3 px-4 text-sm font-medium text-gray-600 dark:text-gray-400">
                   Ticket
@@ -80,6 +89,24 @@ export default function ClientDetailSalesPanel({
                     <span className={`badge ${getSaleDisplayStatusBadgeClassName(sale)}`}>
                       {getSaleDisplayStatusLabel(sale)}
                     </span>
+                  </td>
+                  <td className="py-3 px-4">
+                    <div className="flex items-center gap-2">
+                      <span className="whitespace-nowrap text-sm font-medium text-gray-700 dark:text-gray-200">
+                        {salePaymentMethodLabel(sale)}
+                      </span>
+                      {canEditSalePaymentMethod(sale) && (
+                        <button
+                          aria-label={`Modificar método de pago de ${sale.saleNumber || 'la venta'}`}
+                          className="rounded p-1 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-white"
+                          onClick={() => onEditPaymentMethod(sale)}
+                          title="Modificar método de pago"
+                          type="button"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
                   </td>
                   <td className="py-3 px-4 text-right">
                     {getSaleDisplayStatus(sale) !== 'PENDING' ? (

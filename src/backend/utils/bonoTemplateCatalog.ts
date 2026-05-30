@@ -1,12 +1,10 @@
-import { prisma } from '../db'
 import type { ComparableBonoTemplate } from './bonoServiceMatch'
+import { getSettingByKey } from './settings'
 
 const BONO_TEMPLATES_SETTING_KEY = 'bono_templates_catalog'
 
 export const readAppointmentBonoTemplates = async (): Promise<ComparableBonoTemplate[]> => {
-  const setting = await prisma.setting.findUnique({
-    where: { key: BONO_TEMPLATES_SETTING_KEY }
-  })
+  const setting = await getSettingByKey(BONO_TEMPLATES_SETTING_KEY)
 
   if (!setting) {
     return []

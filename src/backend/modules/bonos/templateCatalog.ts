@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import type { Workbook } from 'exceljs'
-import { prisma } from '../../db'
+import { getSettingByKey, saveSettingByKey } from '../../utils/settings'
 import { worksheetToObjects } from '../../utils/spreadsheet'
 import { BonoOperationError } from './errors'
 
@@ -134,9 +134,7 @@ const coerceBonoTemplate = (template: unknown): BonoTemplate | null => {
 }
 
 export const readBonoTemplates = async (options: { onlyActive?: boolean } = {}) => {
-  const setting = await prisma.setting.findUnique({
-    where: { key: BONO_TEMPLATES_SETTING_KEY }
-  })
+  const setting = await getSettingByKey(BONO_TEMPLATES_SETTING_KEY)
 
   if (!setting) return [] as BonoTemplate[]
 
@@ -157,17 +155,10 @@ export const readBonoTemplates = async (options: { onlyActive?: boolean } = {}) 
 export const writeBonoTemplates = async (templates: BonoTemplate[]) => {
   const value = JSON.stringify(sortBonoTemplates(templates))
 
-  await prisma.setting.upsert({
-    where: { key: BONO_TEMPLATES_SETTING_KEY },
-    update: {
-      value,
-      description: 'Catalogo importado de bonos'
-    },
-    create: {
-      key: BONO_TEMPLATES_SETTING_KEY,
-      value,
-      description: 'Catalogo importado de bonos'
-    }
+  await saveSettingByKey({
+    key: BONO_TEMPLATES_SETTING_KEY,
+    value,
+    description: 'Catalogo importado de bonos'
   })
 }
 

@@ -6,7 +6,6 @@ import { promises as fsPromises } from 'fs'
 import { ChildProcess, spawn } from 'child_process'
 import { ensureDir, findExistingPath } from './fileUtils'
 import {
-  getDatabasePath,
   getProductionDbPath,
   getRuntimeJwtSecretPath,
   getUserDataDir
@@ -85,11 +84,13 @@ const loadProductionEnv = (): Record<string, string> => {
     path.join(getUserDataDir(), '.env')
   ]
 
+  const mergedVars: Record<string, string> = {}
+  let loadedAnyEnv = false
+
   for (const envPath of envPaths) {
     if (fs.existsSync(envPath)) {
       writeMainLog('info', 'Loading production .env file', { envPath })
       const content = fs.readFileSync(envPath, 'utf-8')
-      const vars: Record<string, string> = {}
       for (const line of content.split('\n')) {
         const trimmed = line.trim()
         if (!trimmed || trimmed.startsWith('#')) continue
@@ -97,14 +98,17 @@ const loadProductionEnv = (): Record<string, string> => {
         if (eqIndex === -1) continue
         const key = trimmed.slice(0, eqIndex).trim()
         const value = trimmed.slice(eqIndex + 1).trim().replace(/^[\"']|[\"']$/g, '')
-        vars[key] = value
+        mergedVars[key] = value
       }
-      return vars
+      loadedAnyEnv = true
     }
   }
 
-  writeMainLog('warn', 'No .env file found for production')
-  return {}
+  if (!loadedAnyEnv) {
+    writeMainLog('warn', 'No .env file found for production')
+  }
+
+  return mergedVars
 }
 
 const ensureRuntimeJwtSecret = async (existingSecret?: string) => {
@@ -157,6 +161,8 @@ const ensureProductionDatabaseInitialized = async (dbPath: string) => {
   await fsPromises.copyFile(bundledSeedDbPath, dbPath)
   writeMainLog('info', 'Copied bundled database to production location', { dbPath, bundledSeedDbPath })
 }
+
+const toFileDatabaseUrl = (dbPath: string) => `file:${dbPath.replace(/\\/g, '/')}`
 
 export type BackendRuntime = ReturnType<typeof createBackendRuntime>
 
@@ -255,14 +261,30 @@ export const createBackendRuntime = (options: {
     }
 
     const productionEnv = loadProductionEnv()
-    const dbPath = getProductionDbPath()
-    const jwtSecret = await ensureRuntimeJwtSecret(productionEnv.JWT_SECRET)
+    const configuredDatabaseUrl = productionEnv.DATABASE_URL || process.env.DATABASE_URL
 
-    await ensureProductionDatabaseInitialized(dbPath)
+    if (!configuredDatabaseUrl) {
+      throw new Error(
+        'DATABASE_URL no esta configurada. Configura Lucy3000 como cliente local o cliente compartido.'
+      )
+    }
+
+    let databaseUrl = configuredDatabaseUrl
+    const isSqliteMode = configuredDatabaseUrl.startsWith('file:')
+
+    if (isSqliteMode) {
+      const dbPath = getProductionDbPath()
+      await ensureProductionDatabaseInitialized(dbPath)
+      databaseUrl = toFileDatabaseUrl(dbPath)
+    }
+
+    const jwtSecret = await ensureRuntimeJwtSecret(productionEnv.JWT_SECRET || process.env.JWT_SECRET)
+
     writeMainLog('info', 'Starting packaged backend process', {
       backendEntry,
       backendPort: options.backendPort,
-      dbPath
+      databaseMode: isSqliteMode ? 'sqlite' : 'postgresql',
+      databaseConfigured: true
     })
 
     const child = spawn(process.execPath, [backendEntry], {
@@ -274,7 +296,7 @@ export const createBackendRuntime = (options: {
         NODE_PATH: getPackagedNodePath(),
         PORT: options.backendPort,
         JWT_SECRET: jwtSecret,
-        DATABASE_URL: `file:${dbPath}`
+        DATABASE_URL: databaseUrl
       },
       windowsHide: true
     })
@@ -381,7 +403,6 @@ export const createBackendRuntime = (options: {
     ensureBackendReady,
     stopBackendGracefully,
     runWithPackagedBackendPaused,
-    hasManagedProcess: () => !options.isDevelopment && Boolean(backendProcess && backendProcess.exitCode === null),
-    getDatabasePath: () => getDatabasePath(options.isDevelopment)
+    hasManagedProcess: () => !options.isDevelopment && Boolean(backendProcess && backendProcess.exitCode === null)
   }
 }

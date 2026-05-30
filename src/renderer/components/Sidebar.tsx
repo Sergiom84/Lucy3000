@@ -13,13 +13,22 @@ import {
   Database,
   Sparkles,
   Trophy,
-  ShieldCheck
+  ShieldCheck,
+  Building2
 } from 'lucide-react'
 import { cn } from '../utils/cn'
 import { getAppVersion } from '../utils/desktop'
 import { useAuthStore } from '../stores/authStore'
 
-const navigation = [
+type NavItem = {
+  name: string
+  href: string
+  icon: typeof LayoutDashboard
+  adminOnly?: boolean
+  platformAdminOnly?: boolean
+}
+
+const navigation: NavItem[] = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Clientes', href: '/clients', icon: Users },
   { name: 'Ranking', href: '/ranking', icon: Trophy },
@@ -32,6 +41,7 @@ const navigation = [
   { name: 'Reportes', href: '/reports', icon: FileText, adminOnly: true },
   { name: 'Configuración', href: '/settings', icon: Settings },
   { name: 'SQL', href: '/sql', icon: Database, adminOnly: true },
+  { name: 'Centros', href: '/tenants', icon: Building2, platformAdminOnly: true },
 ]
 
 export default function Sidebar() {
@@ -56,7 +66,11 @@ export default function Sidebar() {
     }
   }, [])
 
-  const visibleNavigation = navigation.filter((item) => !item.adminOnly || user?.role === 'ADMIN')
+  const visibleNavigation = navigation.filter((item) => {
+    if (item.platformAdminOnly) return Boolean(user?.isPlatformAdmin)
+    if (item.adminOnly) return user?.role === 'ADMIN'
+    return true
+  })
 
   return (
     <div className="w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">

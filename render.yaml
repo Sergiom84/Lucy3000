@@ -1,0 +1,50 @@
+# Blueprint de Render para Lucy3000.
+# Despliega dos servicios desde este repo:
+#   - lucy3000-api : API central Express + Prisma (consume el PostgreSQL de Supabase).
+#   - lucy3000-web : front React/Vite servido como sitio estatico (PWA), con SPA fallback.
+#
+# Secretos (sync:false) se rellenan en el dashboard de Render, no se versionan:
+#   - DATABASE_URL    : cadena Session Pooler de Supabase (postgres...:pass@...pooler...:5432/postgres?sslmode=require)
+#   - BOOTSTRAP_TOKEN : token para crear el primer platform admin (POST /api/auth/bootstrap-admin)
+#   - VITE_API_URL    : URL publica de lucy3000-api (se conoce tras el primer deploy de la API)
+
+services:
+  - type: web
+    name: lucy3000-api
+    runtime: node
+    repo: https://github.com/Sergiom84/Lucy3000
+    branch: master
+    region: frankfurt
+    plan: starter
+    healthCheckPath: /health
+    buildCommand: npm install && npm run prisma:generate && npm run build:backend
+    preDeployCommand: npx prisma migrate deploy
+    startCommand: node dist/backend/server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: BOOTSTRAP_TOKEN
+        sync: false
+
+  - type: web
+    name: lucy3000-web
+    runtime: static
+    repo: https://github.com/Sergiom84/Lucy3000
+    branch: master
+    buildCommand: npm install && npm run build:web
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        sync: false
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /sw.js
+        name: Cache-Control
+        value: no-cache

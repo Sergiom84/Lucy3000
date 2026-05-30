@@ -8,6 +8,7 @@ const GOOGLE_CALENDAR_TIMEZONE = 'Europe/Madrid'
 const OAUTH_STATE_SCOPE = 'google-calendar-oauth'
 const OAUTH_STATE_TTL_SECONDS = 60 * 10
 const GOOGLE_CALENDAR_SCOPES = ['https://www.googleapis.com/auth/calendar.events']
+const GOOGLE_CALENDAR_DELETE_TIMEOUT_MS = 10_000
 const GOOGLE_CALENDAR_ENV_KEYS = [
   'GOOGLE_CALENDAR_CLIENT_ID',
   'GOOGLE_CALENDAR_CLIENT_SECRET',
@@ -18,11 +19,13 @@ const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 type AuthenticatedCalendarUser = {
   id: string
   role: string
+  tenantId: string
 }
 
 type OAuthStatePayload = {
   sub: string
   role: string
+  tenantId: string
   scope: typeof OAUTH_STATE_SCOPE
 }
 
@@ -35,7 +38,7 @@ type StoredGoogleCalendarConfig = {
 }
 
 export const GOOGLE_CALENDAR_RECONNECT_MESSAGE =
-  'La conexion con Google Calendar ha caducado o fue revocada. Ve a Configuracion > Google Calendar y vuelve a conectar la cuenta.'
+  'La conexion con Google Calendar ha caducado o fue revocada. Ve a Configuracion > Google Calendar y vuelve a conectar la cuenta. Si ocurre cada pocos dias, revisa si el proyecto OAuth de Google Cloud sigue en modo Testing.'
 
 export type CalendarSyncStatus = 'DISABLED' | 'SYNCED' | 'ERROR'
 
@@ -359,6 +362,7 @@ export class GoogleCalendarService {
       {
         sub: user.id,
         role: user.role,
+        tenantId: user.tenantId,
         scope: OAUTH_STATE_SCOPE
       } satisfies OAuthStatePayload,
       getJwtSecret(),
@@ -383,7 +387,8 @@ export class GoogleCalendarService {
 
     return {
       id: payload.sub,
-      role: payload.role
+      role: payload.role,
+      tenantId: payload.tenantId
     }
   }
 
@@ -572,11 +577,17 @@ export class GoogleCalendarService {
     try {
       const { calendar, config: activeConfig } = await this.getAuthorizedCalendar(true)
 
-      await calendar.events.delete({
-        calendarId: activeConfig.calendarId,
-        eventId,
-        sendUpdates: this.getSendUpdates(activeConfig, clientEmail, forceSendUpdates)
-      })
+      await calendar.events.delete(
+        {
+          calendarId: activeConfig.calendarId,
+          eventId,
+          sendUpdates: this.getSendUpdates(activeConfig, clientEmail, forceSendUpdates)
+        },
+        {
+          retry: false,
+          timeout: GOOGLE_CALENDAR_DELETE_TIMEOUT_MS
+        }
+      )
 
       return {
         eventId: null,

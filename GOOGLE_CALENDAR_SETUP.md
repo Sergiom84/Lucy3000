@@ -123,6 +123,13 @@ Revisa:
 El servicio limpia la configuración local cuando detecta `invalid_grant`.
 La acción correcta es volver a conectar la cuenta desde `Settings`.
 
+Si el acceso caduca de forma recurrente cada pocos días, revisa en Google Cloud la pantalla de consentimiento OAuth:
+- si el tipo de usuario es `External`;
+- y el estado de publicación está en `Testing`;
+- Google puede emitir refresh tokens que caducan a los 7 días para scopes que no sean solo perfil/email/OpenID.
+
+Para una instalación estable, el proyecto OAuth debe pasar a producción/verificación cuando aplique, o usarse una configuración interna adecuada si el negocio trabaja con Google Workspace.
+
 ## Recomendación operativa
 
 Empieza con:

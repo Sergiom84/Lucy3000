@@ -7,7 +7,10 @@ export interface CartItem {
   name: string
   detail?: string
   category?: string
+  basePrice?: number
   price: number
+  priceIncreaseEuros?: number
+  priceIncreasePercent?: number
   quantity: number
   stock?: number
   productId?: string

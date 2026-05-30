@@ -9,6 +9,7 @@ import {
   ensureDefaultAppointmentLegends
 } from './appointments'
 import { ensureMultipleBonoSessionsPerAppointment } from './bono-packs'
+import { ensureClientCancelledAppointmentCountColumn } from './clients'
 import {
   ensureAccountBalancePaymentMethodColumn,
   ensureCashRegisterClosureColumns,
@@ -27,6 +28,7 @@ import {
   type SqliteCompatibilityRuntime,
   type SqliteTableInfoRow
 } from './helpers'
+import { ensureLocalTenantSupport } from './tenant'
 import {
   ensurePendingPaymentCollectionsTable,
   ensurePendingPaymentsTable
@@ -35,7 +37,9 @@ import {
 type SqliteCompatibilityStep = (runtime: SqliteCompatibilityRuntime) => Promise<void>
 
 const sqliteCompatibilitySteps: SqliteCompatibilityStep[] = [
+  ensureLocalTenantSupport,
   ensureUsersUsernameColumn,
+  ensureClientCancelledAppointmentCountColumn,
   ensureAccountBalancePaymentMethodColumn,
   ensureSalesPaymentBreakdownColumn,
   ensureCashRegisterClosureColumns,

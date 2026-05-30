@@ -1,0 +1,3 @@
+# SPA fallback para Cloudflare Pages: cualquier ruta que no sea un archivo
+# estatico existente se sirve con index.html (router del cliente).
+/*    /index.html   200

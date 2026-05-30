@@ -2,8 +2,10 @@ import { createHash, randomUUID } from 'crypto'
 import bcrypt from 'bcryptjs'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '../db'
+import { getTenantId } from '../tenant/context'
 import { resolveAppointmentEndTime } from '../utils/appointment-spreadsheet'
 import { normalizeProfessionalName } from '../utils/professional-catalog'
+import { syncClientCancelledAppointmentCounts } from '../utils/client-cancellation-counts'
 import type {
   SqlAccountBalancePreview,
   SqlAgendaBlockPreview,
@@ -870,13 +872,22 @@ export const importSqlAnalysisToDatabase = async (
       }
     })
 
-    await tx.setting.upsert({
-      where: { key: BONO_TEMPLATES_SETTING_KEY },
+    const tenantId = getTenantId()
+    await (tx.setting as any).upsert({
+      where: tenantId
+        ? {
+            tenantId_key: {
+              tenantId,
+              key: BONO_TEMPLATES_SETTING_KEY
+            }
+          }
+        : { key: BONO_TEMPLATES_SETTING_KEY },
       update: {
         value: JSON.stringify(bonoTemplateCatalog),
         description: 'Catalogo importado desde SQL legacy'
       },
       create: {
+        ...(tenantId ? { tenantId } : {}),
         key: BONO_TEMPLATES_SETTING_KEY,
         value: JSON.stringify(bonoTemplateCatalog),
         description: 'Catalogo importado desde SQL legacy'
@@ -1082,6 +1093,10 @@ export const importSqlAnalysisToDatabase = async (
       async (chunk) => {
         await tx.appointmentService.createMany({ data: chunk })
       }
+    )
+    await syncClientCancelledAppointmentCounts(
+      appointmentData.map((appointment) => appointment.clientId),
+      tx
     )
 
     const agendaBlockData = selectedAgendaBlocks.map((block) => {

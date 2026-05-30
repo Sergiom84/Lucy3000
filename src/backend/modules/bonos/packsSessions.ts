@@ -388,7 +388,7 @@ export const updateBonoPack = async (req: Request, res: Response) => {
 export const createBonoAppointment = async (req: Request, res: Response) => {
   try {
     const { bonoPackId } = req.params
-    const { userId, cabin, date, startTime, status, notes, reminder } = req.body
+    const { userId, cabin, date, startTime, endTime, status, notes, reminder } = req.body
 
     const bonoPack = await prisma.bonoPack.findUnique({
       where: { id: bonoPackId },
@@ -462,10 +462,12 @@ export const createBonoAppointment = async (req: Request, res: Response) => {
       professional,
       date: toDate(String(date)),
       startTime: String(startTime),
-      endTime: calculateAppointmentEndTime(
-        String(startTime),
-        selectedServices.reduce((total, service) => total + Math.max(0, Number(service.duration || 0)), 0)
-      ),
+      endTime:
+        String(endTime || '').trim() ||
+        calculateAppointmentEndTime(
+          String(startTime),
+          selectedServices.reduce((total, service) => total + Math.max(0, Number(service.duration || 0)), 0)
+        ),
       status: (status as string) || 'SCHEDULED',
       notes: notes ? String(notes) : null,
       reminder: reminder === undefined ? true : Boolean(reminder)
@@ -576,16 +578,24 @@ export const consumeSession = async (req: Request, res: Response) => {
       )
     }
 
-    const nextAvailable = bonoPack.sessions.find(
-      (session) => session.status === 'AVAILABLE' && !isFutureReservation(session)
-    )
+    const availableSessions = bonoPack.sessions.filter((session) => session.status === 'AVAILABLE')
+    const nextAvailable =
+      availableSessions.find((session) => !isFutureReservation(session)) ||
+      availableSessions[0]
+
     if (!nextAvailable) {
       return res.status(400).json({ error: 'No available sessions ready to consume' })
     }
 
+    const shouldDetachFutureAppointment = isFutureReservation(nextAvailable)
+
     await prisma.bonoSession.update({
       where: { id: nextAvailable.id },
-      data: { status: 'CONSUMED', consumedAt: new Date() }
+      data: {
+        status: 'CONSUMED',
+        consumedAt: new Date(),
+        ...(shouldDetachFutureAppointment ? { appointmentId: null } : {})
+      }
     })
 
     const remainingAvailable = bonoPack.sessions.filter((session) => session.status === 'AVAILABLE').length - 1
@@ -617,6 +627,86 @@ export const consumeSession = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Consume session error:', error)
     res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const addSessionToBonoPack = async (req: Request, res: Response) => {
+  try {
+    const { bonoPackId } = req.params
+
+    const bonoPack = await prisma.bonoPack.findUnique({
+      where: { id: bonoPackId },
+      include: {
+        sessions: sessionInclude
+      }
+    })
+
+    if (!bonoPack) {
+      return res.status(404).json({ error: 'BonoPack not found' })
+    }
+
+    const consumedSessions = bonoPack.sessions
+      .filter((session) => session.status === 'CONSUMED')
+      .sort((left, right) => {
+        const leftConsumedAt = left.consumedAt ? new Date(left.consumedAt).getTime() : 0
+        const rightConsumedAt = right.consumedAt ? new Date(right.consumedAt).getTime() : 0
+
+        if (leftConsumedAt !== rightConsumedAt) {
+          return rightConsumedAt - leftConsumedAt
+        }
+
+        return Number(right.sessionNumber || 0) - Number(left.sessionNumber || 0)
+      })
+    const sessionToRestore = consumedSessions[0]
+
+    if (!sessionToRestore) {
+      return res.status(400).json({ error: 'No hay sesiones descontadas que recuperar' })
+    }
+
+    const nextStatus = resolveBonoPackStatus({
+      expiryDate: bonoPack.expiryDate,
+      totalSessions: Number(bonoPack.totalSessions || 0),
+      consumedSessions: consumedSessions.length - 1
+    })
+
+    await prisma.$transaction(async (tx) => {
+      const restoredSession = await tx.bonoSession.updateMany({
+        where: {
+          id: sessionToRestore.id,
+          status: 'CONSUMED'
+        },
+        data: {
+          status: 'AVAILABLE',
+          consumedAt: null,
+          appointmentId: null
+        }
+      })
+
+      if (restoredSession.count === 0) {
+        throw new BonoOperationError(409, 'La última sesión descontada ya no se puede recuperar. Recarga e inténtalo de nuevo.')
+      }
+
+      await tx.bonoPack.update({
+        where: { id: bonoPackId },
+        data: {
+          status: nextStatus
+        }
+      })
+    })
+
+    const updated = await prisma.bonoPack.findUnique({
+      where: { id: bonoPackId },
+      include: {
+        service: { select: { id: true, name: true } },
+        sessions: sessionInclude
+      }
+    })
+
+    res.json(updated)
+  } catch (error) {
+    const { statusCode, message } = toBonoHttpError(error)
+    console.error('Add bono session error:', error)
+    res.status(statusCode).json({ error: message })
   }
 }
 

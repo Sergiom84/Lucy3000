@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { AlertTriangle, CreditCard, FileText, Ticket } from 'lucide-react'
-import { formatCurrency } from '../../utils/format'
+import { formatCurrency, formatDateTime } from '../../utils/format'
 import {
   getPrintTicketSuccessMessage,
   normalizeDesktopAssetUrl,
@@ -11,15 +11,18 @@ import {
   buildPendingCollectionTicketPayload,
   buildSaleTicketPayload,
   buildQuoteHtml,
+  paymentMethodLabel,
   salePaymentMethodLabel
 } from '../../utils/tickets'
 import { buildClientPendingSummary, type PendingPaymentRow } from '../../utils/clientPendingPayments'
+import { invalidateAppointmentClientsCache } from '../../utils/appointmentCatalogs'
 import toast from 'react-hot-toast'
 import Modal from '../../components/Modal'
 import ClientForm from '../../components/ClientForm'
 import BonoPackModal from '../../components/BonoPackModal'
 import AppointmentForm from '../../components/AppointmentForm'
 import {
+  addBonoPackSession,
   collectPendingSale,
   consumeBonoPack,
   createAccountBalanceTopUp,
@@ -27,7 +30,9 @@ import {
   deleteClientQuote,
   fetchSaleDetail,
   updateClientAppointmentStatus,
-  updateClientRecord
+  updateClientRecord,
+  updateSalePaymentMethod,
+  updateSaleNotes
 } from './clientDetailApi'
 import ClientDetailAbonosPanel from './components/ClientDetailAbonosPanel'
 import ClientDetailAppointmentsPanel from './components/ClientDetailAppointmentsPanel'
@@ -47,6 +52,7 @@ import type {
   ClientDetailQuote,
   ClientDetailSale,
   ClientDetailSaleLabelSource,
+  ClientDetailSaleNote,
   ClientDetailTab,
   ClientDetailTabOption,
   ClientDetailToolbarItem
@@ -71,6 +77,10 @@ type PendingCollectionExecutionOptions = {
   paymentMethod: 'CASH' | 'CARD' | 'BIZUM' | 'ABONO'
   accountBalanceUsageAmount?: number
 }
+
+type EditableSalePaymentMethod = 'CASH' | 'CARD' | 'BIZUM'
+
+const editableSalePaymentMethods: EditableSalePaymentMethod[] = ['CASH', 'CARD', 'BIZUM']
 
 const appointmentStatusLabel: Record<string, string> = {
   SCHEDULED: 'Programada',
@@ -160,6 +170,26 @@ const getSaleDisplayStatusLabel = (sale: ClientDetailSale) =>
 const getSaleDisplayStatusBadgeClassName = (sale: ClientDetailSale) =>
   getSaleDisplayStatus(sale) === 'PENDING' ? 'badge-warning' : 'badge-success'
 
+const hasSaleStoredPaymentBreakdown = (sale: ClientDetailSale) => {
+  if (Array.isArray(sale.paymentBreakdown)) return sale.paymentBreakdown.length > 0
+  return String(sale.paymentBreakdown || '').trim().length > 0
+}
+
+const hasSaleAccountBalanceUsage = (sale: ClientDetailSale) =>
+  (sale.accountBalanceMovements || []).some(
+    (movement) => String(movement.type || '').toUpperCase() === 'CONSUMPTION' && Number(movement.amount || 0) > 0
+  )
+
+const hasSalePendingCollections = (sale: ClientDetailSale) =>
+  (sale.pendingPayment?.collections || []).length > 0
+
+const normalizeEditableSalePaymentMethod = (paymentMethod: unknown): EditableSalePaymentMethod => {
+  const normalizedPaymentMethod = String(paymentMethod || '').toUpperCase()
+  return editableSalePaymentMethods.includes(normalizedPaymentMethod as EditableSalePaymentMethod)
+    ? (normalizedPaymentMethod as EditableSalePaymentMethod)
+    : 'CASH'
+}
+
 const getSaleTreatmentLabel = (sale: ClientDetailSaleLabelSource | null | undefined) => {
   const labels = Array.isArray(sale?.items)
     ? sale.items
@@ -183,6 +213,27 @@ const parseClientNotes = (notes: unknown) =>
 const serializeClientNotes = (notes: string[]) => {
   const normalizedNotes = notes.map((note) => note.trim()).filter(Boolean)
   return normalizedNotes.length > 0 ? normalizedNotes.join('\n\n') : null
+}
+
+type ClientDetailBonoSession = ClientDetailBonoPack['sessions'][number]
+
+const getLastConsumedBonoSession = (bonoPack: ClientDetailBonoPack | null): ClientDetailBonoSession | null => {
+  if (!bonoPack) return null
+
+  return (
+    bonoPack.sessions
+      .filter((session) => session.status === 'CONSUMED')
+      .sort((left, right) => {
+        const leftConsumedAt = left.consumedAt ? new Date(left.consumedAt).getTime() : 0
+        const rightConsumedAt = right.consumedAt ? new Date(right.consumedAt).getTime() : 0
+
+        if (leftConsumedAt !== rightConsumedAt) {
+          return rightConsumedAt - leftConsumedAt
+        }
+
+        return Number(right.sessionNumber || 0) - Number(left.sessionNumber || 0)
+      })[0] || null
+  )
 }
 
 export default function ClientDetail() {
@@ -212,6 +263,10 @@ export default function ClientDetail() {
   const [accountBalanceSaving, setAccountBalanceSaving] = useState(false)
   const [noteDraft, setNoteDraft] = useState('')
   const [noteSaving, setNoteSaving] = useState(false)
+  const [saleNoteSavingId, setSaleNoteSavingId] = useState<string | null>(null)
+  const [paymentMethodModalSale, setPaymentMethodModalSale] = useState<ClientDetailSale | null>(null)
+  const [paymentMethodDraft, setPaymentMethodDraft] = useState<EditableSalePaymentMethod>('CASH')
+  const [paymentMethodSaving, setPaymentMethodSaving] = useState(false)
   const [accountBalanceDraft, setAccountBalanceDraft] = useState<ClientDetailAccountBalanceDraft>({
     description: '',
     amount: '',
@@ -223,6 +278,8 @@ export default function ClientDetail() {
   const [editingBonoPack, setEditingBonoPack] = useState<ClientDetailBonoPack | null>(null)
   const [showBonoAppointmentModal, setShowBonoAppointmentModal] = useState(false)
   const [selectedBonoForAppointment, setSelectedBonoForAppointment] = useState<ClientDetailBonoPack | null>(null)
+  const [selectedBonoForAddSession, setSelectedBonoForAddSession] = useState<ClientDetailBonoPack | null>(null)
+  const [addingBonoSession, setAddingBonoSession] = useState(false)
   const [pendingSettlementTarget, setPendingSettlementTarget] = useState<PendingPaymentRow | null>(null)
   const [pendingSettlementModalOpen, setPendingSettlementModalOpen] = useState(false)
   const [pendingSettlementSaving, setPendingSettlementSaving] = useState(false)
@@ -381,6 +438,43 @@ export default function ClientDetail() {
   const handleBonoAppointmentSuccess = async () => {
     handleCloseBonoAppointmentModal()
     await refreshClient()
+  }
+
+  const handleOpenAddBonoSessionModal = (bonoPackId: string) => {
+    const selectedBono = clientBonoPacks.find((bonoPack) => bonoPack.id === bonoPackId) || null
+    if (!selectedBono) {
+      toast.error('No se encontró el bono seleccionado')
+      return
+    }
+
+    if (!getLastConsumedBonoSession(selectedBono)) {
+      toast.error('No hay sesiones descontadas que recuperar')
+      return
+    }
+
+    setSelectedBonoForAddSession(selectedBono)
+  }
+
+  const handleCloseAddBonoSessionModal = () => {
+    if (addingBonoSession) return
+    setSelectedBonoForAddSession(null)
+  }
+
+  const handleConfirmAddBonoSession = async () => {
+    if (!selectedBonoForAddSession) return
+
+    try {
+      setAddingBonoSession(true)
+      await addBonoPackSession(selectedBonoForAddSession.id)
+      toast.success('Sesión recuperada')
+      setSelectedBonoForAddSession(null)
+      await refreshClient()
+    } catch (error: any) {
+      console.error('Error adding bono session:', error)
+      toast.error(error.response?.data?.error || 'No se pudo recuperar la sesión')
+    } finally {
+      setAddingBonoSession(false)
+    }
   }
 
   const handleClosePendingSettlementModal = () => {
@@ -583,6 +677,80 @@ export default function ClientDetail() {
   }, [clientAssets, client?.photoUrl])
 
   const clientNotes = useMemo(() => parseClientNotes(client?.notes), [client?.notes])
+  const saleNotes = useMemo<ClientDetailSaleNote[]>(
+    () =>
+      (client?.sales || [])
+        .map((sale) => ({
+          id: sale.id,
+          date: sale.date,
+          treatment: getSaleTreatmentLabel(sale),
+          note: String(sale.notes || '').trim()
+        }))
+        .filter((saleNote) => saleNote.note.length > 0),
+    [client?.sales]
+  )
+
+  const handleUpdateSaleNote = async (saleId: string, nextNote: string | null) => {
+    try {
+      setSaleNoteSavingId(saleId)
+      await updateSaleNotes(saleId, nextNote)
+      toast.success(nextNote ? 'Nota de venta actualizada' : 'Nota de venta eliminada')
+      await refreshClient()
+      return true
+    } catch (error: any) {
+      console.error('Error updating sale note:', error)
+      toast.error(error.response?.data?.error || 'No se pudo actualizar la nota de venta')
+      return false
+    } finally {
+      setSaleNoteSavingId(null)
+    }
+  }
+
+  const canEditSalePaymentMethod = (sale: ClientDetailSale) =>
+    getSaleDisplayStatus(sale) === 'COMPLETED' &&
+    editableSalePaymentMethods.includes(String(sale.paymentMethod || '').toUpperCase() as EditableSalePaymentMethod) &&
+    !hasSaleStoredPaymentBreakdown(sale) &&
+    !hasSaleAccountBalanceUsage(sale) &&
+    !hasSalePendingCollections(sale)
+
+  const handleOpenSalePaymentMethodModal = (sale: ClientDetailSale) => {
+    if (!canEditSalePaymentMethod(sale)) {
+      toast.error('Solo se puede corregir el método de pago de ventas cobradas con un pago directo')
+      return
+    }
+
+    setPaymentMethodModalSale(sale)
+    setPaymentMethodDraft(normalizeEditableSalePaymentMethod(sale.paymentMethod))
+  }
+
+  const handleCloseSalePaymentMethodModal = () => {
+    if (paymentMethodSaving) return
+    setPaymentMethodModalSale(null)
+    setPaymentMethodDraft('CASH')
+  }
+
+  const handleConfirmSalePaymentMethodUpdate = async () => {
+    if (!paymentMethodModalSale) return
+
+    if (paymentMethodDraft === normalizeEditableSalePaymentMethod(paymentMethodModalSale.paymentMethod)) {
+      handleCloseSalePaymentMethodModal()
+      return
+    }
+
+    try {
+      setPaymentMethodSaving(true)
+      await updateSalePaymentMethod(paymentMethodModalSale.id, paymentMethodDraft)
+      toast.success('Método de pago actualizado')
+      setPaymentMethodModalSale(null)
+      setPaymentMethodDraft('CASH')
+      await refreshClient()
+    } catch (error: any) {
+      console.error('Error updating sale payment method:', error)
+      toast.error(error.response?.data?.error || 'No se pudo actualizar el método de pago')
+    } finally {
+      setPaymentMethodSaving(false)
+    }
+  }
 
   const handleConsumeBonoSession = async (bonoPackId: string) => {
     try {
@@ -689,6 +857,7 @@ export default function ClientDetail() {
         notes: accountBalanceDraft.notes.trim() || null
       })
       toast.success('Abono registrado correctamente')
+      invalidateAppointmentClientsCache()
       setAccountBalanceDraft({
         description: '',
         amount: '',
@@ -809,6 +978,16 @@ export default function ClientDetail() {
     { id: 'appointments', label: 'Citas', count: client.appointments?.length || 0 },
     { id: 'sales', label: 'Ventas', count: client.sales?.length || 0 }
   ]
+  const addSessionConsumedCount =
+    selectedBonoForAddSession?.sessions.filter((session) => session.status === 'CONSUMED').length || 0
+  const addSessionRemainingCount = selectedBonoForAddSession
+    ? Math.max(selectedBonoForAddSession.totalSessions - addSessionConsumedCount, 0)
+    : 0
+  const addSessionLastConsumedSession = getLastConsumedBonoSession(selectedBonoForAddSession)
+  const addSessionRecoveredRemainingCount =
+    selectedBonoForAddSession && addSessionLastConsumedSession
+      ? addSessionRemainingCount + 1
+      : addSessionRemainingCount
 
   const activePanel = (() => {
     switch (activeTab) {
@@ -852,6 +1031,8 @@ export default function ClientDetail() {
             getSaleDisplayStatusBadgeClassName={getSaleDisplayStatusBadgeClassName}
             getSaleDisplayStatusLabel={getSaleDisplayStatusLabel}
             getSaleTreatmentLabel={getSaleTreatmentLabel}
+            canEditSalePaymentMethod={canEditSalePaymentMethod}
+            onEditPaymentMethod={handleOpenSalePaymentMethodModal}
             onPrintSale={(saleId) => void handlePrintSale(saleId)}
           />
         )
@@ -896,6 +1077,7 @@ export default function ClientDetail() {
         return (
           <ClientDetailBonosPanel
             bonoPacks={clientBonoPacks}
+            onAddSession={handleOpenAddBonoSessionModal}
             onConsume={(bonoPackId) => void handleConsumeBonoSession(bonoPackId)}
             onCreate={handleOpenBonoPackCreateModal}
             onDelete={(bonoPackId) => void handleDeleteBono(bonoPackId)}
@@ -930,6 +1112,10 @@ export default function ClientDetail() {
         client={client}
         profileImageUrl={profileImageUrl}
         pendingTotal={clientPendingTotal}
+        saleNotes={saleNotes}
+        saleNoteSavingId={saleNoteSavingId}
+        onDeleteSaleNote={(saleId) => handleUpdateSaleNote(saleId, null)}
+        onUpdateSaleNote={handleUpdateSaleNote}
       />
 
       <ClientDetailQuickToolbar items={toolbarItems} onSelectTab={(tab) => setActiveTab(tab)} />
@@ -958,6 +1144,7 @@ export default function ClientDetail() {
       >
         {selectedBonoForAppointment && (
           <AppointmentForm
+            key={`bono-${selectedBonoForAppointment.id}`}
             onSuccess={handleBonoAppointmentSuccess}
             onCancel={handleCloseBonoAppointmentModal}
             fromBono={{
@@ -969,6 +1156,98 @@ export default function ClientDetail() {
             }}
             initialCabin="LUCY"
           />
+        )}
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(selectedBonoForAddSession)}
+        onClose={handleCloseAddBonoSessionModal}
+        title="¿Añadir una sesión a las disponibles?"
+        maxWidth="md"
+      >
+        {selectedBonoForAddSession && (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Se recuperará la última sesión descontada por error, ya fuera manualmente o desde una cita. No se modificará el total del bono.
+            </p>
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm dark:border-gray-700 dark:bg-gray-800">
+              <div className="grid gap-2">
+                <div className="flex items-center justify-between gap-4">
+                  <span className="shrink-0 text-gray-500 dark:text-gray-400">Cliente</span>
+                  <span className="min-w-0 break-words text-right font-medium text-gray-900 dark:text-white">
+                    {client.firstName} {client.lastName}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="shrink-0 text-gray-500 dark:text-gray-400">Bono</span>
+                  <span className="min-w-0 break-words text-right font-medium text-gray-900 dark:text-white">
+                    {selectedBonoForAddSession.name}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="shrink-0 text-gray-500 dark:text-gray-400">Tratamiento</span>
+                  <span className="min-w-0 break-words text-right font-medium text-gray-900 dark:text-white">
+                    {selectedBonoForAddSession.service?.name || 'Sin tratamiento'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="shrink-0 text-gray-500 dark:text-gray-400">Precio</span>
+                  <span className="min-w-0 text-right font-medium text-gray-900 dark:text-white">
+                    {formatCurrency(Number(selectedBonoForAddSession.price || 0))}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="shrink-0 text-gray-500 dark:text-gray-400">Sesiones usadas</span>
+                  <span className="min-w-0 text-right font-medium text-gray-900 dark:text-white">
+                    {addSessionConsumedCount}/{selectedBonoForAddSession.totalSessions}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="shrink-0 text-gray-500 dark:text-gray-400">Sesión a recuperar</span>
+                  <span className="min-w-0 text-right font-medium text-gray-900 dark:text-white">
+                    {addSessionLastConsumedSession
+                      ? `#${addSessionLastConsumedSession.sessionNumber}${
+                          addSessionLastConsumedSession.consumedAt
+                            ? ` · ${formatDateTime(addSessionLastConsumedSession.consumedAt)}`
+                            : ''
+                        }`
+                      : '-'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="shrink-0 text-gray-500 dark:text-gray-400">Restantes ahora</span>
+                  <span className="min-w-0 text-right font-medium text-gray-900 dark:text-white">
+                    {addSessionRemainingCount}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="shrink-0 text-gray-500 dark:text-gray-400">Restantes tras añadir</span>
+                  <span className="min-w-0 text-right font-medium text-gray-900 dark:text-white">
+                    {addSessionRecoveredRemainingCount}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={handleCloseAddBonoSessionModal}
+                className="btn btn-secondary"
+                disabled={addingBonoSession}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmAddBonoSession()}
+                className="btn btn-primary"
+                disabled={addingBonoSession}
+              >
+                {addingBonoSession ? 'Guardando...' : 'Añadir sesión'}
+              </button>
+            </div>
+          </div>
         )}
       </Modal>
 
@@ -984,6 +1263,65 @@ export default function ClientDetail() {
           onSuccess={handleFormSuccess}
           onCancel={() => setShowEditModal(false)}
         />
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(paymentMethodModalSale)}
+        onClose={handleCloseSalePaymentMethodModal}
+        title="Modificar método de pago"
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          {paymentMethodModalSale && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+              <div className="flex items-center justify-between gap-4">
+                <span className="font-medium">{paymentMethodModalSale.saleNumber || 'Venta'}</span>
+                <span>{formatCurrency(Number(paymentMethodModalSale.total || 0))}</span>
+              </div>
+              <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Pago actual: {salePaymentMethodLabel(paymentMethodModalSale)}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="label" htmlFor="sale-payment-method">
+              Método de pago
+            </label>
+            <select
+              id="sale-payment-method"
+              className="input"
+              value={paymentMethodDraft}
+              onChange={(event) => setPaymentMethodDraft(normalizeEditableSalePaymentMethod(event.target.value))}
+              disabled={paymentMethodSaving}
+            >
+              {editableSalePaymentMethods.map((method) => (
+                <option key={method} value={method}>
+                  {paymentMethodLabel(method)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={handleCloseSalePaymentMethodModal}
+              className="btn btn-secondary"
+              disabled={paymentMethodSaving}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleConfirmSalePaymentMethodUpdate()}
+              className="btn btn-primary"
+              disabled={paymentMethodSaving}
+            >
+              {paymentMethodSaving ? 'Guardando...' : 'Guardar'}
+            </button>
+          </div>
+        </div>
       </Modal>
 
       <Modal

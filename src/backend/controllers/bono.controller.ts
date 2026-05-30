@@ -11,6 +11,7 @@ export {
   importClientBonosFromSpreadsheet
 } from '../modules/bonos/legacyImport'
 export {
+  addSessionToBonoPack,
   createBonoAppointment,
   createBonoPack,
   deleteBonoPack,

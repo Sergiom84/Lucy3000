@@ -258,7 +258,8 @@ const createTransactionMock = () => ({
   },
   client: {
     count: vi.fn().mockResolvedValue(0),
-    createMany: vi.fn().mockResolvedValue({ count: 1 })
+    createMany: vi.fn().mockResolvedValue({ count: 1 }),
+    update: vi.fn().mockResolvedValue(undefined)
   },
   service: {
     count: vi.fn().mockResolvedValue(0),

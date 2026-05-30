@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  calculateAdjustedItemPrice,
   mapSaleClient,
   parsePositiveNumericInput,
   resolveSalesView,
@@ -21,6 +22,12 @@ describe('salesHelpers', () => {
     expect(parsePositiveNumericInput('12,5')).toBe(12.5)
     expect(parsePositiveNumericInput('-4')).toBe(0)
     expect(parsePositiveNumericInput('abc')).toBe(0)
+  })
+
+  it('calculates the adjusted item price from euro and percentage increases', () => {
+    expect(calculateAdjustedItemPrice({ basePrice: 25, eurosIncrease: 3, percentIncrease: 0 })).toBe(28)
+    expect(calculateAdjustedItemPrice({ basePrice: 25, eurosIncrease: 0, percentIncrease: 10 })).toBe(27.5)
+    expect(calculateAdjustedItemPrice({ basePrice: 25, eurosIncrease: 3, percentIncrease: 10 })).toBe(30.5)
   })
 
   it('maps a sale client payload to the renderer shape', () => {

@@ -36,6 +36,36 @@ export type RuntimeDataPaths = {
   dbExists: boolean
 }
 
+export type DatabaseConfigMode = 'local' | 'shared'
+
+export type DatabaseUrlKind = 'missing' | 'postgresql' | 'sqlite' | 'unknown'
+
+export type DatabaseConfigStatus = {
+  configured: boolean
+  needsSetup: boolean
+  mode: DatabaseConfigMode | null
+  databaseUrlKind: DatabaseUrlKind
+  envPath: string | null
+  writableEnvPath: string
+  userDataPath: string
+  legacySqlitePath: string
+  legacySqliteExists: boolean
+  reason?: string
+}
+
+export type DatabaseConfigurePayload = {
+  mode: DatabaseConfigMode
+  databaseUrl?: string
+}
+
+export type DatabaseConfigureResult = {
+  success: boolean
+  requiresRelaunch: boolean
+  envPath?: string
+  mode?: DatabaseConfigMode
+  error?: string
+}
+
 export type OpenPathResult = {
   success: boolean
   path: string
@@ -121,6 +151,10 @@ export interface ElectronAPI {
   resetRuntimeData: () => Promise<ResetRuntimeDataResult>
   relaunch: () => Promise<{ success: boolean }>
   quit: () => Promise<void>
+  databaseConfig: {
+    getStatus: () => Promise<DatabaseConfigStatus>
+    configure: (payload: DatabaseConfigurePayload) => Promise<DatabaseConfigureResult>
+  }
   logs: {
     getFilePath: () => Promise<string>
     openFolder: () => Promise<OpenPathResult>

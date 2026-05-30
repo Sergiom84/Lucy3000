@@ -10,7 +10,7 @@ import {
 } from '../../utils/sales-reporting'
 import { CashPeriod, getPeriodRange, pendingCollectionRangeWhere, regularCommercialSaleRangeWhere } from './shared'
 
-const resolveAnalyticsRange = (query: Request['query'] | undefined) => {
+export const resolveAnalyticsRange = (query: Request['query'] | undefined) => {
   const safeQuery = query || {}
   if (safeQuery.startDate && safeQuery.endDate) {
     const range = buildInclusiveDateRange(safeQuery.startDate as string, safeQuery.endDate as string)

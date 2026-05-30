@@ -13,21 +13,36 @@ import {
 } from './shared'
 
 const reconcileCancelledAppointmentsFromGoogle = async (
-  appointments: Array<{ id: string; status: string; googleCalendarEventId?: string | null }>
+  appointments: Array<{
+    id: string
+    status: string
+    date: Date
+    startTime: string
+    googleCalendarEventId?: string | null
+  }>
 ) => {
+  const now = new Date()
   const candidates = appointments.filter(
-    (appointment) => isActiveAppointmentStatus(appointment.status) && Boolean(appointment.googleCalendarEventId)
+    (appointment) =>
+      isActiveAppointmentStatus(appointment.status) &&
+      Boolean(appointment.googleCalendarEventId) &&
+      toAppointmentDateTime(appointment) >= now
   )
 
   if (candidates.length === 0) {
     return false
   }
 
+  const remoteStates = await Promise.all(
+    candidates.map(async (appointment) => ({
+      appointment,
+      remoteState: await googleCalendarService.getAppointmentEventState(appointment.googleCalendarEventId || null)
+    }))
+  )
+
   let changed = false
 
-  for (const appointment of candidates) {
-    const remoteState = await googleCalendarService.getAppointmentEventState(appointment.googleCalendarEventId || null)
-
+  for (const { appointment, remoteState } of remoteStates) {
     if (remoteState === 'CANCELLED' || remoteState === 'MISSING') {
       await prisma.appointment.update({
         where: { id: appointment.id },
@@ -51,6 +66,15 @@ const reconcileCancelledAppointmentsFromGoogle = async (
   }
 
   return changed
+}
+
+const toAppointmentDateTime = (appointment: { date: Date; startTime: string }) => {
+  const value = new Date(appointment.date)
+  const [hours, minutes] = String(appointment.startTime || '00:00')
+    .split(':')
+    .map((item) => Number.parseInt(item, 10))
+  value.setHours(Number.isFinite(hours) ? hours : 0, Number.isFinite(minutes) ? minutes : 0, 0, 0)
+  return value
 }
 
 export const listClients = async (query: {
@@ -214,6 +238,13 @@ export const getClientByIdOrThrow = async (id: string) => {
     sales: {
       include: {
         items: true,
+        accountBalanceMovements: {
+          select: {
+            type: true,
+            amount: true,
+            balanceAfter: true
+          }
+        },
         pendingPayment: {
           include: {
             collections: {

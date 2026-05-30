@@ -16,6 +16,19 @@ export const prismaMock: any = {
     update: vi.fn()
   },
 
+  tenant: {
+    findUnique: vi.fn(),
+    findMany: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn()
+  },
+
+  tenantLicense: {
+    findUnique: vi.fn(),
+    upsert: vi.fn(),
+    update: vi.fn()
+  },
+
   sale: {
     count: vi.fn(),
     findFirst: vi.fn(),
@@ -28,6 +41,7 @@ export const prismaMock: any = {
 
   pendingPayment: {
     findUnique: vi.fn(),
+    findMany: vi.fn(),
     create: vi.fn(),
     update: vi.fn()
   },
@@ -63,6 +77,8 @@ export const prismaMock: any = {
   },
 
   bonoSession: {
+    count: vi.fn(),
+    findMany: vi.fn(),
     createMany: vi.fn(),
     deleteMany: vi.fn(),
     update: vi.fn(),
@@ -193,8 +209,10 @@ export const prismaMock: any = {
   },
 
   setting: {
+    findFirst: vi.fn(),
     findMany: vi.fn(),
     findUnique: vi.fn(),
+    create: vi.fn(),
     update: vi.fn(),
     upsert: vi.fn()
   },

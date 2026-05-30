@@ -13,6 +13,7 @@ import {
   getAgendaBlocks,
   getAgendaBlockProfessionals
 } from '../../../src/backend/controllers/agendaBlock.controller'
+import { googleCalendarService } from '../../../src/backend/services/googleCalendar.service'
 import { createMockRequest, createMockResponse } from '../helpers/http'
 import { prismaMock, resetPrismaMock } from '../mocks/prisma.mock'
 
@@ -143,8 +144,15 @@ describe('agendaBlock.controller', () => {
     expect(res.status).toHaveBeenCalledWith(201)
   })
 
-  it('deletes an agenda block and clears its calendar event', async () => {
-    prismaMock.googleCalendarConfig.findFirst.mockResolvedValue(null)
+  it('responds to agenda block deletion before Google Calendar deletion finishes', async () => {
+    let resolveCalendarDeletion: (value: { eventId: null; status: 'DISABLED'; error: null }) => void = () => {}
+    const calendarDeletionPromise = new Promise<{ eventId: null; status: 'DISABLED'; error: null }>((resolve) => {
+      resolveCalendarDeletion = resolve
+    })
+    const deleteCalendarSpy = vi
+      .spyOn(googleCalendarService, 'deleteAppointmentEvent')
+      .mockReturnValue(calendarDeletionPromise)
+
     prismaMock.agendaBlock.findUnique.mockResolvedValue({
       id: 'block-1',
       professional: 'Tamara',
@@ -173,6 +181,11 @@ describe('agendaBlock.controller', () => {
     expect(prismaMock.agendaBlock.delete).toHaveBeenCalledWith({
       where: { id: 'block-1' }
     })
+    expect(deleteCalendarSpy).toHaveBeenCalledWith('event-1', 'tamara@example.com', true)
     expect(res.json).toHaveBeenCalledWith({ message: 'Agenda block deleted successfully' })
+
+    resolveCalendarDeletion({ eventId: null, status: 'DISABLED', error: null })
+    await calendarDeletionPromise
+    deleteCalendarSpy.mockRestore()
   })
 })

@@ -285,7 +285,8 @@ const createSqlImportTx = () => ({
   },
   client: {
     count: vi.fn().mockResolvedValue(0),
-    createMany: vi.fn().mockResolvedValue({ count: 1 })
+    createMany: vi.fn().mockResolvedValue({ count: 1 }),
+    update: vi.fn().mockResolvedValue(undefined)
   },
   service: {
     count: vi.fn().mockResolvedValue(0),
@@ -334,6 +335,9 @@ const createSqlImportTx = () => ({
     count: vi.fn().mockResolvedValue(0)
   },
   setting: {
+    findFirst: vi.fn().mockResolvedValue(null),
+    create: vi.fn().mockResolvedValue(undefined),
+    update: vi.fn().mockResolvedValue(undefined),
     upsert: vi.fn().mockResolvedValue(undefined)
   }
 })
@@ -383,13 +387,34 @@ describe('API smoke tests', () => {
 
   it('POST /api/auth/bootstrap-admin creates the first admin and returns auth payload', async () => {
     const tx: any = {
+      tenant: {
+        create: vi.fn().mockResolvedValue({
+          id: 'tenant-1',
+          name: 'Lucy3000',
+          slug: 'lucy3000'
+        })
+      },
       user: {
         count: vi.fn().mockResolvedValue(0),
         create: vi.fn().mockResolvedValue({
           id: 'admin-1',
+          tenantId: 'tenant-1',
           email: 'owner@example.com',
           name: 'Owner',
-          role: 'ADMIN'
+          role: 'ADMIN',
+          isPlatformAdmin: true,
+          tenant: {
+            id: 'tenant-1',
+            name: 'Lucy3000',
+            slug: 'lucy3000',
+            license: {
+              status: 'TRIAL',
+              plan: 'trial',
+              trialEndsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+              blockedAt: null,
+              cancelledAt: null
+            }
+          }
         })
       }
     }
@@ -417,6 +442,9 @@ describe('API smoke tests', () => {
 
   it('POST /api/auth/bootstrap-admin returns 409 when bootstrap was already completed', async () => {
     const tx: any = {
+      tenant: {
+        create: vi.fn()
+      },
       user: {
         count: vi.fn().mockResolvedValue(1),
         create: vi.fn()
@@ -865,6 +893,64 @@ describe('API smoke tests', () => {
     expect(response.status).toBe(201)
     expect(response.body).toEqual(
       expect.objectContaining({ id: 'appointment-guest-1', guestName: 'Cliente puntual' })
+    )
+  })
+
+  it('PUT /api/appointments/:id accepts status-only updates', async () => {
+    const appointmentId = '840d15cb-53b6-453a-8050-d06b634bfb37'
+    const serviceId = '3adf3ca8-c749-4f40-9f2e-54a8ff0f8f59'
+    const updatedAppointment = {
+      id: appointmentId,
+      clientId: '3adf3ca8-c749-4f40-9f2e-54a8ff0f8f57',
+      guestName: null,
+      guestPhone: null,
+      cabin: 'LUCY',
+      reminder: true,
+      date: new Date('2099-03-07T10:00:00.000Z'),
+      startTime: '10:00',
+      endTime: '10:30',
+      status: 'NO_SHOW',
+      notes: null,
+      professional: 'Lucy',
+      client: { firstName: 'Ana', lastName: 'Lopez', phone: '600000000', email: null },
+      user: { id: 'user-1', name: 'Lucy', email: 'admin@lucy3000.com' },
+      service: { id: serviceId, name: 'Limpieza facial' },
+      appointmentServices: [
+        {
+          serviceId,
+          sortOrder: 0,
+          service: { id: serviceId, name: 'Limpieza facial', duration: 30 }
+        }
+      ],
+      bonoSessions: [],
+      sale: null,
+      googleCalendarEventId: null
+    }
+
+    prismaMock.appointment.findUnique.mockResolvedValue({
+      ...updatedAppointment,
+      status: 'SCHEDULED'
+    })
+    prismaMock.appointment.update
+      .mockResolvedValueOnce(updatedAppointment)
+      .mockResolvedValueOnce({
+        ...updatedAppointment,
+        googleCalendarSyncStatus: 'DISABLED',
+        googleCalendarSyncError: null
+      })
+    prismaMock.bonoSession.updateMany.mockResolvedValue({ count: 0 })
+
+    const response = await request(app)
+      .put(`/api/appointments/${appointmentId}`)
+      .set('Authorization', createAuthHeader())
+      .send({ status: 'NO_SHOW' })
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        id: appointmentId,
+        status: 'NO_SHOW'
+      })
     )
   })
 

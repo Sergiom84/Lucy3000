@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '../../db'
+import { getTenantId } from '../../tenant/context'
 
 export type ClientSortBy = 'lastVisit' | 'name' | 'clientNumber' | 'totalSpent' | 'pendingAmount'
 export type ClientSortDirection = 'asc' | 'desc'
@@ -19,7 +20,7 @@ const buildClientNameOrderSql = (sortDirection: ClientSortDirection) =>
 
 const clientNumberIsNumericSql = Prisma.sql`
   TRIM(COALESCE(c."externalCode", '')) <> ''
-  AND TRIM(COALESCE(c."externalCode", '')) NOT GLOB '*[^0-9]*'
+  AND TRIM(COALESCE(c."externalCode", '')) ~ '^[0-9]+$'
 `
 
 const clientNumberRankSql = Prisma.sql`
@@ -185,7 +186,14 @@ export const getOrderedClientIds = async ({
   skip?: number
   take?: number
 }) => {
+  const tenantId = getTenantId()
   const whereClauses: Prisma.Sql[] = []
+
+  if (tenantId) {
+    whereClauses.push(Prisma.sql`c."tenantId" = ${tenantId}`)
+  } else if (process.env.NODE_ENV !== 'test') {
+    throw new Error('Tenant context is required for this operation')
+  }
 
   for (const term of searchTerms) {
     whereClauses.push(buildClientSearchSql(term))
@@ -213,7 +221,7 @@ export const getOrderedClientIds = async ({
   const rows = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
     SELECT c."id"
     FROM "clients" c
-    LEFT JOIN "appointments" a ON a."clientId" = c."id"
+    LEFT JOIN "appointments" a ON a."clientId" = c."id"${tenantId ? Prisma.sql` AND a."tenantId" = c."tenantId"` : Prisma.empty}
     ${whereSql}
     GROUP BY c."id"
     ORDER BY ${orderBySql}

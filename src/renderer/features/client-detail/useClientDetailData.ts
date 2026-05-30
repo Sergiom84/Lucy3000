@@ -60,28 +60,35 @@ export const useClientDetailData = ({ clientId, navigate }: UseClientDetailDataA
     }
   }
 
+  const refreshClientAssets = async (targetClient: ClientDetailClient) => {
+    if (!targetClient?.id) return
+
+    try {
+      setAssetsLoading(true)
+      const assets = await fetchClientAssets(targetClient)
+      setClientAssets(assets)
+    } catch (error) {
+      console.error('Error loading client assets:', error)
+      setClientAssets(null)
+    } finally {
+      setAssetsLoading(false)
+    }
+  }
+
   const refreshClient = async () => {
     if (!clientId) return
 
     try {
       const nextClient = await fetchClientDetail(clientId)
       setClient(nextClient)
+      setLoading(false)
       void refreshAccountBalanceHistory(nextClient.id)
       void refreshClientQuotes(nextClient.id)
-      if (nextClient?.id) {
-        setAssetsLoading(true)
-        try {
-          const assets = await fetchClientAssets(nextClient)
-          setClientAssets(assets)
-        } finally {
-          setAssetsLoading(false)
-        }
-      }
+      void refreshClientAssets(nextClient)
     } catch (error) {
       console.error('Error fetching client:', error)
       toast.error('Error al cargar el cliente')
       navigate('/clients')
-    } finally {
       setLoading(false)
     }
   }

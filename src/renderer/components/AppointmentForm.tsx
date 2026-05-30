@@ -358,7 +358,8 @@ function SearchableSelect({
   emptyText,
   disabled = false,
   loading = false,
-  loadingText = 'Cargando opciones...'
+  loadingText = 'Cargando opciones...',
+  autoFocus = false
 }: {
   value: string
   options: SearchableOption[]
@@ -368,6 +369,7 @@ function SearchableSelect({
   disabled?: boolean
   loading?: boolean
   loadingText?: string
+  autoFocus?: boolean
 }) {
   const [query, setQuery] = useState('')
   const [isOpen, setIsOpen] = useState(false)
@@ -385,10 +387,10 @@ function SearchableSelect({
       return
     }
 
-    if (selectedOption && !isOpen) {
+    if (selectedOption && (!isOpen || query.trim() === '')) {
       setQuery(selectedOption.label)
     }
-  }, [value, selectedOption, isOpen])
+  }, [value, selectedOption, isOpen, query])
 
   useEffect(() => {
     if (disabled) {
@@ -437,6 +439,7 @@ function SearchableSelect({
         className="input disabled:cursor-not-allowed disabled:opacity-70"
         placeholder={placeholder}
         disabled={disabled}
+        autoFocus={autoFocus && !disabled}
       />
 
       {!disabled && isOpen && (
@@ -517,13 +520,18 @@ export default function AppointmentForm({
   const [professionals, setProfessionals] = useState<string[]>([])
   const [clientBonos, setClientBonos] = useState<ClientBonoSummary[]>([])
 
-  const isCreatingFromBono = !appointment && Boolean(fromBono?.bonoPackId)
+  const fromBonoPackId = fromBono?.bonoPackId || ''
+  const fromBonoClientId = fromBono?.clientId || ''
+  const fromBonoServiceId = fromBono?.serviceId || ''
+  const fromBonoLockClient = Boolean(fromBono?.lockClient)
+  const fromBonoLockService = Boolean(fromBono?.lockService)
+  const isCreatingFromBono = !appointment && Boolean(fromBonoPackId)
   const canCreateCopies = !isCreatingFromBono
   const isEditingGuestAppointment = Boolean(appointment?.id) && !appointment?.clientId
   const lockClient =
-    (isCreatingFromBono && Boolean(fromBono?.lockClient)) ||
+    (isCreatingFromBono && fromBonoLockClient) ||
     (!appointment && Boolean(lockClientSelection && preselectedClientId))
-  const lockService = isCreatingFromBono && Boolean(fromBono?.lockService)
+  const lockService = isCreatingFromBono && fromBonoLockService
   const canToggleGuestMode = !appointment && !isCreatingFromBono && !lockClient
   const [guestMode, setGuestMode] = useState(isEditingGuestAppointment)
   const [copyAppointmentEnabled, setCopyAppointmentEnabled] = useState(false)
@@ -533,10 +541,10 @@ export default function AppointmentForm({
   )
 
   const [formData, setFormData] = useState({
-    clientId: fromBono?.clientId || preselectedClientId || '',
+    clientId: fromBonoClientId || preselectedClientId || '',
     guestName: '',
     guestPhone: '',
-    serviceIds: fromBono?.serviceId ? [fromBono.serviceId] : [],
+    serviceIds: fromBonoServiceId ? [fromBonoServiceId] : [],
     userId: user?.id || '',
     cabin: initialCabin,
     professional: '',
@@ -643,26 +651,26 @@ export default function AppointmentForm({
       return
     }
 
-    if (isCreatingFromBono) {
-      setGuestMode(false)
-    }
+    setGuestMode(false)
 
     setCopyAppointmentEnabled(false)
     setAppointmentCopies([])
     setCopyDraft(createEmptyAppointmentCopyDraft(initialCabin))
     setCopyStartTimeInput('')
     setProfessionalTouched(false)
-    setFormData((prev) => ({
-      ...prev,
-      clientId: fromBono?.clientId || preselectedClientId || prev.clientId,
-      guestName: isCreatingFromBono ? '' : prev.guestName,
-      guestPhone: isCreatingFromBono ? '' : prev.guestPhone,
-      serviceIds: fromBono?.serviceId ? [fromBono.serviceId] : prev.serviceIds,
-      userId: user?.id || prev.userId || '',
+    setFormData({
+      clientId: fromBonoClientId || preselectedClientId || '',
+      guestName: '',
+      guestPhone: '',
+      serviceIds: fromBonoServiceId ? [fromBonoServiceId] : [],
+      userId: user?.id || '',
       cabin: initialCabin,
-      professional: prev.professional || '',
-      date: preselectedDate ? getLocalDateInputValue(preselectedDate) : prev.date
-    }))
+      professional: '',
+      date: preselectedDate ? getLocalDateInputValue(preselectedDate) : '',
+      status: 'SCHEDULED',
+      notes: '',
+      reminder: true
+    })
     setStartTimeInput(preselectedStartTime || '')
     setEndTimeInput(
       preselectedEndTime ||
@@ -679,7 +687,9 @@ export default function AppointmentForm({
     preselectedEndTime,
     user,
     initialCabin,
-    fromBono,
+    fromBonoPackId,
+    fromBonoClientId,
+    fromBonoServiceId,
     isCreatingFromBono,
     preselectedClientId
   ])
@@ -877,6 +887,10 @@ export default function AppointmentForm({
     if (endTimeState.normalized) {
       setEndTimeInput(endTimeState.normalized)
     }
+  }
+
+  const handleEndTimeInputChange = (value: string) => {
+    setEndTimeInput(value)
   }
 
   const handleCopyStartTimeInputChange = (value: string) => {
@@ -1466,7 +1480,7 @@ export default function AppointmentForm({
         } else {
           showCalendarSyncWarning(updatedResponse.data, 'Cita actualizada exitosamente')
         }
-      } else if (isCreatingFromBono && fromBono?.bonoPackId) {
+      } else if (isCreatingFromBono && fromBonoPackId) {
         const bonoPayload = {
           userId: dataToSend.userId,
           serviceId: dataToSend.serviceId,
@@ -1480,7 +1494,7 @@ export default function AppointmentForm({
           notes: dataToSend.notes,
           reminder: dataToSend.reminder
         }
-        const response = await api.post(`/bonos/${fromBono.bonoPackId}/appointments`, bonoPayload)
+        const response = await api.post(`/bonos/${fromBonoPackId}/appointments`, bonoPayload)
         showCalendarSyncWarning(response.data, 'Cita creada y sesion reservada')
       } else {
         const createdAppointments: any[] = []
@@ -1542,7 +1556,7 @@ export default function AppointmentForm({
       console.error('Error saving appointment:', {
         error,
         appointmentId: appointment?.id || null,
-        fromBonoPackId: fromBono?.bonoPackId || null,
+        fromBonoPackId: fromBonoPackId || null,
         requestPayload
       })
       const backendErrorMessage = error.response?.data?.error || 'Error al guardar la cita'
@@ -1618,6 +1632,7 @@ export default function AppointmentForm({
                       onChange={handleChange}
                       className="input"
                       placeholder="Nombre del cliente puntual"
+                      autoFocus
                     />
                   </div>
                   <div>
@@ -1644,6 +1659,7 @@ export default function AppointmentForm({
                   loading={clientsLoading}
                   loadingText="Cargando clientes..."
                   disabled={lockClient}
+                  autoFocus
                 />
                 {lockClient && (
                   <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -1772,10 +1788,9 @@ export default function AppointmentForm({
             </label>
             <TimeInput
               value={endTimeInput}
-              onChange={() => {}}
+              onChange={handleEndTimeInputChange}
               onBlur={handleEndTimeBlur}
               placeholder="08:15"
-              readOnly
               disabled={!normalizedStartTime || formData.serviceIds.length === 0}
             />
             {endTimeState.error && (

@@ -12,7 +12,7 @@ import {
 } from './excel'
 import { paymentMethodLabel } from './tickets'
 
-type CashPeriod = 'DAY' | 'WEEK' | 'MONTH' | 'YEAR'
+type CashPeriod = 'DAY' | 'WEEK' | 'MONTH' | 'YEAR' | 'CUSTOM'
 
 type CashMovementExportRow = {
   saleId: string
@@ -31,6 +31,9 @@ type CashMovementExportRow = {
 
 type CashMovementExportFilters = {
   period: CashPeriod
+  periodLabel?: string
+  startDate?: string
+  endDate?: string
   clientLabel: string
   paymentMethodLabel: string
   serviceLabel: string
@@ -157,10 +160,15 @@ const formatPeriodLabel = (period: CashPeriod) => {
       return 'Mensual'
     case 'YEAR':
       return 'Anual'
+    case 'CUSTOM':
+      return 'Rango'
     default:
       return period
   }
 }
+
+const getCashPeriodLabel = (filters: CashMovementExportFilters) =>
+  filters.periodLabel || formatPeriodLabel(filters.period)
 
 const escapeHtml = (value: string) =>
   value
@@ -175,8 +183,10 @@ const formatQuantity = (value: number) => {
   return value.toFixed(3).replace(/\.?0+$/, '')
 }
 
-const buildCashFileBaseName = (period: CashPeriod) =>
-  `caja_movimientos_${period.toLowerCase()}_${format(new Date(), 'yyyy-MM-dd')}`
+const buildCashFileBaseName = (period: CashPeriod, startDate?: string, endDate?: string) => {
+  const rangeSuffix = startDate && endDate ? `${startDate}_${endDate}` : format(new Date(), 'yyyy-MM-dd')
+  return `caja_movimientos_${period.toLowerCase()}_${rangeSuffix}`
+}
 
 const buildReportFileBaseName = (startDate: string, endDate: string) =>
   `reportes_ventas_${startDate}_${endDate}`
@@ -363,63 +373,66 @@ export const exportCashMovementsWorkbook = async (
 ) => {
   const totalAmount = rows.reduce((sum, row) => sum + Number(row.amount || 0), 0)
 
-  await downloadWorkbook(`${buildCashFileBaseName(filters.period)}.xlsx`, async (workbook) => {
-    workbook.creator = 'Lucy3000'
-    workbook.created = new Date()
+  await downloadWorkbook(
+    `${buildCashFileBaseName(filters.period, filters.startDate, filters.endDate)}.xlsx`,
+    async (workbook) => {
+      workbook.creator = 'Lucy3000'
+      workbook.created = new Date()
 
-    const movementsSheet = workbook.addWorksheet('Movimientos')
-    setWorksheetColumnWidths(movementsSheet, [18, 28, 28, 14, 12, 14, 16, 18, 14])
+      const movementsSheet = workbook.addWorksheet('Movimientos')
+      setWorksheetColumnWidths(movementsSheet, [28, 28, 14, 12, 14, 16, 18, 18, 14])
 
-    movementsSheet.addRow([
-      'Fecha',
-      'Cliente',
-      'Concepto',
-      'Tipo',
-      'Cantidad',
-      'Pago',
-      'Importe',
-      'Profesional',
-      'Nº venta'
-    ])
-
-    rows.forEach((row) => {
       movementsSheet.addRow([
-        formatDateTime(row.date),
-        row.clientName,
-        row.concept,
-        row.itemType === 'SERVICE' ? 'Tratamiento' : 'Producto',
-        formatQuantity(Number(row.quantity || 0)),
-        paymentMethodLabel(row.paymentMethod),
-        Number(row.amount || 0),
-        row.professionalName,
-        row.saleNumber
+        'Cliente',
+        'Concepto',
+        'Tipo',
+        'Cantidad',
+        'Pago',
+        'Importe',
+        'Profesional',
+        'Fecha',
+        'Nº venta'
       ])
-    })
 
-    markFirstRowAsHeader(movementsSheet)
-    setWorksheetHeaderAutoFilter(movementsSheet, 9)
-    movementsSheet.views = [{ state: 'frozen', ySplit: 1 }]
-    movementsSheet.getColumn(7).numFmt = '#,##0.00 [$€-es-ES]'
+      rows.forEach((row) => {
+        movementsSheet.addRow([
+          row.clientName,
+          row.concept,
+          row.itemType === 'SERVICE' ? 'Tratamiento' : 'Producto',
+          formatQuantity(Number(row.quantity || 0)),
+          paymentMethodLabel(row.paymentMethod),
+          Number(row.amount || 0),
+          row.professionalName,
+          formatDateTime(row.date),
+          row.saleNumber
+        ])
+      })
 
-    const contextSheet = workbook.addWorksheet('Contexto')
-    setWorksheetColumnWidths(contextSheet, [22, 40])
+      markFirstRowAsHeader(movementsSheet)
+      setWorksheetHeaderAutoFilter(movementsSheet, 9)
+      movementsSheet.views = [{ state: 'frozen', ySplit: 1 }]
+      movementsSheet.getColumn(6).numFmt = '#,##0.00 [$€-es-ES]'
 
-    contextSheet.addRows([
-      ['Exportado el', formatDateTime(new Date())],
-      ['Periodo', formatPeriodLabel(filters.period)],
-      ['Cliente', filters.clientLabel],
-      ['Pago', filters.paymentMethodLabel],
-      ['Tratamiento', filters.serviceLabel],
-      ['Producto', filters.productLabel],
-      ['Tipo', filters.typeLabel],
-      ['Total movimientos', rows.length],
-      ['Importe total', totalAmount],
-      ['Caja B', 'Excluida']
-    ])
+      const contextSheet = workbook.addWorksheet('Contexto')
+      setWorksheetColumnWidths(contextSheet, [22, 40])
 
-    contextSheet.getColumn(1).font = { bold: true }
-    contextSheet.getCell('B9').numFmt = '#,##0.00 [$€-es-ES]'
-  })
+      contextSheet.addRows([
+        ['Exportado el', formatDateTime(new Date())],
+        ['Periodo', getCashPeriodLabel(filters)],
+        ['Cliente', filters.clientLabel],
+        ['Pago', filters.paymentMethodLabel],
+        ['Tratamiento', filters.serviceLabel],
+        ['Producto', filters.productLabel],
+        ['Tipo', filters.typeLabel],
+        ['Total movimientos', rows.length],
+        ['Importe total', totalAmount],
+        ['Caja B', 'Excluida']
+      ])
+
+      contextSheet.getColumn(1).font = { bold: true }
+      contextSheet.getCell('B9').numFmt = '#,##0.00 [$€-es-ES]'
+    }
+  )
 }
 
 export const buildCashMovementsPdfHtml = (
@@ -431,7 +444,6 @@ export const buildCashMovementsPdfHtml = (
     .map((row) => {
       return `
         <tr>
-          <td>${escapeHtml(formatDateTime(row.date))}</td>
           <td>${escapeHtml(row.clientName)}</td>
           <td>${escapeHtml(row.concept)}</td>
           <td>${escapeHtml(row.itemType === 'SERVICE' ? 'Tratamiento' : 'Producto')}</td>
@@ -439,6 +451,7 @@ export const buildCashMovementsPdfHtml = (
           <td>${escapeHtml(paymentMethodLabel(row.paymentMethod))}</td>
           <td class="amount">${escapeHtml(formatCurrency(Number(row.amount || 0)))}</td>
           <td>${escapeHtml(row.professionalName)}</td>
+          <td>${escapeHtml(formatDateTime(row.date))}</td>
           <td>${escapeHtml(row.saleNumber)}</td>
         </tr>
       `
@@ -547,7 +560,7 @@ export const buildCashMovementsPdfHtml = (
         </div>
 
         <div class="filters">
-          <div class="filter-card"><strong>Periodo</strong>${escapeHtml(formatPeriodLabel(filters.period))}</div>
+          <div class="filter-card"><strong>Periodo</strong>${escapeHtml(getCashPeriodLabel(filters))}</div>
           <div class="filter-card"><strong>Cliente</strong>${escapeHtml(filters.clientLabel)}</div>
           <div class="filter-card"><strong>Pago</strong>${escapeHtml(filters.paymentMethodLabel)}</div>
           <div class="filter-card"><strong>Tratamiento</strong>${escapeHtml(filters.serviceLabel)}</div>
@@ -563,7 +576,6 @@ export const buildCashMovementsPdfHtml = (
         <table>
           <thead>
             <tr>
-              <th>Fecha</th>
               <th>Cliente</th>
               <th>Concepto</th>
               <th>Tipo</th>
@@ -571,6 +583,7 @@ export const buildCashMovementsPdfHtml = (
               <th>Pago</th>
               <th>Importe</th>
               <th>Profesional</th>
+              <th>Fecha</th>
               <th>Nº venta</th>
             </tr>
           </thead>
@@ -583,8 +596,11 @@ export const buildCashMovementsPdfHtml = (
   `
 }
 
-export const getCashMovementsPdfFileName = (period: CashPeriod) =>
-  `${buildCashFileBaseName(period)}.pdf`
+export const getCashMovementsPdfFileName = (
+  period: CashPeriod,
+  startDate?: string,
+  endDate?: string
+) => `${buildCashFileBaseName(period, startDate, endDate)}.pdf`
 
 export const exportRawSalesReportWorkbook = async (report: RawSalesReportExport) => {
   await downloadWorkbook(

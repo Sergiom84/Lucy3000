@@ -5,6 +5,7 @@ import {
   chargeAppointmentWithBonoBodySchema,
   createAgendaDayNoteBodySchema,
   createAppointmentBodySchema,
+  updateAppointmentBodySchema,
   toggleAgendaDayNoteBodySchema
 } from '../../../src/backend/validators/appointment.schemas'
 import { createBonoAppointmentBodySchema } from '../../../src/backend/validators/bono.schemas'
@@ -55,6 +56,30 @@ describe('appointment schemas', () => {
     })
 
     expect(result.success).toBe(false)
+  })
+
+  it('accepts status-only appointment updates', () => {
+    const result = updateAppointmentBodySchema.safeParse({
+      status: 'NO_SHOW'
+    })
+
+    expect(result.success).toBe(true)
+  })
+
+  it('validates services only when an update changes service selection', () => {
+    const missingServices = updateAppointmentBodySchema.safeParse({
+      serviceIds: []
+    })
+    const mismatchedPrimaryService = updateAppointmentBodySchema.safeParse({
+      serviceId: '9c95c98f-bde0-4c9f-833d-a8fe46f43a49',
+      serviceIds: [
+        baseAppointmentPayload.serviceId,
+        '2c95c98f-bde0-4c9f-833d-a8fe46f43a42'
+      ]
+    })
+
+    expect(missingServices.success).toBe(false)
+    expect(mismatchedPrimaryService.success).toBe(false)
   })
 
   it('accepts guest appointments with guest name and phone', () => {

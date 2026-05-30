@@ -7,8 +7,71 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+// ============================================
+// SAAS / MULTI-TENANT
+// ============================================
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  status    String   @default("ACTIVE")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  license                  TenantLicense?
+  users                    User[]
+  clients                  Client[]
+  clientHistory            ClientHistory[]
+  services                 Service[]
+  appointments             Appointment[]
+  appointmentServices      AppointmentService[]
+  appointmentLegends       AppointmentLegend[]
+  agendaBlocks             AgendaBlock[]
+  agendaDayNotes           AgendaDayNote[]
+  dashboardReminders       DashboardReminder[]
+  products                 Product[]
+  stockMovements           StockMovement[]
+  sales                    Sale[]
+  pendingPayments          PendingPayment[]
+  pendingPaymentCollections PendingPaymentCollection[]
+  saleItems                SaleItem[]
+  cashRegisters            CashRegister[]
+  cashCounts               CashCount[]
+  cashMovements            CashMovement[]
+  accountBalanceMovements  AccountBalanceMovement[]
+  notifications            Notification[]
+  settings                 Setting[]
+  googleCalendarConfig     GoogleCalendarConfig?
+  bonoPacks                BonoPack[]
+  bonoSessions             BonoSession[]
+  quotes                   Quote[]
+  quoteItems               QuoteItem[]
+
+  @@map("tenants")
+}
+
+model TenantLicense {
+  id          String   @id @default(uuid())
+  tenantId    String   @unique
+  status      String   @default("TRIAL")
+  plan        String   @default("trial")
+  trialEndsAt DateTime
+  activatedAt DateTime?
+  blockedAt   DateTime?
+  cancelledAt DateTime?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([status, trialEndsAt])
+  @@map("tenant_licenses")
 }
 
 // ============================================
@@ -17,22 +80,29 @@ datasource db {
 
 model User {
   id            String   @id @default(uuid())
-  email         String   @unique
-  username      String?  @unique
+  tenantId      String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  email         String
+  username      String?
   password      String
   name          String
   role          String   @default("EMPLOYEE")
+  isPlatformAdmin Boolean @default(false)
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   // Relaciones
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   appointments  Appointment[]
   cashMovements CashMovement[]
   cashCounts    CashCount[]
   pendingPaymentCollections PendingPaymentCollection[]
   sales         Sale[]
 
+  @@unique([tenantId, email])
+  @@unique([tenantId, username])
+  @@unique([id, tenantId])
+  @@index([tenantId, role])
   @@map("users")
 }
 
@@ -42,9 +112,10 @@ model User {
 
 model Client {
   id              String    @id @default(uuid())
+  tenantId        String    @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   firstName       String
   lastName        String
-  email           String?   @unique
+  email           String?
   phone           String
   birthDate       DateTime?
   address         String?
@@ -92,6 +163,7 @@ model Client {
   photoUrl        String?
   loyaltyPoints   Int       @default(0)
   totalSpent      Decimal   @default(0)
+  cancelledAppointmentCount Int      @default(0)
   isActive        Boolean   @default(true)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -109,12 +181,18 @@ model Client {
   quotes          Quote[]
   linkedClient    Client?   @relation("ClientLink", fields: [linkedClientId], references: [id], onDelete: SetNull)
   relatedClients  Client[]  @relation("ClientLink")
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@unique([tenantId, email])
+  @@unique([id, tenantId])
+  @@index([tenantId, isActive, createdAt])
+  @@index([tenantId, lastVisit])
   @@map("clients")
 }
 
 model ClientHistory {
   id          String   @id @default(uuid())
+  tenantId    String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   clientId    String
   date        DateTime @default(now())
   service     String
@@ -123,7 +201,10 @@ model ClientHistory {
   amount      Decimal
 
   client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@unique([id, tenantId])
+  @@index([tenantId, clientId, date])
   @@map("client_history")
 }
 
@@ -133,6 +214,7 @@ model ClientHistory {
 
 model Service {
   id              String   @id @default(uuid())
+  tenantId        String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   name            String
   description     String?
   price           Decimal
@@ -154,7 +236,10 @@ model Service {
   saleItems       SaleItem[]
   bonoPacks       BonoPack[]
   quoteItems      QuoteItem[]
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@unique([id, tenantId])
+  @@index([tenantId, category, isActive])
   @@map("services")
 }
 
@@ -164,6 +249,7 @@ model Service {
 
 model Appointment {
   id                       String   @id @default(uuid())
+  tenantId                 String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   clientId                 String?
   guestName                String?
   guestPhone               String?
@@ -190,36 +276,48 @@ model Appointment {
   appointmentServices AppointmentService[]
   bonoSessions       BonoSession[]
   sale               Sale?
+  tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@unique([id, tenantId])
+  @@unique([tenantId, googleCalendarEventId])
+  @@index([tenantId, date, startTime])
+  @@index([tenantId, status, date])
   @@map("appointments")
 }
 
 model AppointmentService {
+  tenantId      String @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   appointmentId String
   serviceId     String
   sortOrder     Int
 
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
   service     Service     @relation(fields: [serviceId], references: [id], onDelete: Restrict)
 
-  @@id([appointmentId, serviceId])
-  @@unique([appointmentId, sortOrder])
+  @@id([tenantId, appointmentId, serviceId])
+  @@unique([tenantId, appointmentId, sortOrder])
   @@map("appointment_services")
 }
 
 model AppointmentLegend {
   id        String   @id @default(uuid())
+  tenantId  String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   name      String
   color     String
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@unique([id, tenantId])
+  @@index([tenantId, sortOrder])
   @@map("appointment_legends")
 }
 
 model AgendaBlock {
   id                       String   @id @default(uuid())
+  tenantId                 String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   professional             String
   calendarInviteEmail      String?
   cabin                    String   @default("LUCY")
@@ -233,32 +331,42 @@ model AgendaBlock {
   googleCalendarSyncedAt   DateTime?
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
+  tenant                   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@unique([id, tenantId])
+  @@unique([tenantId, googleCalendarEventId])
+  @@index([tenantId, date, startTime])
   @@map("agenda_blocks")
 }
 
 model AgendaDayNote {
   id          String   @id @default(uuid())
+  tenantId    String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   dayKey       String
   text         String
   isCompleted  Boolean  @default(false)
   completedAt  DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  @@index([dayKey, createdAt])
+  @@unique([id, tenantId])
+  @@index([tenantId, dayKey, createdAt])
   @@map("agenda_day_notes")
 }
 
 model DashboardReminder {
   id          String   @id @default(uuid())
+  tenantId    String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   text        String
   isCompleted Boolean  @default(false)
   completedAt DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  @@index([isCompleted, createdAt])
+  @@unique([id, tenantId])
+  @@index([tenantId, isCompleted, createdAt])
   @@map("dashboard_reminders")
 }
 
@@ -268,9 +376,10 @@ model DashboardReminder {
 
 model Product {
   id              String   @id @default(uuid())
+  tenantId        String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   name            String
   description     String?
-  sku             String   @unique
+  sku             String
   barcode         String?
   category        String
   brand           String?
@@ -288,12 +397,17 @@ model Product {
   stockMovements  StockMovement[]
   saleItems       SaleItem[]
   quoteItems      QuoteItem[]
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@unique([tenantId, sku])
+  @@unique([id, tenantId])
+  @@index([tenantId, category, isActive])
   @@map("products")
 }
 
 model StockMovement {
   id          String   @id @default(uuid())
+  tenantId    String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   productId   String
   type        String
   quantity    Int
@@ -302,7 +416,10 @@ model StockMovement {
   date        DateTime @default(now())
 
   product     Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  tenant      Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@unique([id, tenantId])
+  @@index([tenantId, productId, date])
   @@map("stock_movements")
 }
 
@@ -312,11 +429,12 @@ model StockMovement {
 
 model Sale {
   id              String   @id @default(uuid())
+  tenantId        String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   clientId        String?
   appointmentId   String?  @unique
   userId          String
   professional    String   @default("LUCY")
-  saleNumber      String   @unique
+  saleNumber      String
   date            DateTime @default(now())
   subtotal        Decimal
   discount        Decimal  @default(0)
@@ -336,12 +454,18 @@ model Sale {
   cashMovement    CashMovement?
   accountBalanceMovements AccountBalanceMovement[]
   pendingPaymentCollections PendingPaymentCollection[]
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@unique([tenantId, saleNumber])
+  @@unique([id, tenantId])
+  @@index([tenantId, date])
+  @@index([tenantId, clientId, date])
   @@map("sales")
 }
 
 model PendingPayment {
   id                  String   @id @default(uuid())
+  tenantId            String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   saleId               String   @unique
   clientId             String
   amount               Decimal
@@ -354,13 +478,16 @@ model PendingPayment {
   sale   Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
   client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
   collections PendingPaymentCollection[]
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  @@index([clientId, status, createdAt])
+  @@unique([id, tenantId])
+  @@index([tenantId, clientId, status, createdAt])
   @@map("pending_payments")
 }
 
 model PendingPaymentCollection {
   id                String   @id @default(uuid())
+  tenantId          String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   pendingPaymentId  String
   saleId            String
   clientId          String
@@ -375,15 +502,18 @@ model PendingPaymentCollection {
   sale           Sale           @relation(fields: [saleId], references: [id], onDelete: Cascade)
   client         Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
   user           User           @relation(fields: [userId], references: [id], onDelete: Restrict)
+  tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  @@index([pendingPaymentId, operationDate])
-  @@index([saleId, operationDate])
-  @@index([clientId, operationDate])
+  @@unique([id, tenantId])
+  @@index([tenantId, pendingPaymentId, operationDate])
+  @@index([tenantId, saleId, operationDate])
+  @@index([tenantId, clientId, operationDate])
   @@map("pending_payment_collections")
 }
 
 model SaleItem {
   id          String  @id @default(uuid())
+  tenantId    String  @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   saleId      String
   productId   String?
   serviceId   String?
@@ -395,7 +525,10 @@ model SaleItem {
   sale        Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
   product     Product? @relation(fields: [productId], references: [id])
   service     Service? @relation(fields: [serviceId], references: [id])
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@unique([id, tenantId])
+  @@index([tenantId, saleId])
   @@map("sale_items")
 }
 
@@ -405,6 +538,7 @@ model SaleItem {
 
 model CashRegister {
   id              String   @id @default(uuid())
+  tenantId        String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   date            DateTime @default(now())
   openingBalance  Decimal
   openingDenominations      String?
@@ -424,12 +558,16 @@ model CashRegister {
 
   movements       CashMovement[]
   cashCounts      CashCount[]
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@unique([id, tenantId])
+  @@index([tenantId, status, date])
   @@map("cash_registers")
 }
 
 model CashCount {
   id              String   @id @default(uuid())
+  tenantId        String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   cashRegisterId  String
   userId          String
   expectedTotal   Decimal
@@ -443,13 +581,16 @@ model CashCount {
 
   cashRegister    CashRegister @relation(fields: [cashRegisterId], references: [id], onDelete: Cascade)
   user            User         @relation(fields: [userId], references: [id])
+  tenant          Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  @@index([cashRegisterId, createdAt])
+  @@unique([id, tenantId])
+  @@index([tenantId, cashRegisterId, createdAt])
   @@map("cash_counts")
 }
 
 model CashMovement {
   id              String   @id @default(uuid())
+  tenantId        String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   cashRegisterId  String
   userId          String
   saleId          String?  @unique
@@ -464,12 +605,16 @@ model CashMovement {
   cashRegister    CashRegister @relation(fields: [cashRegisterId], references: [id], onDelete: Cascade)
   user            User         @relation(fields: [userId], references: [id])
   sale            Sale?        @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  tenant          Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@unique([id, tenantId])
+  @@index([tenantId, cashRegisterId, date])
   @@map("cash_movements")
 }
 
 model AccountBalanceMovement {
   id            String   @id @default(uuid())
+  tenantId      String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   clientId      String
   saleId        String?
   type          String
@@ -486,10 +631,12 @@ model AccountBalanceMovement {
 
   client        Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
   sale          Sale?    @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  @@index([clientId, operationDate])
-  @@index([saleId])
-  @@unique([clientId, legacyRef, importSource])
+  @@unique([id, tenantId])
+  @@index([tenantId, clientId, operationDate])
+  @@index([tenantId, saleId])
+  @@unique([tenantId, clientId, legacyRef, importSource])
   @@map("account_balance_movements")
 }
 
@@ -499,13 +646,17 @@ model AccountBalanceMovement {
 
 model Notification {
   id          String   @id @default(uuid())
+  tenantId    String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   type        String
   title       String
   message     String
   isRead      Boolean  @default(false)
   priority    String   @default("NORMAL")
   createdAt   DateTime @default(now())
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@unique([id, tenantId])
+  @@index([tenantId, isRead, createdAt])
   @@map("notifications")
 }
 
@@ -515,11 +666,15 @@ model Notification {
 
 model Setting {
   id          String   @id @default(uuid())
-  key         String   @unique
+  tenantId    String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  key         String
   value       String
   description String?
   updatedAt   DateTime @updatedAt
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@unique([tenantId, key])
+  @@unique([id, tenantId])
   @@map("settings")
 }
 
@@ -529,13 +684,16 @@ model Setting {
 
 model GoogleCalendarConfig {
   id                String   @id @default(uuid())
+  tenantId          String   @unique @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   refreshToken      String
   calendarId        String   @default("primary")
   enabled           Boolean  @default(false)
   sendClientInvites Boolean  @default(true)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@unique([id, tenantId])
   @@map("google_calendar_config")
 }
 
@@ -545,6 +703,7 @@ model GoogleCalendarConfig {
 
 model BonoPack {
   id             String   @id @default(uuid())
+  tenantId       String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   clientId       String
   name           String
   serviceId      String?
@@ -563,13 +722,17 @@ model BonoPack {
   client         Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
   service        Service? @relation(fields: [serviceId], references: [id])
   sessions       BonoSession[]
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  @@unique([clientId, legacyRef, importSource])
+  @@unique([id, tenantId])
+  @@unique([tenantId, clientId, legacyRef, importSource])
+  @@index([tenantId, clientId, status])
   @@map("bono_packs")
 }
 
 model BonoSession {
   id             String    @id @default(uuid())
+  tenantId       String    @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   bonoPackId     String
   sessionNumber  Int
   status         String    @default("AVAILABLE")
@@ -579,7 +742,11 @@ model BonoSession {
 
   bonoPack       BonoPack     @relation(fields: [bonoPackId], references: [id], onDelete: Cascade)
   appointment    Appointment? @relation(fields: [appointmentId], references: [id])
+  tenant         Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@unique([id, tenantId])
+  @@index([tenantId, bonoPackId, sessionNumber])
+  @@index([tenantId, appointmentId])
   @@map("bono_sessions")
 }
 
@@ -589,7 +756,8 @@ model BonoSession {
 
 model Quote {
   id              String   @id @default(uuid())
-  quoteNumber     String   @unique
+  tenantId        String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  quoteNumber     String
   clientId        String
   professional    String   @default("LUCY")
   date            DateTime @default(now())
@@ -603,12 +771,17 @@ model Quote {
 
   client          Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
   items           QuoteItem[]
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@unique([tenantId, quoteNumber])
+  @@unique([id, tenantId])
+  @@index([tenantId, clientId, date])
   @@map("quotes")
 }
 
 model QuoteItem {
   id          String  @id @default(uuid())
+  tenantId    String  @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   quoteId     String
   productId   String?
   serviceId   String?
@@ -620,6 +793,9 @@ model QuoteItem {
   quote       Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
   product     Product? @relation(fields: [productId], references: [id])
   service     Service? @relation(fields: [serviceId], references: [id])
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@unique([id, tenantId])
+  @@index([tenantId, quoteId])
   @@map("quote_items")
 }
