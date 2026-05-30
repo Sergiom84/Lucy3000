@@ -21,6 +21,8 @@ const ClientRanking = lazy(() => import('./pages/ClientRanking'))
 const Accounts = lazy(() => import('./pages/Accounts'))
 const Sql = lazy(() => import('./pages/Sql'))
 const DatabaseSetup = lazy(() => import('./pages/DatabaseSetup'))
+const LicenseBlocked = lazy(() => import('./pages/LicenseBlocked'))
+const Tenants = lazy(() => import('./pages/Tenants'))
 
 function RouteLoader() {
   return (
@@ -38,6 +40,30 @@ function AdminOnlyRoute({ children }: { children: JSX.Element }) {
   }
 
   return children
+}
+
+function PlatformAdminRoute({ children }: { children: JSX.Element }) {
+  const { user } = useAuthStore()
+
+  if (!user?.isPlatformAdmin) {
+    return <Navigate to="/" replace />
+  }
+
+  return children
+}
+
+// Gate de licencia: si el tenant no esta activo (PENDING, prueba expirada,
+// bloqueado o cancelado) la API responde 402 y el servidor marca reason !=
+// 'active'. En ese caso mostramos la pantalla de estado en vez de la app.
+function LicensedArea() {
+  const { user } = useAuthStore()
+  const license = user?.license
+
+  if (license && license.reason && license.reason !== 'active') {
+    return <LicenseBlocked license={license} />
+  }
+
+  return <Layout />
 }
 
 function AppToaster() {
@@ -170,7 +196,7 @@ function App() {
         <Routes>
           <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to="/" />} />
 
-          <Route element={isAuthenticated ? <Layout /> : <Navigate to="/login" />}>
+          <Route element={isAuthenticated ? <LicensedArea /> : <Navigate to="/login" />}>
             <Route path="/" element={<Dashboard />} />
             <Route path="/clients" element={<Clients />} />
             <Route path="/clients/:id" element={<ClientDetail />} />
@@ -196,6 +222,14 @@ function App() {
               }
             />
             <Route path="/ranking" element={<ClientRanking />} />
+            <Route
+              path="/tenants"
+              element={
+                <PlatformAdminRoute>
+                  <Tenants />
+                </PlatformAdminRoute>
+              }
+            />
             <Route path="/settings" element={<Settings />} />
             <Route
               path="/sql"

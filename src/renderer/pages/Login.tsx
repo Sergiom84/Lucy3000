@@ -73,7 +73,12 @@ export default function Login() {
       if (error.response?.status === 402 && error.response?.data?.token && error.response?.data?.user) {
         const { token, user } = error.response.data
         login(user, token)
-        toast.error('La licencia de este centro no esta activa')
+        const reason = user?.license?.reason
+        if (reason === 'pending') {
+          toast('Tu cuenta esta pendiente de activacion', { icon: '⏳' })
+        } else {
+          toast.error('La licencia de este centro no esta activa')
+        }
         navigate('/')
         return
       }
