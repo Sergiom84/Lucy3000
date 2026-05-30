@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Clock, Lock, RefreshCw, LogOut, Hourglass } from 'lucide-react'
+import { Clock, Lock, RefreshCw, LogOut, Hourglass, PlayCircle } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
@@ -27,9 +27,15 @@ const REASON_CONTENT: Record<
 > = {
   pending: {
     icon: Hourglass,
-    title: 'Cuenta pendiente de activacion',
+    title: 'Tu cuenta esta lista',
     description:
-      'Tu centro esta configurado pero la prueba todavia no ha comenzado. En cuanto terminemos de preparar tus datos activaremos tu periodo de prueba de 7 dias y podras entrar.'
+      'Cuando termines de configurar tu centro, empieza tu prueba gratuita de 7 dias. Hasta entonces puedes cerrar y volver otro dia; el reloj solo arranca cuando pulses "Empezar prueba".'
+  },
+  'pending-expired': {
+    icon: Lock,
+    title: 'Periodo de preparacion agotado',
+    description:
+      'Ha pasado el plazo para iniciar la prueba sin activarla. Ponte en contacto con soporte de Lucy3000 para activar tu cuenta.'
   },
   'trial-expired': {
     icon: Clock,
@@ -60,10 +66,26 @@ const REASON_CONTENT: Record<
 export default function LicenseBlocked({ license }: { license: LicenseInfo }) {
   const { user, updateUser, logout } = useAuthStore()
   const [refreshing, setRefreshing] = useState(false)
+  const [startingTrial, setStartingTrial] = useState(false)
 
   const content = REASON_CONTENT[license.reason] ?? REASON_CONTENT.inactive
   const Icon = content.icon
   const trialDate = formatDate(license.trialEndsAt)
+  const canStartTrial = license.reason === 'pending'
+
+  const handleStartTrial = async () => {
+    setStartingTrial(true)
+    try {
+      await api.post('/tenants/current/start-trial')
+      const me = await api.get('/auth/me')
+      updateUser({ ...(user as any), ...me.data })
+      toast.success('Prueba de 7 dias iniciada. ¡A trabajar!')
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'No se pudo iniciar la prueba')
+    } finally {
+      setStartingTrial(false)
+    }
+  }
 
   const handleRefresh = async () => {
     setRefreshing(true)
@@ -107,15 +129,27 @@ export default function LicenseBlocked({ license }: { license: LicenseInfo }) {
             ) : null}
 
             <div className="mt-8 w-full space-y-3">
-              <button
-                type="button"
-                onClick={handleRefresh}
-                disabled={refreshing}
-                className="w-full btn btn-primary py-3 flex items-center justify-center gap-2"
-              >
-                <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-                {refreshing ? 'Comprobando...' : 'Ya esta activo, comprobar de nuevo'}
-              </button>
+              {canStartTrial ? (
+                <button
+                  type="button"
+                  onClick={handleStartTrial}
+                  disabled={startingTrial}
+                  className="w-full btn btn-primary py-3 flex items-center justify-center gap-2"
+                >
+                  <PlayCircle className="w-4 h-4" />
+                  {startingTrial ? 'Iniciando prueba...' : 'Empezar prueba de 7 dias'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleRefresh}
+                  disabled={refreshing}
+                  className="w-full btn btn-primary py-3 flex items-center justify-center gap-2"
+                >
+                  <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+                  {refreshing ? 'Comprobando...' : 'Ya esta activo, comprobar de nuevo'}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={logout}
