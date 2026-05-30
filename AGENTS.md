@@ -7,6 +7,33 @@ La topologia real actual es React/Vite + Express + Prisma + PostgreSQL multi-ten
 Supabase es una opcion de infraestructura para Postgres/Storage, no una autorizacion directa desde el frontend.
 SQLite queda como legado de migracion, importacion o soporte puntual.
 
+## Modelo de distribucion vigente (2026-05-31)
+
+Decision de Sergio: distribuir como **app Electron instalada por cliente**, cada
+instalacion contra **su propio proyecto Supabase** (datos aislados entre negocios,
+sin servidor central, sin cuota ni cold start). El control de trial vive en la
+tabla `tenant_licenses` del Supabase del cliente y usa **hora de servidor**
+(`getServerNow()` -> `SELECT NOW()`), no el reloj del PC.
+
+Flujo de licencia: bootstrap en modo Supabase nace `PENDING`; el admin del tenant
+arranca su prueba con `POST /api/tenants/current/start-trial` (boton "Empezar
+prueba"); gracia `PENDING_GRACE_DAYS` (9 dias) antes del bloqueo definitivo
+(`pending-expired`). Alta por cliente: crear Supabase -> `prisma migrate deploy`
+-> instalar .exe modo Supabase -> bootstrap -> empezar prueba.
+
+<!--
+  CANAL CENTRAL WEB/PWA EN RENDER (DORMIDO, no usado por el modelo vigente).
+  Se monto el 2026-05-31 por si en el futuro se vuelve a un SaaS central:
+    - render.yaml (Blueprint) en la raiz define lucy3000-api + lucy3000-web.
+    - Workspace Render "Lucy3000" tea-d8dlksh9rddc73a25e50 (cuenta sergio.hlara84).
+    - Servicio API: srv-d8dlmoojs32c73fmfee0  -> https://lucy3000-2hnv.onrender.com
+    - Servicio front estatico: srv-d8dlqkvavr4c73ft9kl0 -> https://lucy3000-web.onrender.com
+    - El front PWA (public/manifest.webmanifest, public/sw.js, public/_redirects)
+      y los scripts build:web / deploy:web siguen en el repo, inertes para Electron.
+  Si se reactiva: poner DATABASE_URL/BOOTSTRAP_TOKEN en la API y VITE_API_URL en el front.
+-->
+
+
 ## Fuentes de verdad
 
 Cuando una instruccion o documento entre en conflicto, usa este orden:

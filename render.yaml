@@ -1,3 +1,10 @@
+# DORMIDO (2026-05-31): el modelo vigente es Electron por cliente contra su
+# propio Supabase, sin servidor central (ver CLAUDE.md / AGENTS.md). Este
+# Blueprint se conserva por si en el futuro se vuelve a un SaaS central.
+# Servicios ya creados (cuenta sergio.hlara84, workspace tea-d8dlksh9rddc73a25e50):
+#   API  srv-d8dlmoojs32c73fmfee0  https://lucy3000-2hnv.onrender.com
+#   web  srv-d8dlqkvavr4c73ft9kl0  https://lucy3000-web.onrender.com
+#
 # Blueprint de Render para Lucy3000.
 # Despliega dos servicios desde este repo:
 #   - lucy3000-api : API central Express + Prisma (consume el PostgreSQL de Supabase).
