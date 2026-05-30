@@ -306,6 +306,24 @@ if (process.env.NODE_ENV !== 'production') {
   globalForPrisma.__lucyPrisma = prisma
 }
 
+// Hora autoritativa para decisiones de licencia/trial. En modo Postgres
+// (Supabase) la toma de la base con SELECT NOW(), de forma que cambiar el reloj
+// del PC del cliente no alarga ni adelanta el trial. En SQLite local cae a la
+// hora local del proceso.
+export const getServerNow = async (): Promise<Date> => {
+  if (process.env.DATABASE_URL?.startsWith('file:')) {
+    return new Date()
+  }
+
+  try {
+    const rows = await prisma.$queryRawUnsafe<Array<{ now: Date }>>('SELECT NOW() as now')
+    const value = rows?.[0]?.now
+    return value ? new Date(value) : new Date()
+  } catch {
+    return new Date()
+  }
+}
+
 export const ensureSqliteCompatibilityMigrations = async () => {
   if (!process.env.DATABASE_URL?.startsWith('file:')) {
     return

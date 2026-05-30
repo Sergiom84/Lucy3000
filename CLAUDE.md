@@ -13,6 +13,12 @@ La guia detallada vive en `AGENTS.md`.
 4. `ARCHITECTURE.md`
 5. `AGENTS.md`
 
+## Distribucion vigente (2026-05-31)
+
+- Modelo elegido: app Electron por cliente, cada una contra su propio Supabase. Sin servidor central.
+- Trial controlado en `tenant_licenses` con hora de servidor; bootstrap nace `PENDING`, el cliente arranca con `start-trial`, gracia de 9 dias.
+- El canal central web/PWA en Render queda DORMIDO (no borrado). Detalle e IDs en el comentario de `AGENTS.md` y en `render.yaml`.
+
 ## Resumen operativo
 
 - Runtime oficial de datos: API central Express + Prisma + PostgreSQL multi-tenant.

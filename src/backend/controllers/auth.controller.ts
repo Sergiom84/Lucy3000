@@ -1,7 +1,7 @@
 import { Request, Response } from 'express'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { prisma } from '../db'
+import { getServerNow, prisma } from '../db'
 import { AuthRequest } from '../middleware/auth.middleware'
 import { evaluateTenantLicense, getTrialEndDate } from '../tenant/license'
 import { getJwtSecret } from '../utils/jwt'
@@ -48,10 +48,11 @@ const buildAuthResponse = (user: {
       trialEndsAt: Date
       blockedAt?: Date | null
       cancelledAt?: Date | null
+      createdAt?: Date | null
     } | null
   }
-}) => {
-  const license = user.tenant?.license ? evaluateTenantLicense(user.tenant.license) : null
+}, now?: Date) => {
+  const license = user.tenant?.license ? evaluateTenantLicense(user.tenant.license, now) : null
   const token = jwt.sign(
     {
       id: user.id,
@@ -133,8 +134,12 @@ export const bootstrapAdmin = async (req: Request, res: Response) => {
           slug: tenantSlug,
           license: {
             create: {
-              status: isLocalSqliteMode() ? 'ACTIVE' : 'TRIAL',
-              plan: isLocalSqliteMode() ? 'local' : 'trial',
+              // SQLite local = ACTIVE de por vida (sin control de trial).
+              // Supabase = PENDING: la prueba no arranca en la instalacion;
+              // el cliente la inicia con el pop-up "Empezar prueba" (start-trial)
+              // y dispone de una gracia para configurar antes (PENDING_GRACE_DAYS).
+              status: isLocalSqliteMode() ? 'ACTIVE' : 'PENDING',
+              plan: isLocalSqliteMode() ? 'local' : 'pending',
               trialEndsAt: isLocalSqliteMode() ? new Date('2099-12-31T23:59:59.000Z') : getTrialEndDate(),
               activatedAt: isLocalSqliteMode() ? new Date() : undefined
             }
@@ -218,7 +223,8 @@ export const login = async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'Tenant is not active' })
     }
 
-    const licenseAccess = evaluateTenantLicense(user.tenant.license)
+    const serverNow = await getServerNow()
+    const licenseAccess = evaluateTenantLicense(user.tenant.license, serverNow)
 
     const isValidPassword = await bcrypt.compare(password, user.password)
 
@@ -230,7 +236,7 @@ export const login = async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'User is inactive' })
     }
 
-    res.status(licenseAccess.allowed ? 200 : 402).json(buildAuthResponse(user))
+    res.status(licenseAccess.allowed ? 200 : 402).json(buildAuthResponse(user, serverNow))
   } catch (error) {
     console.error('Login error:', error)
     res.status(500).json({ error: 'Internal server error' })
@@ -332,7 +338,8 @@ export const getCurrentUser = async (req: AuthRequest, res: Response) => {
                 plan: true,
                 trialEndsAt: true,
                 blockedAt: true,
-                cancelledAt: true
+                cancelledAt: true,
+                createdAt: true
               }
             }
           }
@@ -344,7 +351,9 @@ export const getCurrentUser = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: 'User not found' })
     }
 
-    const license = user.tenant.license ? evaluateTenantLicense(user.tenant.license) : null
+    const license = user.tenant.license
+      ? evaluateTenantLicense(user.tenant.license, await getServerNow())
+      : null
 
     res.json({
       ...user,
