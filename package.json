@@ -12,6 +12,8 @@
     "dev:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-backend.ps1",
     "dev:electron": "vite",
     "build": "npm run build:prepare-db && tsc && vite build && npm run build:backend && electron-builder",
+    "build:web": "vite build",
+    "deploy:web": "wrangler pages deploy",
     "build:backend": "tsc -p tsconfig.backend.json",
     "build:prepare-db": "node scripts/prepare-packaged-db.js",
     "test": "vitest run",
@@ -78,7 +80,8 @@
     "vite": "^5.0.10",
     "vite-plugin-electron": "^0.28.1",
     "vite-plugin-electron-renderer": "^0.14.5",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "wrangler": "^4.0.0"
   },
   "build": {
     "appId": "com.lucy3000.accounting",

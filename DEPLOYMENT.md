@@ -112,6 +112,33 @@ Requisitos del hosting del front (Vercel, Netlify, Cloudflare Pages, etc.):
 Supabase no sirve SPA estatica; usar un host de estaticos para el front y un
 proveedor aparte (Render/Railway/Fly/VPS) para la API.
 
+### Desplegar el front en Cloudflare Pages
+
+El repo ya trae lo necesario: `wrangler.toml` (`pages_build_output_dir = dist`),
+`public/_redirects` con el fallback SPA y los scripts `build:web` / `deploy:web`.
+
+**Dependencia previa**: el front necesita una API a la que hablar. Antes de que
+la PWA sirva de algo hay que tener desplegada la API central (Express + Prisma)
+contra el PostgreSQL (Supabase) y conocer su URL publica para `VITE_API_URL`.
+
+Ruta A — conectar Git (recomendada, sin secretos locales, auto-deploy en push):
+1. Cloudflare Dashboard > Workers & Pages > Create > Pages > Connect to Git.
+2. Repo `Sergiom84/Lucy3000`, rama `master` (o la que publiques).
+3. Build command: `npm run build:web`. Output directory: `dist`.
+4. Variables de entorno (build): `VITE_API_URL=https://api.tu-dominio.com`.
+5. Deploy. Cada push a la rama elegida redeploya solo.
+
+Ruta B — wrangler CLI (deploy manual desde tu maquina):
+```bash
+npx wrangler login            # autentica tu cuenta Cloudflare (una vez)
+set VITE_API_URL=https://api.tu-dominio.com   # PowerShell: $env:VITE_API_URL=...
+npm run build:web             # genera dist/
+npm run deploy:web            # wrangler pages deploy (crea el proyecto si no existe)
+```
+
+Nota: la API central NO va en Pages (Pages es solo estaticos). El gate de
+licencia, el bootstrap y los datos viven en la API + PostgreSQL.
+
 ## Licencias y trial
 
 Regla de producto:
