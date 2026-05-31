@@ -224,13 +224,17 @@ export const createBackupRuntime = (options: {
 
   const selectBackupFolder = async (): Promise<SelectFolderResult> => {
     const parentWindow = getMainWindow()
+    const config = await getBackupConfig()
+    await ensureDir(config.folder)
     const dialogResult = parentWindow
       ? await dialog.showOpenDialog(parentWindow, {
           title: 'Seleccionar carpeta de backups',
+          defaultPath: config.folder,
           properties: ['openDirectory']
         })
       : await dialog.showOpenDialog({
           title: 'Seleccionar carpeta de backups',
+          defaultPath: config.folder,
           properties: ['openDirectory']
         })
 

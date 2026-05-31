@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import toast from 'react-hot-toast'
 import { CheckCircle2, Cloud, Database, FolderOpen, Laptop, Loader2, RefreshCw, ShieldCheck } from 'lucide-react'
 import type { DatabaseConfigMode, DatabaseConfigStatus } from '../../shared/electron'
@@ -16,23 +16,6 @@ export default function DatabaseSetup({ initialStatus }: DatabaseSetupProps) {
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [savedEnvPath, setSavedEnvPath] = useState<string | null>(null)
-
-  const modeCopy = useMemo(() => {
-    if (mode === 'shared') {
-      return {
-        title: 'Cliente compartido',
-        helper: 'Usa la URL PostgreSQL de Supabase. Copiala desde Database > Connect > Session pooler.',
-        placeholder: SUPABASE_PLACEHOLDER,
-        icon: Cloud
-      }
-    }
-
-    return {
-      title: 'Cliente local',
-      helper: 'Usa SQLite en este portatil. No necesita internet, Supabase ni servidor externo.',
-      icon: Laptop
-    }
-  }, [mode])
 
   const selectMode = (nextMode: DatabaseConfigMode) => {
     setMode(nextMode)
@@ -105,8 +88,6 @@ export default function DatabaseSetup({ initialStatus }: DatabaseSetupProps) {
     )
   }
 
-  const ActiveIcon = modeCopy.icon
-
   return (
     <main className="min-h-screen bg-gray-50 px-6 py-8 text-gray-950 dark:bg-gray-950 dark:text-white">
       <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl items-center gap-8 lg:grid-cols-[0.95fr_1.05fr]">
@@ -115,10 +96,6 @@ export default function DatabaseSetup({ initialStatus }: DatabaseSetupProps) {
             <Database className="h-8 w-8" />
           </div>
           <h1 className="text-3xl font-semibold tracking-normal">Configurar datos de Lucy3000</h1>
-          <p className="mt-4 max-w-xl text-sm leading-6 text-gray-600 dark:text-gray-300">
-            Elige donde vivira la base de datos de esta instalacion. Esta decision se guarda en un archivo local de
-            configuracion y se aplica al reiniciar.
-          </p>
 
           {initialStatus.reason ? (
             <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
@@ -167,16 +144,6 @@ export default function DatabaseSetup({ initialStatus }: DatabaseSetupProps) {
           </div>
 
           <form onSubmit={handleSubmit} className="mt-6 space-y-5">
-            <div className="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-950">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-gray-700 dark:bg-gray-900 dark:text-gray-200">
-                <ActiveIcon className="h-5 w-5" />
-              </div>
-              <div>
-                <h2 className="text-sm font-semibold">{modeCopy.title}</h2>
-                <p className="mt-1 text-xs leading-5 text-gray-600 dark:text-gray-300">{modeCopy.helper}</p>
-              </div>
-            </div>
-
             {mode === 'shared' ? (
               <div>
                 <label className="label flex items-center gap-2">
