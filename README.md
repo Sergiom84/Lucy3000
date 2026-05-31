@@ -42,10 +42,13 @@ Lucy3000 es una app de gestion de estetica orientada a SaaS multi-equipo: una AP
   - `POST /api/auth/bootstrap-admin`
 - Licencia del centro actual:
   - `GET /api/tenants/current/license`
-- Administracion interna de centros:
+- Endpoints internos de centros/licencias, sin pantalla `Centros` en la app del cliente:
   - `GET /api/tenants`
   - `POST /api/tenants`
   - `PUT /api/tenants/:id/license`
+- Consola local de Sergio para control comercial por Supabase de cliente:
+  - `npm run admin:dashboard`
+  - `tools/lucy-admin-dashboard/`
 
 Roles observados en codigo:
 - `ADMIN`

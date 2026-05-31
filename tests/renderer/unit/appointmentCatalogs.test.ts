@@ -25,6 +25,7 @@ describe('appointmentCatalogs', () => {
     const secondLoad = await loadAppointmentClients()
 
     expect(mockGet).toHaveBeenCalledTimes(1)
+    expect(mockGet).toHaveBeenCalledWith('/clients/catalog?isActive=true&limit=5000')
     expect(secondLoad).toEqual(firstLoad)
   })
 
@@ -135,5 +136,19 @@ describe('appointmentCatalogs', () => {
     const professionals = await loadAppointmentProfessionals()
 
     expect(professionals).toEqual(['Lucy', 'Tamara', 'Chema', 'Otros'])
+  })
+
+  it('preloads appointment form catalogs without loading the full client list by default', async () => {
+    mockGet
+      .mockResolvedValueOnce({ data: [] })
+      .mockResolvedValueOnce({ data: [] })
+
+    const { preloadAppointmentFormCatalogs } = await import('../../../src/renderer/utils/appointmentCatalogs')
+
+    await preloadAppointmentFormCatalogs()
+
+    expect(mockGet).toHaveBeenCalledWith('/services?isActive=true')
+    expect(mockGet).toHaveBeenCalledWith('/appointments/professionals')
+    expect(mockGet).not.toHaveBeenCalledWith('/clients/catalog?isActive=true&limit=5000')
   })
 })

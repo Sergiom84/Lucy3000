@@ -203,7 +203,8 @@ Roles observados:
 
 Estado actual de permisos:
 - `register`, `users`, `calendar` y `sql` ya tienen guard admin explicito;
-- `/api/tenants` combina ruta de licencia para usuario autenticado y administracion de plataforma;
+- `/api/tenants` combina ruta de licencia para usuario autenticado y endpoints internos de plataforma;
+- la gestion comercial de centros ya no se muestra en el renderer del cliente; vive en `tools/lucy-admin-dashboard/` como consola local de Sergio;
 - muchos modulos de negocio siguen siendo `auth only` y necesitan permisos finos.
 
 ## Persistencia

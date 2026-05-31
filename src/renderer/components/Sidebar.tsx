@@ -13,8 +13,7 @@ import {
   Database,
   Sparkles,
   Trophy,
-  ShieldCheck,
-  Building2
+  ShieldCheck
 } from 'lucide-react'
 import { cn } from '../utils/cn'
 import { getAppVersion } from '../utils/desktop'
@@ -25,7 +24,6 @@ type NavItem = {
   href: string
   icon: typeof LayoutDashboard
   adminOnly?: boolean
-  platformAdminOnly?: boolean
 }
 
 const navigation: NavItem[] = [
@@ -41,7 +39,6 @@ const navigation: NavItem[] = [
   { name: 'Reportes', href: '/reports', icon: FileText, adminOnly: true },
   { name: 'Configuración', href: '/settings', icon: Settings },
   { name: 'SQL', href: '/sql', icon: Database, adminOnly: true },
-  { name: 'Centros', href: '/tenants', icon: Building2, platformAdminOnly: true },
 ]
 
 export default function Sidebar() {
@@ -67,7 +64,6 @@ export default function Sidebar() {
   }, [])
 
   const visibleNavigation = navigation.filter((item) => {
-    if (item.platformAdminOnly) return Boolean(user?.isPlatformAdmin)
     if (item.adminOnly) return user?.role === 'ADMIN'
     return true
   })

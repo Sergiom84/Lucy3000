@@ -4,7 +4,7 @@ import { createClientRecord, deleteClientRecord, updateClientRecord } from '../m
 import { toClientHttpError } from '../modules/clients/errors'
 import { createClientHistoryEntry, listClientHistoryEntries } from '../modules/clients/history'
 import { importClientsSpreadsheet } from '../modules/clients/importSpreadsheet'
-import { getClientByIdOrThrow, listBirthdaysThisMonth, listClients } from '../modules/clients/queries'
+import { getClientByIdOrThrow, listBirthdaysThisMonth, listClientCatalog, listClients } from '../modules/clients/queries'
 
 const handleClientError = (res: Response, logMessage: string, error: unknown) => {
   const httpError = toClientHttpError(error)
@@ -22,6 +22,15 @@ export const getClients = async (req: Request, res: Response) => {
     res.json(clients)
   } catch (error) {
     handleClientError(res, 'Get clients error:', error)
+  }
+}
+
+export const getClientCatalog = async (req: Request, res: Response) => {
+  try {
+    const clients = await listClientCatalog(req.query)
+    res.json(clients)
+  } catch (error) {
+    handleClientError(res, 'Get client catalog error:', error)
   }
 }
 

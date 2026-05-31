@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import {
   getClients,
+  getClientCatalog,
   getClientById,
   createClient,
   updateClient,
@@ -14,6 +15,7 @@ import { adminMiddleware, authMiddleware } from '../middleware/auth.middleware'
 import { spreadsheetUpload, validateSpreadsheetUpload } from '../middleware/upload.middleware'
 import { validateRequest } from '../middleware/validation.middleware'
 import {
+  clientsCatalogQuerySchema,
   clientHistoryBodySchema,
   clientIdParamSchema,
   clientsQuerySchema,
@@ -26,6 +28,7 @@ const router = Router()
 router.use(authMiddleware)
 
 router.get('/', validateRequest({ query: clientsQuerySchema }), getClients)
+router.get('/catalog', validateRequest({ query: clientsCatalogQuerySchema }), getClientCatalog)
 router.get('/birthdays', getBirthdaysThisMonth)
 router.get('/:id', validateRequest({ params: clientIdParamSchema }), getClientById)
 router.post('/', validateRequest({ body: createClientBodySchema }), createClient)

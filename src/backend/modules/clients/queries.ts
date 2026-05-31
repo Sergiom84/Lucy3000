@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '../../db'
-import { googleCalendarService } from '../../services/googleCalendar.service'
+import { googleCalendarService, type CalendarEventRemoteState } from '../../services/googleCalendar.service'
 import { isActiveAppointmentStatus } from '../../utils/appointment-validation'
 import { logWarn } from '../../utils/logger'
 import { ClientModuleError } from './errors'
@@ -11,6 +11,21 @@ import {
   normalizeClientSortBy,
   normalizeClientSortDirection
 } from './shared'
+
+const GOOGLE_RECONCILIATION_TIMEOUT_MS = 1200
+
+const getAppointmentRemoteState = async (eventId: string | null): Promise<CalendarEventRemoteState> => {
+  const remoteStatePromise = googleCalendarService
+    .getAppointmentEventState(eventId)
+    .catch((): CalendarEventRemoteState => 'ERROR')
+
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => resolve('ERROR'), GOOGLE_RECONCILIATION_TIMEOUT_MS)
+    remoteStatePromise
+      .then(resolve)
+      .finally(() => clearTimeout(timeout))
+  })
+}
 
 const reconcileCancelledAppointmentsFromGoogle = async (
   appointments: Array<{
@@ -36,7 +51,7 @@ const reconcileCancelledAppointmentsFromGoogle = async (
   const remoteStates = await Promise.all(
     candidates.map(async (appointment) => ({
       appointment,
-      remoteState: await googleCalendarService.getAppointmentEventState(appointment.googleCalendarEventId || null)
+      remoteState: await getAppointmentRemoteState(appointment.googleCalendarEventId || null)
     }))
   )
 
@@ -213,6 +228,68 @@ export const listClients = async (query: {
   return loadClientsByOrderedIds({
     clientIds: orderedClientIds,
     include
+  })
+}
+
+export const listClientCatalog = async (query: {
+  search?: unknown
+  isActive?: unknown
+  limit?: unknown
+}) => {
+  const { search, isActive, limit } = query
+  const normalizedSearch = typeof search === 'string' ? search.trim() : ''
+  const searchTerms = normalizedSearch ? buildSearchTerms(normalizedSearch) : []
+  const isActiveFilter =
+    isActive !== undefined ? (typeof isActive === 'boolean' ? isActive : isActive === 'true') : true
+  const parsedLimit = Number.parseInt(String(limit ?? '5000'), 10)
+  const pageSize = Number.isFinite(parsedLimit) ? Math.min(5000, Math.max(1, parsedLimit)) : 5000
+
+  const whereClauses: Prisma.ClientWhereInput[] = []
+
+  if (typeof isActiveFilter === 'boolean') {
+    whereClauses.push({ isActive: isActiveFilter })
+  }
+
+  for (const term of searchTerms) {
+    whereClauses.push({
+      OR: [
+        { firstName: { contains: term } },
+        { lastName: { contains: term } },
+        { fullName: { contains: term } },
+        { externalCode: { contains: term } },
+        { dni: { contains: term } },
+        { email: { contains: term } },
+        { phone: { contains: term } },
+        { mobilePhone: { contains: term } },
+        { landlinePhone: { contains: term } }
+      ]
+    })
+  }
+
+  const where: Prisma.ClientWhereInput = whereClauses.length > 0 ? { AND: whereClauses } : {}
+
+  return prisma.client.findMany({
+    where,
+    select: {
+      id: true,
+      externalCode: true,
+      firstName: true,
+      lastName: true,
+      fullName: true,
+      phone: true,
+      mobilePhone: true,
+      landlinePhone: true,
+      email: true,
+      accountBalance: true,
+      loyaltyPoints: true,
+      isActive: true
+    },
+    orderBy: [
+      { firstName: 'asc' },
+      { lastName: 'asc' },
+      { createdAt: 'desc' }
+    ],
+    take: pageSize
   })
 }
 

@@ -14,6 +14,7 @@
     "build": "npm run build:prepare-db && tsc && vite build && npm run build:backend && electron-builder",
     "build:web": "vite build",
     "deploy:web": "wrangler pages deploy",
+    "admin:dashboard": "node tools/lucy-admin-dashboard/server.mjs",
     "build:backend": "tsc -p tsconfig.backend.json",
     "build:prepare-db": "node scripts/prepare-packaged-db.js",
     "test": "vitest run",

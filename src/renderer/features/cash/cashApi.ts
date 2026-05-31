@@ -38,7 +38,7 @@ export const fetchCashSummary = async (): Promise<CashSummary> => {
 
 export const fetchCashFilterOptions = async (): Promise<CashFilterOptions> => {
   const [clientsRes, servicesRes, productsRes] = await Promise.all([
-    api.get('/clients?isActive=true&includeCounts=false'),
+    api.get('/clients/catalog?isActive=true&limit=5000'),
     api.get('/services?isActive=true'),
     api.get('/products?isActive=true')
   ])

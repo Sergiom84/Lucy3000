@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createClient, getClientById, getClients, importClientsFromExcel, updateClient } from '../../../src/backend/controllers/client.controller'
+import { createClient, getClientById, getClientCatalog, getClients, importClientsFromExcel, updateClient } from '../../../src/backend/controllers/client.controller'
 import { googleCalendarService } from '../../../src/backend/services/googleCalendar.service'
 import { createWorkbookBuffer } from '../helpers/spreadsheet'
 import { createMockRequest, createMockResponse } from '../helpers/http'
@@ -735,6 +735,59 @@ describe('client.controller gender validation', () => {
     )
     expect(res.json).toHaveBeenCalledWith([])
   })
+
+  it('getClientCatalog returns active clients with a lightweight select', async () => {
+    const catalogClients = [
+      {
+        id: 'client-1',
+        firstName: 'Ana',
+        lastName: 'Lopez',
+        phone: '600000000',
+        email: 'ana@example.com',
+        accountBalance: 10,
+        loyaltyPoints: 2,
+        isActive: true
+      }
+    ]
+    prismaMock.client.findMany.mockResolvedValue(catalogClients)
+
+    const req = createMockRequest({
+      query: {
+        search: 'ana lopez',
+        isActive: 'true',
+        limit: '5000'
+      }
+    })
+    const res = createMockResponse()
+
+    await getClientCatalog(req as any, res)
+
+    expect(prismaMock.client.findMany).toHaveBeenCalledWith({
+      where: {
+        AND: [
+          { isActive: true },
+          expect.objectContaining({ OR: expect.any(Array) }),
+          expect.objectContaining({ OR: expect.any(Array) })
+        ]
+      },
+      select: expect.objectContaining({
+        id: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+        accountBalance: true,
+        loyaltyPoints: true
+      }),
+      orderBy: [
+        { firstName: 'asc' },
+        { lastName: 'asc' },
+        { createdAt: 'desc' }
+      ],
+      take: 5000
+    })
+    expect(prismaMock.$queryRaw).not.toHaveBeenCalled()
+    expect(res.json).toHaveBeenCalledWith(catalogClients)
+  })
 })
 
 describe('client.controller google calendar reconciliation', () => {
@@ -855,5 +908,61 @@ describe('client.controller google calendar reconciliation', () => {
       })
     })
     expect(res.json).toHaveBeenCalledWith(refreshedClient)
+  })
+
+  it('opens the client file without waiting indefinitely for slow Google Calendar checks', async () => {
+    vi.useFakeTimers()
+
+    try {
+      const initialClient = {
+        id: 'client-1',
+        firstName: 'Ana',
+        lastName: 'Lopez',
+        appointments: [
+          {
+            id: 'appointment-1',
+            status: 'SCHEDULED',
+            googleCalendarEventId: 'event-1',
+            serviceId: 'service-1',
+            cabin: 'LUCY',
+            startTime: '10:00',
+            endTime: '10:30',
+            date: new Date('2099-06-15T00:00:00.000Z'),
+            service: { id: 'service-1', name: 'Limpieza facial' },
+            user: { name: 'Lucy' },
+            sale: null
+          }
+        ],
+        sales: [],
+        pendingPayments: [],
+        clientHistory: [],
+        bonoPacks: [],
+        linkedClient: null,
+        relatedClients: []
+      }
+
+      prismaMock.client.findUnique.mockResolvedValueOnce(initialClient)
+      vi.spyOn(googleCalendarService, 'getAppointmentEventState').mockImplementation(
+        () => new Promise((resolve) => setTimeout(() => resolve('ACTIVE'), 10_000))
+      )
+
+      const req = createMockRequest({
+        params: {
+          id: 'client-1'
+        }
+      })
+      const res = createMockResponse()
+
+      const requestPromise = getClientById(req as any, res)
+      await vi.advanceTimersByTimeAsync(1200)
+      await requestPromise
+
+      expect(prismaMock.appointment.update).not.toHaveBeenCalled()
+      expect(prismaMock.client.findUnique).toHaveBeenCalledTimes(1)
+      expect(res.json).toHaveBeenCalledWith(initialClient)
+    } finally {
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
   })
 })

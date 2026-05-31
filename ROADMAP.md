@@ -1,6 +1,6 @@
 # Roadmap Lucy3000
 
-Estado actualizado: 2026-05-26
+Estado actualizado: 2026-05-31
 
 ## Objetivo actual
 
@@ -22,8 +22,9 @@ La base tecnica ya refleja el giro multi-tenant:
 - `src/backend/tenant/license.ts` evalua trial, licencia activa, bloqueo, cancelacion y expiracion;
 - `src/backend/db.ts` aplica scoping tenant-aware en Prisma y solo ejecuta compatibilidad SQLite si la URL es `file:`;
 - `authMiddleware` carga usuario, tenant y licencia, y bloquea operativa cuando corresponde;
-- el bootstrap crea centro, licencia de prueba de 7 dias y primer `ADMIN`;
-- `/api/tenants/*` expone estado de licencia y administracion interna;
+- el bootstrap crea centro, licencia `PENDING` y primer `ADMIN`; la prueba arranca despues con `start-trial`;
+- `/api/tenants/*` expone estado de licencia y endpoints internos, pero la pantalla `Centros` ya no vive en el renderer del cliente;
+- `tools/lucy-admin-dashboard/` contiene la consola local de Sergio para listar clientes/Supabase y activar, bloquear o cancelar licencias;
 - Google Calendar guarda estado OAuth con `tenantId`;
 - el login del renderer acepta centro opcional y muestra el bloqueo de licencia;
 - `build:prepare-db` ya no prepara SQLite empaquetada por defecto.
@@ -40,7 +41,7 @@ La refactorizacion incremental previa sigue vigente:
 
 - Probar migracion/importacion real desde instalaciones SQLite antiguas hacia PostgreSQL tenant-aware.
 - Endurecer permisos por rol en rutas de negocio, no solo autenticacion.
-- Completar panel interno de administracion de centros: activar, cancelar, ampliar trial, bloquear y convertir a pago.
+- Evolucionar la consola local interna si hace falta ampliacion de trial, auditoria o facturacion.
 - Preparar despliegue central: API, base PostgreSQL, Storage/S3, logs, backups, monitorizacion y dominios.
 - Mover fotos/assets de clienta a Storage/S3 con claves por tenant.
 - Revisar todas las consultas pesadas para paginacion, indices por `tenantId`, fechas y busquedas frecuentes.

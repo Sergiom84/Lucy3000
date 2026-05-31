@@ -1,11 +1,18 @@
 import api from './api'
 
-type AppointmentClientCatalogItem = {
+export type AppointmentClientCatalogItem = {
   id: string
+  externalCode?: string | null
   firstName?: string | null
   lastName?: string | null
+  fullName?: string | null
   phone?: string | null
+  mobilePhone?: string | null
+  landlinePhone?: string | null
   email?: string | null
+  accountBalance?: number | string | null
+  loyaltyPoints?: number | null
+  isActive?: boolean | null
 }
 
 export type AppointmentServiceCatalogItem = {
@@ -160,7 +167,7 @@ export const loadAppointmentClients = async (options?: { forceRefresh?: boolean 
   if (!clientsPromise) {
     const requestVersion = clientsCacheVersion
     clientsPromise = api
-      .get('/clients?isActive=true&includeCounts=false')
+      .get('/clients/catalog?isActive=true&limit=5000')
       .then((response) => {
         const nextClients = Array.isArray(response.data) ? sortClients(response.data) : []
         if (requestVersion === clientsCacheVersion) {
@@ -375,9 +382,9 @@ export const deleteAppointmentLegendItem = async (id: string) => {
   return nextLegends
 }
 
-export const preloadAppointmentFormCatalogs = async () => {
+export const preloadAppointmentFormCatalogs = async (options?: { includeClients?: boolean }) => {
   await Promise.allSettled([
-    loadAppointmentClients(),
+    ...(options?.includeClients ? [loadAppointmentClients()] : []),
     loadAppointmentServices(),
     loadAppointmentProfessionals()
   ])

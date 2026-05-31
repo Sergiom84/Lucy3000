@@ -1,0 +1,18 @@
+{
+  "clients": [
+    {
+      "id": "lucy-local",
+      "label": "Lucy3000 Local",
+      "businessName": "Centro de ejemplo",
+      "contactName": "Persona de contacto",
+      "contactEmail": "contacto@example.com",
+      "phone": "+34 600 000 000",
+      "address": "Calle Ejemplo 1, Madrid",
+      "notes": "Notas internas visibles solo en tu portatil.",
+      "supabaseUrl": "https://PROJECT_REF.supabase.co",
+      "dashboardUrl": "https://supabase.com/dashboard/project/PROJECT_REF",
+      "databaseUrlEnv": "LUCY_CLIENT_LUCY_LOCAL_DATABASE_URL",
+      "tenantId": ""
+    }
+  ]
+}

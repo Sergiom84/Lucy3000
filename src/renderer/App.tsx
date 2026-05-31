@@ -22,7 +22,6 @@ const Accounts = lazy(() => import('./pages/Accounts'))
 const Sql = lazy(() => import('./pages/Sql'))
 const DatabaseSetup = lazy(() => import('./pages/DatabaseSetup'))
 const LicenseBlocked = lazy(() => import('./pages/LicenseBlocked'))
-const Tenants = lazy(() => import('./pages/Tenants'))
 
 function RouteLoader() {
   return (
@@ -36,16 +35,6 @@ function AdminOnlyRoute({ children }: { children: JSX.Element }) {
   const { user } = useAuthStore()
 
   if (user?.role !== 'ADMIN') {
-    return <Navigate to="/" replace />
-  }
-
-  return children
-}
-
-function PlatformAdminRoute({ children }: { children: JSX.Element }) {
-  const { user } = useAuthStore()
-
-  if (!user?.isPlatformAdmin) {
     return <Navigate to="/" replace />
   }
 
@@ -222,14 +211,6 @@ function App() {
               }
             />
             <Route path="/ranking" element={<ClientRanking />} />
-            <Route
-              path="/tenants"
-              element={
-                <PlatformAdminRoute>
-                  <Tenants />
-                </PlatformAdminRoute>
-              }
-            />
             <Route path="/settings" element={<Settings />} />
             <Route
               path="/sql"

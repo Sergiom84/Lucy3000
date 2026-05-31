@@ -87,6 +87,12 @@ export const clientsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional()
 })
 
+export const clientsCatalogQuerySchema = z.object({
+  search: z.string().trim().min(1, 'Search cannot be empty').optional(),
+  isActive: booleanQuerySchema.optional(),
+  limit: z.coerce.number().int().min(1).max(5000).optional()
+})
+
 export const createClientBodySchema = z
   .object({
     externalCode: optionalNullableTextSchema(80),

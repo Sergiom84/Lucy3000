@@ -15,6 +15,7 @@ release/
 .env
 .env.development
 .env.local
+.env.admin.local
 .env.development.local
 .env.test.local
 .env.production.local
@@ -47,7 +48,11 @@ backups/
 prisma/prisma/
 
 # Local tooling / binaries
-tools/
+tools/*
+!tools/lucy-admin-dashboard/
+!tools/lucy-admin-dashboard/**
+tools/lucy-admin-dashboard/clients.local.json
+tools/lucy-admin-dashboard/.env.local
 
 # Supabase local temp
 supabase/.temp/
