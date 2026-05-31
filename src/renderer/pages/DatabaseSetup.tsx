@@ -3,8 +3,7 @@ import toast from 'react-hot-toast'
 import { CheckCircle2, Cloud, Database, FolderOpen, Laptop, Loader2, RefreshCw, ShieldCheck } from 'lucide-react'
 import type { DatabaseConfigMode, DatabaseConfigStatus } from '../../shared/electron'
 
-const SUPABASE_PLACEHOLDER =
-  'postgres://prisma.PROJECT_REF:PASSWORD@aws-0-eu-west-1.pooler.supabase.com:5432/postgres'
+const API_PLACEHOLDER = 'https://lucy3000-2hnv.onrender.com/api'
 
 type DatabaseSetupProps = {
   initialStatus: DatabaseConfigStatus
@@ -12,7 +11,7 @@ type DatabaseSetupProps = {
 
 export default function DatabaseSetup({ initialStatus }: DatabaseSetupProps) {
   const [mode, setMode] = useState<DatabaseConfigMode>('local')
-  const [databaseUrl, setDatabaseUrl] = useState('')
+  const [apiUrl, setApiUrl] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [savedEnvPath, setSavedEnvPath] = useState<string | null>(null)
@@ -20,7 +19,7 @@ export default function DatabaseSetup({ initialStatus }: DatabaseSetupProps) {
   const selectMode = (nextMode: DatabaseConfigMode) => {
     setMode(nextMode)
     setError(null)
-    setDatabaseUrl('')
+    setApiUrl('')
   }
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -31,7 +30,7 @@ export default function DatabaseSetup({ initialStatus }: DatabaseSetupProps) {
     try {
       const result = await window.electronAPI?.databaseConfig.configure({
         mode,
-        databaseUrl: mode === 'shared' ? databaseUrl : undefined
+        apiUrl: mode === 'remote' ? apiUrl : undefined
       })
 
       if (!result?.success) {
@@ -128,36 +127,39 @@ export default function DatabaseSetup({ initialStatus }: DatabaseSetupProps) {
             </button>
             <button
               type="button"
-              onClick={() => selectMode('shared')}
+              onClick={() => selectMode('remote')}
               className={`rounded-lg border p-4 text-left transition ${
-                mode === 'shared'
+                mode === 'remote'
                   ? 'border-primary-500 bg-primary-50 text-primary-950 dark:border-primary-400 dark:bg-primary-950/40 dark:text-primary-100'
                   : 'border-gray-200 bg-white hover:border-gray-300 dark:border-gray-800 dark:bg-gray-900 dark:hover:border-gray-700'
               }`}
             >
               <Cloud className="mb-4 h-6 w-6" />
-              <span className="block text-sm font-semibold">Cliente compartido</span>
+              <span className="block text-sm font-semibold">API remota</span>
               <span className="mt-2 block text-xs leading-5 text-gray-600 dark:text-gray-300">
-                Dos portatiles conectados a Supabase.
+                Varios clientes contra la API central.
               </span>
             </button>
           </div>
 
           <form onSubmit={handleSubmit} className="mt-6 space-y-5">
-            {mode === 'shared' ? (
+            {mode === 'remote' ? (
               <div>
                 <label className="label flex items-center gap-2">
                   <ShieldCheck className="h-4 w-4" />
-                  DATABASE_URL de Supabase
+                  URL de la API central
                 </label>
-                <textarea
-                  value={databaseUrl}
-                  onChange={(event) => setDatabaseUrl(event.target.value)}
-                  rows={4}
-                  className="input resize-none font-mono text-sm leading-6"
-                  placeholder={SUPABASE_PLACEHOLDER}
+                <input
+                  type="url"
+                  value={apiUrl}
+                  onChange={(event) => setApiUrl(event.target.value)}
+                  className="input font-mono text-sm"
+                  placeholder={API_PLACEHOLDER}
                   required
                 />
+                <p className="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">
+                  La DATABASE_URL de Supabase se queda en el servidor de la API, nunca en este equipo.
+                </p>
               </div>
             ) : (
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs leading-5 text-gray-600 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-300">

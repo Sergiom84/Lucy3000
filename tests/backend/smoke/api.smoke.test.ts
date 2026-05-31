@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken'
+import bcrypt from 'bcryptjs'
 import request from 'supertest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { app } from '../../../src/backend/app'
@@ -402,7 +403,8 @@ describe('API smoke tests', () => {
         create: vi.fn().mockResolvedValue({
           id: 'tenant-1',
           name: 'Lucy3000',
-          slug: 'lucy3000'
+          slug: 'lucy3000',
+          tenantCode: 1
         })
       },
       user: {
@@ -418,6 +420,7 @@ describe('API smoke tests', () => {
             id: 'tenant-1',
             name: 'Lucy3000',
             slug: 'lucy3000',
+            tenantCode: 1,
             license: {
               status: 'TRIAL',
               plan: 'trial',
@@ -446,6 +449,9 @@ describe('API smoke tests', () => {
           email: 'owner@example.com',
           name: 'Owner',
           role: 'ADMIN',
+          tenant: expect.objectContaining({
+            tenantCode: 1
+          }),
           isPlatformAdmin: false
         })
       })
@@ -483,6 +489,61 @@ describe('API smoke tests', () => {
     expect(tx.user.create).not.toHaveBeenCalled()
   })
 
+  it('POST /api/auth/login resolves the tenant by customer ID', async () => {
+    prismaMock.user.findMany.mockResolvedValue([
+      {
+        id: 'admin-1',
+        tenantId: 'tenant-1',
+        email: 'owner@example.com',
+        username: 'owner',
+        password: await bcrypt.hash('supersecure123', 10),
+        name: 'Owner',
+        role: 'ADMIN',
+        isActive: true,
+        isPlatformAdmin: false,
+        tenant: {
+          id: 'tenant-1',
+          name: 'Lucy3000',
+          slug: 'lucy3000',
+          tenantCode: 1,
+          status: 'ACTIVE',
+          license: {
+            status: 'ACTIVE',
+            plan: 'pro',
+            trialEndsAt: new Date('2099-12-31T23:59:59.000Z'),
+            blockedAt: null,
+            cancelledAt: null,
+            createdAt: new Date('2026-05-31T10:00:00.000Z')
+          }
+        }
+      }
+    ])
+
+    const response = await request(app).post('/api/auth/login').send({
+      tenantCode: '1',
+      identifier: 'owner',
+      password: 'supersecure123'
+    })
+
+    expect(response.status).toBe(200)
+    expect(prismaMock.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenant: { tenantCode: 1 },
+          OR: [{ email: 'owner' }, { username: 'owner' }]
+        })
+      })
+    )
+    expect(response.body.user).toEqual(
+      expect.objectContaining({
+        tenantId: 'tenant-1',
+        tenant: expect.objectContaining({
+          tenantCode: 1
+        })
+      })
+    )
+  })
+
   it('GET /api/tenants rejects tenant admins without platform access', async () => {
     const response = await request(app)
       .get('/api/tenants')
@@ -512,6 +573,7 @@ describe('API smoke tests', () => {
           id: 'tenant-2',
           name: 'Nuevo Centro',
           slug: 'nuevo-centro',
+          tenantCode: 2,
           status: 'ACTIVE',
           createdAt: new Date('2026-05-31T10:00:00.000Z'),
           updatedAt: new Date('2026-05-31T10:00:00.000Z'),

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowRight, Plus } from 'lucide-react'
+import { ArrowRight, Hash, Plus } from 'lucide-react'
 import {
   Area,
   AreaChart,
@@ -143,6 +143,7 @@ export default function Dashboard() {
   const upcomingAppointments = stats?.upcomingAppointments ?? []
   const recentSales = stats?.recentSales ?? []
   const salesChart = stats?.salesChart ?? []
+  const tenantCode = user?.tenant?.tenantCode ? String(user.tenant.tenantCode) : ''
   const serifStyle = { fontFamily: '"Cormorant Garamond", ui-serif, Georgia, serif' }
 
   return (
@@ -165,15 +166,25 @@ export default function Dashboard() {
           </h1>
         </div>
 
-        <Link
-          to="/appointments"
-          className="group inline-flex self-start rounded-sm bg-gray-900 px-5 py-3 text-[11px] font-medium uppercase tracking-[0.15em] text-white transition hover:bg-black dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100 md:self-auto"
-        >
-          <span className="inline-flex items-center gap-2">
-            <Plus className="h-3.5 w-3.5" strokeWidth={2.2} />
-            Nueva cita
-          </span>
-        </Link>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center md:self-auto">
+          {tenantCode ? (
+            <div className="inline-flex self-start items-center gap-2 border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 sm:self-auto">
+              <Hash className="h-4 w-4" strokeWidth={1.8} />
+              <span className="text-gray-500 dark:text-gray-400">ID cliente</span>
+              <strong className="font-semibold text-gray-900 dark:text-white">{tenantCode}</strong>
+            </div>
+          ) : null}
+
+          <Link
+            to="/appointments"
+            className="group inline-flex self-start rounded-sm bg-gray-900 px-5 py-3 text-[11px] font-medium uppercase tracking-[0.15em] text-white transition hover:bg-black dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100 sm:self-auto"
+          >
+            <span className="inline-flex items-center gap-2">
+              <Plus className="h-3.5 w-3.5" strokeWidth={2.2} />
+              Nueva cita
+            </span>
+          </Link>
+        </div>
       </section>
 
       <section className="grid grid-cols-1 border-y border-gray-200 dark:border-gray-700 lg:grid-cols-3">

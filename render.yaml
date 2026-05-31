@@ -1,6 +1,6 @@
-# DORMIDO (2026-05-31): el modelo vigente es Electron por cliente contra su
-# propio Supabase, sin servidor central (ver CLAUDE.md / AGENTS.md). Este
-# Blueprint se conserva por si en el futuro se vuelve a un SaaS central.
+# CANAL CENTRAL WEB/PWA (2026-05-31): modelo vigente para Supabase compartido.
+# La DATABASE_URL vive solo en lucy3000-api; clientes web/PWA/Electron remoto
+# consumen la API publica con VITE_API_URL/LUCY3000_API_URL.
 # Servicios ya creados (cuenta sergio.hlara84, workspace tea-d8dlksh9rddc73a25e50):
 #   API  srv-d8dlmoojs32c73fmfee0  https://lucy3000-2hnv.onrender.com
 #   web  srv-d8dlqkvavr4c73ft9kl0  https://lucy3000-web.onrender.com

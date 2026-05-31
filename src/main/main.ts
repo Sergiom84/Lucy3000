@@ -80,7 +80,9 @@ app.whenReady().then(async () => {
   installAppMenu(() => runtimeDataService?.showDatabaseHelpDialog())
 
   const databaseStatus = databaseConfigService.getStatus()
-  if (!databaseStatus.needsSetup) {
+  const shouldUseRemoteApi = databaseStatus.mode === 'remote'
+
+  if (!databaseStatus.needsSetup && !shouldUseRemoteApi) {
     try {
       await backendRuntime.ensureBackendReady()
     } catch (error) {
@@ -91,8 +93,9 @@ app.whenReady().then(async () => {
       return
     }
   } else {
-    writeMainLog('warn', 'Backend startup deferred until database setup is completed', {
+    writeMainLog(shouldUseRemoteApi ? 'info' : 'warn', 'Backend startup deferred', {
       reason: databaseStatus.reason,
+      mode: databaseStatus.mode,
       databaseUrlKind: databaseStatus.databaseUrlKind,
       legacySqliteExists: databaseStatus.legacySqliteExists
     })
@@ -100,7 +103,7 @@ app.whenReady().then(async () => {
 
   createMainWindow({ isDevelopment, shouldAutoOpenDevTools })
 
-  if (!databaseStatus.needsSetup) {
+  if (!databaseStatus.needsSetup && !shouldUseRemoteApi) {
     backupRuntime.initializeAutoBackup()
       .catch((error) => {
         writeMainLog('error', 'Failed to initialize auto-backup', error)

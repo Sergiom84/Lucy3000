@@ -1,11 +1,24 @@
 import { z } from 'zod'
 
 const userRoleSchema = z.enum(['ADMIN', 'MANAGER', 'EMPLOYEE'])
+const tenantCodeSchema = z.preprocess(
+  (value) => {
+    if (value === undefined || value === null || value === '') return undefined
+    return Number(value)
+  },
+  z
+    .number({ invalid_type_error: 'Customer ID must be a number' })
+    .int('Customer ID must be a whole number')
+    .positive('Customer ID must be positive')
+    .max(999_999_999, 'Customer ID is too long')
+    .optional()
+)
 
 export const loginBodySchema = z
   .object({
     identifier: z.string().trim().min(1, 'User or email is required').max(120, 'User or email is too long'),
     password: z.string().min(1, 'Password is required'),
+    tenantCode: tenantCodeSchema,
     tenantSlug: z.string().trim().min(1).max(80).optional()
   })
   .strict()

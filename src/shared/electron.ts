@@ -36,7 +36,7 @@ export type RuntimeDataPaths = {
   dbExists: boolean
 }
 
-export type DatabaseConfigMode = 'local' | 'shared'
+export type DatabaseConfigMode = 'local' | 'remote'
 
 export type DatabaseUrlKind = 'missing' | 'postgresql' | 'sqlite' | 'unknown'
 
@@ -50,12 +50,14 @@ export type DatabaseConfigStatus = {
   userDataPath: string
   legacySqlitePath: string
   legacySqliteExists: boolean
+  apiUrl?: string
   reason?: string
 }
 
 export type DatabaseConfigurePayload = {
   mode: DatabaseConfigMode
   databaseUrl?: string
+  apiUrl?: string
 }
 
 export type DatabaseConfigureResult = {
@@ -63,6 +65,7 @@ export type DatabaseConfigureResult = {
   requiresRelaunch: boolean
   envPath?: string
   mode?: DatabaseConfigMode
+  apiUrl?: string
   error?: string
 }
 

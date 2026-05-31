@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ShieldCheck, Sparkles, Mail, Lock, User } from 'lucide-react'
+import { Hash, ShieldCheck, Sparkles, Mail, Lock, User } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
@@ -9,7 +9,7 @@ export default function Login() {
   const navigate = useNavigate()
   const { login, bootstrapChecked, bootstrapRequired, setBootstrapStatus } = useAuthStore()
   const [identifier, setIdentifier] = useState('')
-  const [tenantSlug, setTenantSlug] = useState('')
+  const [tenantCode, setTenantCode] = useState('')
   const [password, setPassword] = useState('')
   const [bootstrapBusinessName, setBootstrapBusinessName] = useState('')
   const [bootstrapName, setBootstrapName] = useState('')
@@ -58,7 +58,7 @@ export default function Login() {
       const response = await api.post('/auth/login', {
         identifier,
         password,
-        tenantSlug: tenantSlug || undefined
+        tenantCode: tenantCode.trim()
       })
       const { token, user } = response.data
 
@@ -222,20 +222,6 @@ export default function Login() {
 
               <div>
                 <label className="label">
-                  <Sparkles className="w-4 h-4 inline mr-2" />
-                  Centro
-                </label>
-                <input
-                  type="text"
-                  value={tenantSlug}
-                  onChange={(e) => setTenantSlug(e.target.value)}
-                  className="input"
-                  placeholder="Opcional si el correo es unico"
-                />
-              </div>
-
-              <div>
-                <label className="label">
                   <Lock className="w-4 h-4 inline mr-2" />
                   Contrasena
                 </label>
@@ -276,6 +262,23 @@ export default function Login() {
             </form>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-6">
+              <div>
+                <label className="label">
+                  <Hash className="w-4 h-4 inline mr-2" />
+                  ID cliente
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={tenantCode}
+                  onChange={(e) => setTenantCode(e.target.value.replace(/\D/g, ''))}
+                  className="input"
+                  placeholder="1"
+                  required
+                />
+              </div>
+
               <div>
                 <label className="label">
                   <User className="w-4 h-4 inline mr-2" />

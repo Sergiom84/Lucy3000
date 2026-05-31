@@ -1,7 +1,12 @@
 import axios from 'axios'
 import { useAuthStore } from '../stores/authStore'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api'
+const normalizeApiBaseUrl = (value: string) => {
+  const trimmed = value.trim().replace(/\/+$/, '')
+  return trimmed.endsWith('/api') ? trimmed : `${trimmed}/api`
+}
+
+const API_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_URL || 'http://localhost:3001/api')
 const MAX_NETWORK_RETRIES = 4
 const NETWORK_RETRY_DELAY_MS = 500
 const SLOW_REQUEST_WARNING_MS = 2_000
@@ -54,6 +59,10 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 })
+
+export const setApiBaseUrl = (apiUrl: string) => {
+  api.defaults.baseURL = normalizeApiBaseUrl(apiUrl)
+}
 
 // Request interceptor para agregar el token
 api.interceptors.request.use(

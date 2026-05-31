@@ -12,6 +12,7 @@ interface User {
     id: string
     name: string
     slug: string
+    tenantCode?: number | null
   } | null
   license?: {
     status: string

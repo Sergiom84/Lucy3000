@@ -43,6 +43,7 @@ const serializeTenant = (tenant: any) => {
     id: tenant.id,
     name: tenant.name,
     slug: tenant.slug,
+    tenantCode: tenant.tenantCode ?? null,
     status: tenant.status,
     createdAt: tenant.createdAt,
     updatedAt: tenant.updatedAt,
@@ -81,7 +82,8 @@ export const getCurrentTenantLicense = async (req: AuthRequest, res: Response) =
       tenant: {
         id: tenant.id,
         name: tenant.name,
-        slug: tenant.slug
+        slug: tenant.slug,
+        tenantCode: tenant.tenantCode ?? null
       },
       license: {
         status: license.status,

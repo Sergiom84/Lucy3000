@@ -14,6 +14,11 @@ const normalizeUsername = (value: unknown) => {
   return normalized || null
 }
 const normalizeLoginIdentifier = (value: unknown) => String(value || '').trim().toLowerCase()
+const normalizeTenantCode = (value: unknown) => {
+  if (value === undefined || value === null || value === '') return null
+  const parsed = typeof value === 'number' ? value : Number(String(value).trim())
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
 const normalizeTenantSlug = (value: unknown) =>
   String(value || '')
     .trim()
@@ -42,6 +47,7 @@ const buildAuthResponse = (user: {
     id: string
     name: string
     slug: string
+    tenantCode?: number | null
     license?: {
       status: string
       plan: string
@@ -79,7 +85,8 @@ const buildAuthResponse = (user: {
         ? {
             id: user.tenant.id,
             name: user.tenant.name,
-            slug: user.tenant.slug
+            slug: user.tenant.slug,
+            tenantCode: user.tenant.tenantCode ?? null
           }
         : null,
       license: license
@@ -180,18 +187,24 @@ export const bootstrapAdmin = async (req: Request, res: Response) => {
 
 export const login = async (req: Request, res: Response) => {
   try {
-    const { identifier, password, tenantSlug } = req.body
+    const { identifier, password, tenantCode, tenantSlug } = req.body
 
     if (!identifier || !password) {
       return res.status(400).json({ error: 'User or email and password are required' })
     }
 
     const normalizedIdentifier = normalizeLoginIdentifier(identifier)
+    const normalizedTenantCode = normalizeTenantCode(tenantCode)
     const normalizedTenantSlug = normalizeTenantSlug(tenantSlug)
+    const tenantWhere = normalizedTenantCode
+      ? { tenant: { tenantCode: normalizedTenantCode } }
+      : normalizedTenantSlug
+        ? { tenant: { slug: normalizedTenantSlug } }
+        : {}
 
     const users = await prisma.user.findMany({
       where: {
-        ...(normalizedTenantSlug ? { tenant: { slug: normalizedTenantSlug } } : {}),
+        ...tenantWhere,
         OR: [
           { email: normalizedIdentifier },
           { username: normalizedIdentifier }
@@ -209,7 +222,7 @@ export const login = async (req: Request, res: Response) => {
 
     if (users.length > 1) {
       return res.status(409).json({
-        error: 'This user exists in more than one business. Enter the business slug to continue.'
+        error: 'This user exists in more than one business. Enter the customer ID to continue.'
       })
     }
 
@@ -332,6 +345,7 @@ export const getCurrentUser = async (req: AuthRequest, res: Response) => {
             id: true,
             name: true,
             slug: true,
+            tenantCode: true,
             license: {
               select: {
                 status: true,

@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import { useAuthStore } from './stores/authStore'
-import api from './utils/api'
+import api, { setApiBaseUrl } from './utils/api'
 import type { DatabaseConfigStatus } from '../shared/electron'
 
 const Layout = lazy(() => import('./components/Layout'))
@@ -103,6 +103,9 @@ function App() {
       try {
         const status = await window.electronAPI.databaseConfig.getStatus()
         if (!cancelled) {
+          if (status.mode === 'remote' && status.apiUrl) {
+            setApiBaseUrl(status.apiUrl)
+          }
           setDatabaseStatus(status)
         }
       } finally {

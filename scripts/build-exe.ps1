@@ -44,5 +44,5 @@ if ($LASTEXITCODE -ne 0) { throw "electron-builder failed" }
 
 Write-Host "`n=== Build complete! ===" -ForegroundColor Green
 Write-Host "Installer: release\Lucy3000 Accounting Setup 2.0.0.exe" -ForegroundColor Green
-Write-Host "`nIMPORTANT: Copy your .env file next to the installed .exe on the target machine." -ForegroundColor Yellow
-Write-Host "Location: C:\Users\<user>\AppData\Local\Programs\Lucy3000 Accounting\.env" -ForegroundColor Yellow
+Write-Host "`nIMPORTANT: For shared Supabase, configure only LUCY3000_API_URL on the target machine." -ForegroundColor Yellow
+Write-Host "Never copy a shared Supabase DATABASE_URL to a client PC." -ForegroundColor Yellow

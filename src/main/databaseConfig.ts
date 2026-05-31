@@ -12,6 +12,7 @@ import { getProductionDbPath, getUserDataDir } from './runtimePaths'
 import { writeMainLog } from './logging'
 
 const DATABASE_MODE_ENV_KEY = 'LUCY3000_DATABASE_MODE'
+const API_URL_ENV_KEY = 'LUCY3000_API_URL'
 const POSTGRES_PROTOCOLS = new Set(['postgres:', 'postgresql:'])
 
 type EnvReadResult = {
@@ -40,6 +41,11 @@ const parseEnvContent = (content: string) => {
 }
 
 const quoteEnvValue = (value: string) => `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+
+const serializeEnvValues = (values: Record<string, string>) =>
+  `${Object.entries(values)
+    .map(([key, value]) => `${key}=${quoteEnvValue(value)}`)
+    .join('\n')}\n`
 
 const updateEnvContent = (content: string, updates: Record<string, string>) => {
   const remainingUpdates = new Map(Object.entries(updates))
@@ -87,48 +93,41 @@ const classifyDatabaseUrl = (databaseUrl?: string | null): DatabaseUrlKind => {
 
 const inferDatabaseMode = (
   databaseUrl: string | undefined,
-  explicitMode?: string
+  explicitMode?: string,
+  apiUrl?: string
 ): DatabaseConfigMode | null => {
-  if (explicitMode === 'local' || explicitMode === 'shared') {
+  if (explicitMode === 'local' || explicitMode === 'remote') {
     return explicitMode
+  }
+
+  if (apiUrl) {
+    return 'remote'
   }
 
   if (classifyDatabaseUrl(databaseUrl) === 'sqlite') {
     return 'local'
   }
 
-  if (!databaseUrl || classifyDatabaseUrl(databaseUrl) !== 'postgresql') {
-    return null
-  }
-
-  try {
-    const hostname = new URL(databaseUrl).hostname.toLowerCase()
-    return hostname.includes('supabase') || hostname.includes('pooler.supabase.com') ? 'shared' : 'local'
-  } catch {
-    return null
-  }
+  return null
 }
 
-const normalizePostgresDatabaseUrl = (databaseUrl: string, mode: DatabaseConfigMode) => {
-  const parsed = new URL(databaseUrl.trim())
+const normalizeRemoteApiUrl = (apiUrl?: string | null) => {
+  const normalized = String(apiUrl || '').trim()
+  if (!normalized) return ''
 
-  if (!POSTGRES_PROTOCOLS.has(parsed.protocol)) {
-    throw new Error('La URL debe empezar por postgres:// o postgresql://')
+  const parsed = new URL(normalized)
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('La URL de API debe empezar por https:// o http://')
   }
 
-  if (mode === 'shared') {
-    if (!parsed.searchParams.has('sslmode')) {
-      parsed.searchParams.set('sslmode', 'require')
-    }
-    if (!parsed.searchParams.has('connection_limit')) {
-      parsed.searchParams.set('connection_limit', '3')
-    }
-    if (!parsed.searchParams.has('pool_timeout')) {
-      parsed.searchParams.set('pool_timeout', '20')
-    }
+  parsed.hash = ''
+  parsed.search = ''
+  parsed.pathname = parsed.pathname.replace(/\/+$/, '')
+  if (!parsed.pathname.endsWith('/api')) {
+    parsed.pathname = `${parsed.pathname}/api`.replace(/\/+/g, '/')
   }
 
-  return parsed.toString()
+  return parsed.toString().replace(/\/$/, '')
 }
 
 const toSqliteDatabaseUrl = (dbPath: string) => `file:${dbPath.replace(/\\/g, '/')}`
@@ -175,12 +174,14 @@ export const createDatabaseConfigService = (options: { isDevelopment: boolean })
     if (options.isDevelopment) {
       const databaseUrl = process.env.DATABASE_URL
       const databaseUrlKind = classifyDatabaseUrl(databaseUrl)
+      const apiUrl = normalizeRemoteApiUrl(process.env[API_URL_ENV_KEY] || process.env.VITE_API_URL)
 
       return {
         configured: true,
         needsSetup: false,
-        mode: inferDatabaseMode(databaseUrl, process.env[DATABASE_MODE_ENV_KEY]),
+        mode: inferDatabaseMode(databaseUrl, process.env[DATABASE_MODE_ENV_KEY], apiUrl),
         databaseUrlKind,
+        apiUrl: apiUrl || undefined,
         envPath: null,
         writableEnvPath,
         userDataPath: getUserDataDir(),
@@ -192,19 +193,77 @@ export const createDatabaseConfigService = (options: { isDevelopment: boolean })
     const productionEnv = readProductionEnv()
     const databaseUrl = productionEnv.values.DATABASE_URL || process.env.DATABASE_URL
     const databaseUrlKind = classifyDatabaseUrl(databaseUrl)
-    const mode = inferDatabaseMode(databaseUrl, productionEnv.values[DATABASE_MODE_ENV_KEY])
+    let apiUrl = ''
+    try {
+      apiUrl = normalizeRemoteApiUrl(
+        productionEnv.values[API_URL_ENV_KEY] ||
+          productionEnv.values.VITE_API_URL ||
+          process.env[API_URL_ENV_KEY] ||
+          process.env.VITE_API_URL
+      )
+    } catch {
+      apiUrl = ''
+    }
+    const explicitMode = productionEnv.values[DATABASE_MODE_ENV_KEY]
+    const mode = inferDatabaseMode(databaseUrl, explicitMode, apiUrl)
 
-    if (databaseUrlKind === 'postgresql' || databaseUrlKind === 'sqlite') {
+    if (apiUrl && mode === 'remote') {
       return {
         configured: true,
         needsSetup: false,
-        mode,
+        mode: 'remote',
+        databaseUrlKind,
+        apiUrl,
+        envPath: productionEnv.filePath,
+        writableEnvPath,
+        userDataPath: getUserDataDir(),
+        legacySqlitePath,
+        legacySqliteExists
+      }
+    }
+
+    if (explicitMode === 'remote' && !apiUrl) {
+      return {
+        configured: false,
+        needsSetup: true,
+        mode: 'remote',
+        databaseUrlKind,
+        envPath: productionEnv.filePath,
+        writableEnvPath,
+        userDataPath: getUserDataDir(),
+        legacySqlitePath,
+        legacySqliteExists,
+        reason: 'Falta la URL de la API central para arrancar en modo remoto.'
+      }
+    }
+
+    if (databaseUrlKind === 'sqlite') {
+      return {
+        configured: true,
+        needsSetup: false,
+        mode: 'local',
         databaseUrlKind,
         envPath: productionEnv.filePath,
         writableEnvPath,
         userDataPath: getUserDataDir(),
         legacySqlitePath,
         legacySqliteExists
+      }
+    }
+
+    if (databaseUrlKind === 'postgresql') {
+      return {
+        configured: false,
+        needsSetup: true,
+        mode,
+        databaseUrlKind,
+        envPath: productionEnv.filePath,
+        writableEnvPath,
+        userDataPath: getUserDataDir(),
+        legacySqlitePath,
+        legacySqliteExists,
+        reason:
+          'Este instalador tiene una DATABASE_URL PostgreSQL/Supabase. Para una base compartida usa modo API remota; la DATABASE_URL debe vivir solo en la API central.'
       }
     }
 
@@ -230,34 +289,43 @@ export const createDatabaseConfigService = (options: { isDevelopment: boolean })
   const configure = async (payload: DatabaseConfigurePayload): Promise<DatabaseConfigureResult> => {
     try {
       const mode = payload.mode
-      if (mode !== 'local' && mode !== 'shared') {
+      if (mode !== 'local' && mode !== 'remote') {
         return { success: false, requiresRelaunch: false, error: 'Selecciona un modo de cliente valido.' }
       }
 
-      const rawDatabaseUrl = (payload.databaseUrl || '').trim()
-      if (mode === 'shared' && !rawDatabaseUrl) {
+      const rawApiUrl = (payload.apiUrl || '').trim()
+      if (mode === 'remote' && !rawApiUrl) {
         return {
           success: false,
           requiresRelaunch: false,
-          error: 'Pega la DATABASE_URL de Supabase para configurar un cliente compartido.'
+          error: 'Pega la URL de la API central para configurar el cliente remoto.'
         }
       }
 
-      const normalizedDatabaseUrl =
-        mode === 'local'
-          ? toSqliteDatabaseUrl(getProductionDbPath())
-          : normalizePostgresDatabaseUrl(rawDatabaseUrl, mode)
       const envPath = getWritableEnvPath()
       const currentContent = await readEnvFile(envPath)
       const currentValues = parseEnvContent(currentContent)
+      const nextValues: Record<string, string> =
+        mode === 'local'
+          ? {
+              ...currentValues,
+              DATABASE_URL: toSqliteDatabaseUrl(getProductionDbPath()),
+              NODE_ENV: 'production',
+              PORT: currentValues.PORT || process.env.PORT || '3001',
+              [DATABASE_MODE_ENV_KEY]: mode
+            }
+          : {
+              NODE_ENV: 'production',
+              PORT: currentValues.PORT || process.env.PORT || '3001',
+              [DATABASE_MODE_ENV_KEY]: mode,
+              [API_URL_ENV_KEY]: normalizeRemoteApiUrl(rawApiUrl),
+              VITE_API_URL: normalizeRemoteApiUrl(rawApiUrl)
+            }
 
-      const nextContent = updateEnvContent(currentContent, {
-        ...currentValues,
-        DATABASE_URL: normalizedDatabaseUrl,
-        NODE_ENV: 'production',
-        PORT: currentValues.PORT || process.env.PORT || '3001',
-        [DATABASE_MODE_ENV_KEY]: mode
-      })
+      const nextContent =
+        mode === 'local'
+          ? updateEnvContent(currentContent, nextValues)
+          : serializeEnvValues(nextValues)
 
       await fsPromises.mkdir(path.dirname(envPath), { recursive: true })
       await fsPromises.writeFile(envPath, nextContent, 'utf-8')
@@ -265,14 +333,16 @@ export const createDatabaseConfigService = (options: { isDevelopment: boolean })
       writeMainLog('info', 'Database configuration saved', {
         envPath,
         mode,
-        databaseUrlKind: mode === 'local' ? 'sqlite' : 'postgresql'
+        databaseUrlKind: mode === 'local' ? 'sqlite' : 'missing',
+        remoteApiConfigured: mode === 'remote'
       })
 
       return {
         success: true,
         requiresRelaunch: true,
         envPath,
-        mode
+        mode,
+        apiUrl: mode === 'remote' ? nextValues[API_URL_ENV_KEY] : undefined
       }
     } catch (error) {
       writeMainLog('error', 'Failed to save database configuration', error)

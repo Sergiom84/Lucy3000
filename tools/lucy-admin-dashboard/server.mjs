@@ -228,6 +228,7 @@ async function fetchClientSnapshot(clientConfig) {
         t.id,
         t.name,
         t.slug,
+        t."tenantCode",
         t.status AS "tenantStatus",
         t."createdAt",
         t."updatedAt",
@@ -296,6 +297,7 @@ async function fetchClientSnapshot(clientConfig) {
           id: row.id,
           name: row.name,
           slug: row.slug,
+          tenantCode: row.tenantCode,
           tenantStatus: row.tenantStatus,
           createdAt: row.createdAt,
           updatedAt: row.updatedAt,
@@ -1200,7 +1202,8 @@ function renderHtml(tokenEnabled) {
         if (tenant.id === 'local' || tenant.slug === 'local') {
           return 'Proyecto conectado';
         }
-        return 'Tenant interno: ' + tenant.name + ' / ' + tenant.slug;
+        const publicCode = tenant.tenantCode ? 'ID cliente: ' + tenant.tenantCode : 'ID cliente pendiente';
+        return publicCode + ' / ' + tenant.name + ' / ' + tenant.slug;
       }
 
       function getDashboardUrl(supabaseUrl) {

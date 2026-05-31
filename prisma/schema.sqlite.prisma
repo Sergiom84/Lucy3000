@@ -17,12 +17,13 @@ datasource db {
 // ============================================
 
 model Tenant {
-  id        String   @id @default(uuid())
-  name      String
-  slug      String   @unique
-  status    String   @default("ACTIVE")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(uuid())
+  name       String
+  slug       String   @unique
+  tenantCode Int      @unique @default(1)
+  status     String   @default("ACTIVE")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   license                  TenantLicense?
   users                    User[]
