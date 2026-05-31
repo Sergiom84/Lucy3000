@@ -21,6 +21,16 @@ const createAuthHeader = () => {
   return `Bearer ${token}`
 }
 
+const createPlatformAuthHeader = () => {
+  process.env.JWT_SECRET = 'test-jwt-secret'
+  const token = jwt.sign(
+    { id: 'platform-1', email: 'platform@lucy3000.com', role: 'ADMIN', isPlatformAdmin: true },
+    process.env.JWT_SECRET,
+    { expiresIn: '1h' }
+  )
+  return `Bearer ${token}`
+}
+
 const createEmployeeAuthHeader = () => {
   process.env.JWT_SECRET = 'test-jwt-secret'
   const token = jwt.sign(
@@ -351,6 +361,7 @@ describe('API smoke tests', () => {
     prismaMock.agendaDayNote.findMany.mockResolvedValue([])
     prismaMock.dashboardReminder.findMany.mockResolvedValue([])
     prismaMock.setting.findUnique.mockResolvedValue(null)
+    prismaMock.client.findUnique.mockResolvedValue({ id: 'client-1' })
     prismaMock.sale.findMany.mockResolvedValue([])
     prismaMock.quote.findMany.mockResolvedValue([])
     prismaMock.user.findUnique.mockResolvedValue({ id: 'user-1', name: 'Lucy' })
@@ -402,7 +413,7 @@ describe('API smoke tests', () => {
           email: 'owner@example.com',
           name: 'Owner',
           role: 'ADMIN',
-          isPlatformAdmin: true,
+          isPlatformAdmin: false,
           tenant: {
             id: 'tenant-1',
             name: 'Lucy3000',
@@ -434,7 +445,16 @@ describe('API smoke tests', () => {
           id: 'admin-1',
           email: 'owner@example.com',
           name: 'Owner',
-          role: 'ADMIN'
+          role: 'ADMIN',
+          isPlatformAdmin: false
+        })
+      })
+    )
+    expect(tx.user.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          role: 'ADMIN',
+          isPlatformAdmin: false
         })
       })
     )
@@ -461,6 +481,106 @@ describe('API smoke tests', () => {
     expect(response.status).toBe(409)
     expect(response.body.error).toBe('Bootstrap already completed')
     expect(tx.user.create).not.toHaveBeenCalled()
+  })
+
+  it('GET /api/tenants rejects tenant admins without platform access', async () => {
+    const response = await request(app)
+      .get('/api/tenants')
+      .set('Authorization', createAuthHeader())
+
+    expect(response.status).toBe(403)
+    expect(response.body.error).toBe('Platform admin access required')
+    expect(prismaMock.tenant.findMany).not.toHaveBeenCalled()
+  })
+
+  it('GET /api/tenants accepts explicit platform admins', async () => {
+    prismaMock.tenant.findMany.mockResolvedValue([])
+
+    const response = await request(app)
+      .get('/api/tenants')
+      .set('Authorization', createPlatformAuthHeader())
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual([])
+  })
+
+  it('POST /api/tenants creates tenant admins without platform access', async () => {
+    const tx: any = {
+      tenant: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({
+          id: 'tenant-2',
+          name: 'Nuevo Centro',
+          slug: 'nuevo-centro',
+          status: 'ACTIVE',
+          createdAt: new Date('2026-05-31T10:00:00.000Z'),
+          updatedAt: new Date('2026-05-31T10:00:00.000Z'),
+          license: {
+            id: 'license-2',
+            status: 'PENDING',
+            plan: 'pending',
+            trialEndsAt: new Date('2026-06-07T10:00:00.000Z'),
+            activatedAt: null,
+            blockedAt: null,
+            cancelledAt: null,
+            notes: null
+          },
+          users: [
+            {
+              id: 'tenant-admin-2',
+              email: 'admin@nuevocentro.com',
+              username: 'nuevo',
+              name: 'Admin Nuevo',
+              role: 'ADMIN',
+              isActive: true,
+              isPlatformAdmin: false
+            }
+          ]
+        })
+      }
+    }
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx))
+
+    const response = await request(app)
+      .post('/api/tenants')
+      .set('Authorization', createPlatformAuthHeader())
+      .send({
+        name: 'Nuevo Centro',
+        adminEmail: 'admin@nuevocentro.com',
+        adminUsername: 'nuevo',
+        adminPassword: 'supersecure123',
+        adminName: 'Admin Nuevo'
+      })
+
+    expect(response.status).toBe(201)
+    expect(tx.tenant.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          users: expect.objectContaining({
+            create: expect.objectContaining({
+              role: 'ADMIN',
+              isPlatformAdmin: false
+            })
+          })
+        })
+      })
+    )
+    expect(response.body.users[0]).toEqual(
+      expect.objectContaining({
+        role: 'ADMIN',
+        isPlatformAdmin: false
+      })
+    )
+  })
+
+  it('POST /api/tenants/current/start-trial rejects employees', async () => {
+    const response = await request(app)
+      .post('/api/tenants/current/start-trial')
+      .set('Authorization', createEmployeeAuthHeader())
+
+    expect(response.status).toBe(403)
+    expect(response.body.error).toBe('Admin access required')
+    expect(prismaMock.tenantLicense.findUnique).not.toHaveBeenCalled()
   })
 
   it('POST /api/sales rejects invalid payload with 400', async () => {
@@ -787,6 +907,31 @@ describe('API smoke tests', () => {
 
     expect(response.status).toBe(400)
     expect(response.body.error).toBe('Validation error')
+  })
+
+  it('POST /api/quotes rejects clients outside the tenant context', async () => {
+    prismaMock.client.findUnique.mockResolvedValueOnce(null)
+
+    const response = await request(app)
+      .post('/api/quotes')
+      .set('Authorization', createAuthHeader())
+      .send({
+        clientId: '3adf3ca8-c749-4f40-9f2e-54a8ff0f8f57',
+        professional: 'LUCY',
+        items: [
+          {
+            productId: null,
+            serviceId: null,
+            description: 'Presupuesto de prueba',
+            quantity: 1,
+            price: 50
+          }
+        ]
+      })
+
+    expect(response.status).toBe(404)
+    expect(response.body.error).toBe('Cliente no encontrado')
+    expect(prismaMock.quote.create).not.toHaveBeenCalled()
   })
 
   it('POST /api/appointments accepts cabin payload and creates appointment', async () => {

@@ -51,6 +51,39 @@ export const createQuote = async (req: Request, res: Response) => {
       price: Number(item.price) || 0
     }))
 
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      select: { id: true }
+    })
+
+    if (!client) {
+      return res.status(404).json({ error: 'Cliente no encontrado' })
+    }
+
+    const productIds = [...new Set(validItems.map((item: any) => item.productId).filter(Boolean))]
+    for (const productId of productIds) {
+      const product = await prisma.product.findUnique({
+        where: { id: productId },
+        select: { id: true }
+      })
+
+      if (!product) {
+        return res.status(404).json({ error: 'Producto no encontrado' })
+      }
+    }
+
+    const serviceIds = [...new Set(validItems.map((item: any) => item.serviceId).filter(Boolean))]
+    for (const serviceId of serviceIds) {
+      const service = await prisma.service.findUnique({
+        where: { id: serviceId },
+        select: { id: true }
+      })
+
+      if (!service) {
+        return res.status(404).json({ error: 'Tratamiento no encontrado' })
+      }
+    }
+
     const subtotal = validItems.reduce((sum: number, item: any) => sum + item.quantity * item.price, 0)
     const discountAmount = Number(discount) || 0
     const total = Math.max(0, subtotal - discountAmount)

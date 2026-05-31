@@ -31,7 +31,7 @@ const isLicenseBypassRequest = (req: Request) => {
     return true
   }
 
-  return req.originalUrl.startsWith('/api/tenants') && req.method === 'GET'
+  return false
 }
 
 const getTestFallbackUser = (decoded: any) => {
@@ -43,7 +43,7 @@ const getTestFallbackUser = (decoded: any) => {
     role: String(decoded.role || 'ADMIN'),
     tenantId: String(decoded.tenantId || 'tenant-test'),
     tenantName: 'Test tenant',
-    isPlatformAdmin: Boolean(decoded.isPlatformAdmin ?? decoded.role === 'ADMIN'),
+    isPlatformAdmin: Boolean(decoded.isPlatformAdmin),
     licenseStatus: 'ACTIVE'
   }
 }

@@ -55,6 +55,21 @@ const slugify = (value) =>
     .replace(/^-+|-+$/g, '')
     .slice(0, 80)
 
+const getSupabaseProjectRef = (supabaseUrl) => {
+  try {
+    const hostname = new URL(String(supabaseUrl || '')).hostname
+    const match = hostname.match(/^([a-z0-9-]+)\.supabase\.co$/i)
+    return match?.[1] || ''
+  } catch (_error) {
+    return ''
+  }
+}
+
+const getSupabaseDashboardUrl = (supabaseUrl) => {
+  const projectRef = getSupabaseProjectRef(supabaseUrl)
+  return projectRef ? `https://supabase.com/dashboard/project/${projectRef}` : ''
+}
+
 function loadRawConfig() {
   if (!existsSync(configPath)) {
     return { clients: [] }
@@ -114,6 +129,8 @@ function upsertConfiguredClient(input) {
     throw new Error('Business name is required')
   }
 
+  const supabaseUrl = String(input.supabaseUrl || '').trim()
+  const dashboardUrl = String(input.dashboardUrl || '').trim() || getSupabaseDashboardUrl(supabaseUrl)
   const databaseUrl = String(input.databaseUrl || '').trim()
   if (databaseUrl && !/^postgres(?:ql)?:\/\//i.test(databaseUrl)) {
     throw new Error('Pooler URL must start with postgresql:// or postgres://')
@@ -131,8 +148,8 @@ function upsertConfiguredClient(input) {
     phone: String(input.phone || '').trim(),
     address: String(input.address || '').trim(),
     notes: String(input.notes || '').trim(),
-    supabaseUrl: String(input.supabaseUrl || '').trim(),
-    dashboardUrl: String(input.dashboardUrl || '').trim(),
+    supabaseUrl,
+    dashboardUrl,
     tenantId: String(input.tenantId || '').trim(),
     databaseUrl: databaseUrl || existing.databaseUrl || '',
     databaseUrlEnv: databaseUrl ? '' : String(existing.databaseUrlEnv || input.databaseUrlEnv || '').trim()
@@ -656,6 +673,29 @@ function renderHtml(tokenEnabled) {
         color: #1f2937;
         border-color: #dbe2ea;
       }
+      .link-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        width: fit-content;
+        margin: 0 6px 6px 0;
+      }
+      .link-icon {
+        display: inline-grid;
+        place-items: center;
+        width: 24px;
+        height: 18px;
+        border-radius: 5px;
+        background: #3ecf8e;
+        color: #063827;
+        font-size: 11px;
+        font-weight: 800;
+        line-height: 1;
+      }
+      .link-icon-project {
+        background: #d8e2ef;
+        color: #334155;
+      }
       .metrics {
         display: grid;
         grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -885,7 +925,7 @@ function renderHtml(tokenEnabled) {
             <input name="supabaseUrl" inputmode="url" placeholder="https://PROJECT_REF.supabase.co" />
           </label>
           <label class="span-2">
-            URL Dashboard Supabase
+            URL Dashboard Supabase opcional
             <input name="dashboardUrl" inputmode="url" placeholder="https://supabase.com/dashboard/project/PROJECT_REF" />
           </label>
           <label class="span-2">
@@ -939,8 +979,8 @@ function renderHtml(tokenEnabled) {
         INACTIVE: 'Inactivo'
       };
       const actionLabel = {
-        startTrial: 'Iniciar prueba',
-        activate: 'Activar pago',
+        startTrial: 'Empezar prueba 7 dias',
+        activate: 'Activar plan Pro',
         block: 'Bloquear',
         cancel: 'Cancelar'
       };
@@ -1084,7 +1124,7 @@ function renderHtml(tokenEnabled) {
         ].join('');
 
         setText(row, '.name', client.businessName || client.label);
-        setText(row, '.tenant', tenant ? 'Tenant: ' + tenant.name + ' / ' + tenant.slug : 'Tenant no disponible');
+        setText(row, '.tenant', getTenantLabel(tenant));
         setText(row, '.notes', client.notes || '');
         setText(row, '.contact', client.contactName || mainAdmin?.name || '-');
         setText(row, '.phone', [client.phone, client.contactEmail || mainAdmin?.email].filter(Boolean).join(' / '));
@@ -1095,7 +1135,12 @@ function renderHtml(tokenEnabled) {
         pill.textContent = statusLabel[status] || status;
 
         const dateParts = [];
-        if (license?.trialEndsAt) dateParts.push('Prueba: ' + formatDate(license.trialEndsAt));
+        if ((status === 'TRIAL' || status === 'TRIAL_EXPIRED') && license?.trialEndsAt) {
+          dateParts.push('Prueba hasta: ' + formatDate(license.trialEndsAt));
+        }
+        if (status === 'PENDING') {
+          dateParts.push('Pendiente de OK');
+        }
         if (license?.activatedAt) dateParts.push('Activado: ' + formatDate(license.activatedAt));
         if (tenant?.serverNow) dateParts.push('Servidor: ' + formatDate(tenant.serverNow));
         setText(row, '.dates', dateParts.join(' / '));
@@ -1110,18 +1155,29 @@ function renderHtml(tokenEnabled) {
         );
 
         const links = row.querySelector('.links');
-        if (client.dashboardUrl) {
-          links.appendChild(linkButton('Abrir Supabase', client.dashboardUrl));
-        } else if (client.supabaseUrl) {
-          links.appendChild(linkButton('URL proyecto', client.supabaseUrl));
-        } else {
+        const dashboardUrl = client.dashboardUrl || getDashboardUrl(client.supabaseUrl);
+        if (dashboardUrl) {
+          links.appendChild(linkButton('Dashboard', dashboardUrl, 'S'));
+        }
+        if (client.supabaseUrl) {
+          links.appendChild(linkButton('API URL', client.supabaseUrl, 'URL', 'project'));
+        }
+        if (!dashboardUrl && !client.supabaseUrl) {
           links.appendChild(textLine('-'));
+        }
+
+        if (client.hasConnection) {
+          links.appendChild(textLine('Pooler guardada'));
+        } else {
+          links.appendChild(textLine('Pooler pendiente'));
         }
 
         const actions = row.querySelector('.actions');
         if (tenant && client.connected) {
-          if (status !== 'ACTIVE' && status !== 'TRIAL') {
-            actions.appendChild(actionButton('startTrial', client.id, tenant.id));
+          if (status === 'PENDING' || status === 'TRIAL_EXPIRED') {
+            const trialLabel =
+              status === 'TRIAL_EXPIRED' ? 'Reabrir prueba 7 dias' : 'Empezar prueba 7 dias';
+            actions.appendChild(actionButton('startTrial', client.id, tenant.id, trialLabel));
           }
           if (status !== 'ACTIVE') {
             actions.appendChild(actionButton('activate', client.id, tenant.id));
@@ -1139,26 +1195,50 @@ function renderHtml(tokenEnabled) {
         return row;
       }
 
+      function getTenantLabel(tenant) {
+        if (!tenant) return 'Tenant no disponible';
+        if (tenant.id === 'local' || tenant.slug === 'local') {
+          return 'Proyecto conectado';
+        }
+        return 'Tenant interno: ' + tenant.name + ' / ' + tenant.slug;
+      }
+
+      function getDashboardUrl(supabaseUrl) {
+        if (!supabaseUrl) return '';
+        try {
+          const hostname = new URL(supabaseUrl).hostname;
+          const match = hostname.match(/^([a-z0-9-]+)\\.supabase\\.co$/i);
+          return match ? 'https://supabase.com/dashboard/project/' + match[1] : '';
+        } catch (_error) {
+          return '';
+        }
+      }
+
       function textLine(text) {
         const el = document.createElement('div');
         el.textContent = text;
         return el;
       }
 
-      function linkButton(text, href) {
+      function linkButton(text, href, iconText = 'S', iconVariant = '') {
         const link = document.createElement('a');
         link.className = 'link-button btn-link';
-        link.textContent = text;
         link.href = href;
         link.target = '_blank';
         link.rel = 'noreferrer';
+        const icon = document.createElement('span');
+        icon.className = 'link-icon' + (iconVariant ? ' link-icon-' + iconVariant : '');
+        icon.textContent = iconText;
+        const label = document.createElement('span');
+        label.textContent = text;
+        link.replaceChildren(icon, label);
         return link;
       }
 
-      function actionButton(action, clientId, tenantId) {
+      function actionButton(action, clientId, tenantId, labelOverride = '') {
         const button = document.createElement('button');
         button.type = 'button';
-        button.textContent = actionLabel[action];
+        button.textContent = labelOverride || actionLabel[action];
         button.className =
           action === 'startTrial'
             ? 'btn-trial'
@@ -1167,7 +1247,7 @@ function renderHtml(tokenEnabled) {
               : action === 'block'
                 ? 'btn-block'
                 : 'btn-cancel';
-        button.addEventListener('click', () => runAction(action, clientId, tenantId));
+        button.addEventListener('click', () => runAction(action, clientId, tenantId, button.textContent));
         return button;
       }
 
@@ -1202,8 +1282,7 @@ function renderHtml(tokenEnabled) {
         }
       }
 
-      async function runAction(action, clientId, tenantId) {
-        const label = actionLabel[action];
+      async function runAction(action, clientId, tenantId, label = actionLabel[action]) {
         if (!window.confirm(label + ' para este cliente?')) return;
         try {
           await requestJson('/api/license-action', {

@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import {
   fetchCashAnalytics,
+  fetchCashClients,
   fetchCashFilterOptions,
   fetchCashHistory,
   fetchCashOverview,
@@ -38,6 +39,7 @@ export const useCashPageData = ({ dateRange, filters, period }: UseCashPageDataA
   const [ranking, setRanking] = useState<CashRanking | null>(null)
   const [initialDataLoaded, setInitialDataLoaded] = useState(false)
   const [clients, setClients] = useState<CashClientOption[]>([])
+  const [clientsLoading, setClientsLoading] = useState(false)
   const [services, setServices] = useState<CashServiceOption[]>([])
   const [products, setProducts] = useState<CashProductOption[]>([])
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
@@ -47,6 +49,7 @@ export const useCashPageData = ({ dateRange, filters, period }: UseCashPageDataA
   const [cashHistory, setCashHistory] = useState<CashHistoryEntry[]>([])
   const [cashOverview, setCashOverview] = useState<CashOverview | null>(null)
   const [cashOverviewLoading, setCashOverviewLoading] = useState(false)
+  const clientOptionsRequest = useRef(0)
 
   const loadSummary = async () => {
     try {
@@ -61,11 +64,32 @@ export const useCashPageData = ({ dateRange, filters, period }: UseCashPageDataA
   const loadFilterOptions = async () => {
     try {
       const nextOptions = await fetchCashFilterOptions()
-      setClients(nextOptions.clients)
       setServices(nextOptions.services)
       setProducts(nextOptions.products)
     } catch {
       toast.error('No se pudieron cargar los filtros de caja')
+    }
+  }
+
+  const loadClientOptions = async (search = '') => {
+    const requestId = clientOptionsRequest.current + 1
+    clientOptionsRequest.current = requestId
+
+    try {
+      setClientsLoading(true)
+      const nextClients = await fetchCashClients(search)
+      if (requestId === clientOptionsRequest.current) {
+        setClients(nextClients)
+      }
+    } catch {
+      if (requestId === clientOptionsRequest.current) {
+        setClients([])
+      }
+      toast.error('No se pudieron cargar las clientas')
+    } finally {
+      if (requestId === clientOptionsRequest.current) {
+        setClientsLoading(false)
+      }
     }
   }
 
@@ -163,9 +187,11 @@ export const useCashPageData = ({ dateRange, filters, period }: UseCashPageDataA
     cashOverviewLoading,
     clearPrivateCashData,
     clients,
+    clientsLoading,
     loadCashHistory,
     loadAnalytics,
     loadCashOverview,
+    loadClientOptions,
     loadPrivateNoTicketCash,
     loadRanking,
     loadSummary,

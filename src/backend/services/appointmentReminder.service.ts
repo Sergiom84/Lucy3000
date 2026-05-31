@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '../db'
+import { runWithTenantContext } from '../tenant/context'
 import { getAppointmentDisplayName, getAppointmentDisplayPhone } from '../utils/customer-display'
 import { getAppointmentServiceLabel } from '../utils/appointment-services'
 import { whatsappService } from './whatsapp.service'
@@ -137,6 +138,25 @@ class AppointmentReminderService {
 
     const reminderDaysBefore = parseReminderDaysBefore()
     const { start, end } = getReminderUtcRange(new Date(), reminderDaysBefore)
+    const tenants = await prisma.tenant.findMany({
+      where: { status: 'ACTIVE' },
+      select: { id: true }
+    })
+
+    for (const tenant of tenants) {
+      await runWithTenantContext(
+        {
+          tenantId: tenant.id,
+          userId: 'system:whatsapp-reminders',
+          isPlatformAdmin: false,
+          licenseStatus: 'BACKGROUND'
+        },
+        () => this.sendScheduledRemindersForTenant(start, end)
+      )
+    }
+  }
+
+  private async sendScheduledRemindersForTenant(start: Date, end: Date) {
     const appointments = await prisma.appointment.findMany({
       where: {
         reminder: true,

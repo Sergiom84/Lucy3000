@@ -111,7 +111,7 @@ export const getBootstrapStatus = async (_req: Request, res: Response) => {
 export const bootstrapAdmin = async (req: Request, res: Response) => {
   try {
     // Gate de seguridad para la API central publica: si BOOTSTRAP_TOKEN esta
-    // definido, solo quien lo conozca puede crear el primer platform admin.
+    // definido, solo quien lo conozca puede crear el primer centro/admin.
     // Sin la variable (instalaciones locales/dev) el comportamiento no cambia.
     const requiredToken = process.env.BOOTSTRAP_TOKEN
     if (requiredToken && String(req.body.bootstrapToken || '') !== requiredToken) {
@@ -155,7 +155,7 @@ export const bootstrapAdmin = async (req: Request, res: Response) => {
           password: await bcrypt.hash(password, 10),
           name: String(name).trim(),
           role: 'ADMIN',
-          isPlatformAdmin: true
+          isPlatformAdmin: false
         },
         include: {
           tenant: {

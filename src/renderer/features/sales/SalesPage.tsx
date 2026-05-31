@@ -10,7 +10,7 @@ import {
   ShoppingCart,
   Trash2
 } from 'lucide-react'
-import { format } from 'date-fns'
+import { endOfMonth, format, startOfMonth } from 'date-fns'
 import { es } from 'date-fns/locale'
 import toast from 'react-hot-toast'
 import Modal from '../../components/Modal'
@@ -31,8 +31,7 @@ import { getSaleDisplayName } from '../../../shared/customerDisplay'
 import {
   collectPendingSaleRecord,
   createQuoteRecord,
-  createSaleRecord,
-  preloadSalesCatalogs
+  createSaleRecord
 } from './salesApi'
 import {
   calculateAdjustedItemPrice,
@@ -65,6 +64,14 @@ import {
 } from './types'
 import { useSalesPageData } from './useSalesPageData'
 
+const buildDefaultSalesDateFilter = () => {
+  const today = new Date()
+  return {
+    startDate: format(startOfMonth(today), 'yyyy-MM-dd'),
+    endDate: format(endOfMonth(today), 'yyyy-MM-dd')
+  }
+}
+
 export default function Sales() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -95,7 +102,7 @@ export default function Sales() {
   const [clientModalOpen, setClientModalOpen] = useState(false)
   const [clientSearch, setClientSearch] = useState('')
   const [historySearch, setHistorySearch] = useState('')
-  const [dateFilter, setDateFilter] = useState({ startDate: '', endDate: '' })
+  const [dateFilter, setDateFilter] = useState(buildDefaultSalesDateFilter)
   const [accountBalanceConfirmModalOpen, setAccountBalanceConfirmModalOpen] = useState(false)
   const [cashTicketDecisionModalOpen, setCashTicketDecisionModalOpen] = useState(false)
   const [combinedPaymentModalOpen, setCombinedPaymentModalOpen] = useState(false)
@@ -132,6 +139,7 @@ export default function Sales() {
     legendItems,
     loadAccountBalanceHistory,
     loadCatalog,
+    loadClientById,
     loadClients,
     loadPendingCollectionSale,
     loadSales,
@@ -183,9 +191,8 @@ export default function Sales() {
         setPendingCollectionExecution(null)
         setPendingCollectionCashDecisionModalOpen(false)
         void loadCatalog()
-        void preloadSalesCatalogs()
         if (prefilledClientId) {
-          void loadClients()
+          void loadClientById(prefilledClientId)
         }
       }
       return
@@ -200,12 +207,33 @@ export default function Sales() {
   }, [pendingSaleId, prefilledClientId, view])
 
   useEffect(() => {
-    if (!prefilledClientId || prefillApplied.current.client || clients.length === 0) return
-    const client = clients.find((item) => item.id === prefilledClientId)
-    if (!client) return
-    setSelectedClient(client)
-    prefillApplied.current.client = true
+    if (!prefilledClientId || prefillApplied.current.client) return
+
+    const existingClient = clients.find((item) => item.id === prefilledClientId)
+    if (existingClient) {
+      setSelectedClient(existingClient)
+      prefillApplied.current.client = true
+      return
+    }
+
+    void loadClientById(prefilledClientId).then((client) => {
+      if (!client || prefillApplied.current.client) return
+      setSelectedClient(client)
+      prefillApplied.current.client = true
+    })
   }, [clients, prefilledClientId])
+
+  useEffect(() => {
+    if (!clientModalOpen) return
+
+    const timeoutId = window.setTimeout(() => {
+      void loadClients(clientSearch)
+    }, clientSearch.trim() ? 250 : 0)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [clientModalOpen, clientSearch])
 
   useEffect(() => {
     if (!prefilledServiceId || prefillApplied.current.service || services.length === 0) return
@@ -1732,9 +1760,6 @@ export default function Sales() {
                   <button
                     onClick={() => {
                       setClientModalOpen(true)
-                      if (!clientsLoading) {
-                        void loadClients()
-                      }
                     }}
                     className="btn btn-secondary w-full"
                   >

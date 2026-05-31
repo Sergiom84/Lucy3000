@@ -1,4 +1,5 @@
-import { Filter } from 'lucide-react'
+import { useState } from 'react'
+import { Filter, Search, X } from 'lucide-react'
 import { formatCurrency } from '../../../utils/format'
 import { paymentMethodLabel } from '../../../utils/tickets'
 import type {
@@ -17,9 +18,15 @@ type CashFilterChangeHandler = <Key extends keyof CashFilters>(key: Key, value: 
 type CashPeriodPreset = Exclude<Period, 'YEAR' | 'CUSTOM'>
 
 type CashRankingFiltersSectionProps = {
+  clientSearch: string
   clients: CashClientOption[]
+  clientsLoading: boolean
   dateRange: CashDateRange
   filters: CashFilters
+  onClearClientFilter: () => void
+  onClientSearchChange: (value: string) => void
+  onClientSearchFocus: () => void
+  onClientSelect: (client: CashClientOption) => void
   onDateRangeChange: (field: keyof CashDateRange, value: string) => void
   onFilterChange: CashFilterChangeHandler
   onPeriodChange: (period: CashPeriodPreset) => void
@@ -44,9 +51,15 @@ const periodOptions: Array<{ label: string; value: CashPeriodPreset }> = [
 ]
 
 export default function CashRankingFiltersSection({
+  clientSearch,
   clients,
+  clientsLoading,
   dateRange,
   filters,
+  onClearClientFilter,
+  onClientSearchChange,
+  onClientSearchFocus,
+  onClientSelect,
   onDateRangeChange,
   onFilterChange,
   onPeriodChange,
@@ -58,6 +71,12 @@ export default function CashRankingFiltersSection({
   rankingGroups,
   services
 }: CashRankingFiltersSectionProps) {
+  const [clientOptionsOpen, setClientOptionsOpen] = useState(false)
+  const selectedClientLabel =
+    filters.clientId && clientSearch.trim()
+      ? clientSearch
+      : ''
+
   return (
     <div className="grid gap-6 xl:grid-cols-[1.25fr_1fr]">
       <div className="card space-y-6">
@@ -138,18 +157,65 @@ export default function CashRankingFiltersSection({
         </div>
 
         <div className="grid md:grid-cols-2 gap-3">
-          <select
-            value={filters.clientId}
-            onChange={(event) => onFilterChange('clientId', event.target.value)}
-            className="input"
+          <div
+            className="relative"
+            onBlur={() => {
+              window.setTimeout(() => setClientOptionsOpen(false), 120)
+            }}
           >
-            <option value="">Todos los clientes</option>
-            {clients.map((client) => (
-              <option key={client.id} value={client.id}>
-                {client.firstName} {client.lastName}
-              </option>
-            ))}
-          </select>
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={selectedClientLabel || clientSearch}
+              onChange={(event) => {
+                setClientOptionsOpen(true)
+                onClientSearchChange(event.target.value)
+              }}
+              onFocus={() => {
+                setClientOptionsOpen(true)
+                onClientSearchFocus()
+              }}
+              className="input w-full pl-9 pr-9"
+              placeholder="Todos los clientes"
+            />
+            {filters.clientId ? (
+              <button
+                type="button"
+                onClick={onClearClientFilter}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+                aria-label="Quitar cliente"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            ) : null}
+
+            {clientOptionsOpen ? (
+              <div className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                {clientsLoading ? (
+                  <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">Cargando clientas...</div>
+                ) : clients.length === 0 ? (
+                  <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">Sin resultados</div>
+                ) : (
+                  clients.map((client) => (
+                    <button
+                      key={client.id}
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        onClientSelect(client)
+                        setClientOptionsOpen(false)
+                      }}
+                      className="block w-full px-3 py-2 text-left text-sm transition hover:bg-primary-50 dark:hover:bg-gray-800"
+                    >
+                      <span className="font-medium text-gray-900 dark:text-white">
+                        {client.firstName} {client.lastName}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            ) : null}
+          </div>
 
           <select
             value={filters.paymentMethod}

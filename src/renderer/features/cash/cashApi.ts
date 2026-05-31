@@ -1,6 +1,7 @@
 import api from '../../utils/api'
 import type {
   CashAnalyticsRow,
+  CashClientOption,
   CashDateRange,
   CashFilterOptions,
   CashFilters,
@@ -11,6 +12,8 @@ import type {
   Period,
   PrivateNoTicketCashResponse
 } from './types'
+
+const CLIENT_FILTER_LIMIT = 50
 
 const buildCashAnalyticsParams = (
   period: Period,
@@ -37,17 +40,30 @@ export const fetchCashSummary = async (): Promise<CashSummary> => {
 }
 
 export const fetchCashFilterOptions = async (): Promise<CashFilterOptions> => {
-  const [clientsRes, servicesRes, productsRes] = await Promise.all([
-    api.get('/clients/catalog?isActive=true&limit=5000'),
+  const [servicesRes, productsRes] = await Promise.all([
     api.get('/services?isActive=true'),
     api.get('/products?isActive=true')
   ])
 
   return {
-    clients: clientsRes.data,
+    clients: [],
     products: productsRes.data,
     services: servicesRes.data
   }
+}
+
+export const fetchCashClients = async (search = ''): Promise<CashClientOption[]> => {
+  const params = new URLSearchParams({
+    isActive: 'true',
+    limit: String(CLIENT_FILTER_LIMIT)
+  })
+  const normalizedSearch = search.trim()
+  if (normalizedSearch) {
+    params.set('search', normalizedSearch)
+  }
+
+  const response = await api.get(`/clients/catalog?${params.toString()}`)
+  return Array.isArray(response.data) ? response.data : []
 }
 
 export const fetchCashAnalytics = async (

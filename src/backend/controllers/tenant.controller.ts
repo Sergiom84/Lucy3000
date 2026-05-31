@@ -197,7 +197,8 @@ export const createTenant = async (req: AuthRequest, res: Response) => {
               username: normalizeUsername(adminUsername),
               password: await bcrypt.hash(adminPassword, 10),
               name: String(adminName).trim(),
-              role: 'ADMIN'
+              role: 'ADMIN',
+              isPlatformAdmin: false
             }
           }
         },

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { addDays, addMonths, endOfMonth, format, startOfMonth, subMonths } from 'date-fns'
 import { Unlock } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -34,6 +34,7 @@ import CashSummarySection from './components/CashSummarySection'
 import PrivateCashModal from './components/PrivateCashModal'
 import { useCashPageData } from './useCashPageData'
 import type {
+  CashClientOption,
   CashFilters,
   CashOverviewDateRange,
   CashRankingGroup,
@@ -145,6 +146,8 @@ export default function Cash() {
     buildCashDateRange('DAY', new Date())
   )
   const [filters, setFilters] = useState<CashFilters>(defaultCashFilters)
+  const [cashClientSearch, setCashClientSearch] = useState('')
+  const [selectedCashClientName, setSelectedCashClientName] = useState('')
   const {
     activeCashRegister,
     analyticsLoading,
@@ -153,8 +156,10 @@ export default function Cash() {
     cashOverviewLoading,
     clearPrivateCashData,
     clients,
+    clientsLoading,
     loadAnalytics,
     loadCashOverview,
+    loadClientOptions,
     loadPrivateNoTicketCash,
     loadRanking,
     loadSummary,
@@ -212,6 +217,20 @@ export default function Cash() {
   const [newOpeningBalance, setNewOpeningBalance] = useState('')
   const [editOpeningNotes, setEditOpeningNotes] = useState('')
 
+  useEffect(() => {
+    if (!cashClientSearch.trim() || (filters.clientId && cashClientSearch === selectedCashClientName)) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void loadClientOptions(cashClientSearch)
+    }, 250)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [cashClientSearch, filters.clientId, selectedCashClientName])
+
   const handlePeriodChange = (nextPeriod: CashPeriodPreset) => {
     setPeriod(nextPeriod)
     setCashOverviewDateRange(buildCashDateRange(nextPeriod, new Date()))
@@ -246,8 +265,38 @@ export default function Cash() {
     }))
   }
 
+  const handleCashClientSearchChange = (value: string) => {
+    setCashClientSearch(value)
+
+    if (filters.clientId) {
+      setSelectedCashClientName('')
+      handleCashFilterChange('clientId', '')
+    }
+  }
+
+  const handleCashClientSearchFocus = () => {
+    if (!clientsLoading) {
+      void loadClientOptions(cashClientSearch)
+    }
+  }
+
+  const handleCashClientSelect = (client: CashClientOption) => {
+    const label = `${client.firstName} ${client.lastName}`.trim()
+    setSelectedCashClientName(label)
+    setCashClientSearch(label)
+    handleCashFilterChange('clientId', client.id)
+  }
+
+  const handleClearCashClientFilter = () => {
+    setSelectedCashClientName('')
+    setCashClientSearch('')
+    handleCashFilterChange('clientId', '')
+  }
+
   const handleResetCashFilters = () => {
     setFilters(defaultCashFilters)
+    setSelectedCashClientName('')
+    setCashClientSearch('')
   }
 
   const handlePrepareOpeningBalanceEdit = () => {
@@ -784,13 +833,16 @@ export default function Cash() {
         periodLabel: cashRangeLabel,
         startDate: cashOverviewDateRange.startDate,
         endDate: cashOverviewDateRange.endDate,
-        clientLabel: findOptionLabel(
-          clients,
-          filters.clientId,
-          (client) => client.id,
-          (client) => `${client.firstName} ${client.lastName}`.trim(),
-          'Todos los clientes'
-        ),
+        clientLabel: filters.clientId
+          ? selectedCashClientName ||
+            findOptionLabel(
+              clients,
+              filters.clientId,
+              (client) => client.id,
+              (client) => `${client.firstName} ${client.lastName}`.trim(),
+              'Cliente seleccionado'
+            )
+          : 'Todos los clientes',
         paymentMethodLabel: filters.paymentMethod ? paymentMethodLabel(filters.paymentMethod) : 'Todos los pagos',
         serviceLabel: findOptionLabel(
           services,
@@ -810,7 +862,17 @@ export default function Cash() {
           filters.type === 'SERVICE' ? 'Tratamientos' : filters.type === 'PRODUCT' ? 'Productos' : 'Todo'
       }
     },
-    [cashOverviewDateRange.endDate, cashOverviewDateRange.startDate, cashRangeLabel, clients, filters, period, products, services]
+    [
+      cashOverviewDateRange.endDate,
+      cashOverviewDateRange.startDate,
+      cashRangeLabel,
+      clients,
+      filters,
+      period,
+      products,
+      selectedCashClientName,
+      services
+    ]
   )
 
   const handleExportExcel = async () => {
@@ -915,8 +977,14 @@ export default function Cash() {
 
       <CashRankingFiltersSection
         clients={clients}
+        clientsLoading={clientsLoading}
+        clientSearch={cashClientSearch}
         dateRange={cashOverviewDateRange}
         filters={filters}
+        onClearClientFilter={handleClearCashClientFilter}
+        onClientSearchChange={handleCashClientSearchChange}
+        onClientSearchFocus={handleCashClientSearchFocus}
+        onClientSelect={handleCashClientSelect}
         onDateRangeChange={handleCashDateRangeChange}
         onFilterChange={handleCashFilterChange}
         onPeriodChange={handlePeriodChange}

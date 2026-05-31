@@ -13,6 +13,8 @@ npm run admin:dashboard
 2. Abre `http://127.0.0.1:3999`.
 3. Usa el bloque `Nuevo cliente Supabase` para guardar el centro, contacto,
    direccion, URL del proyecto Supabase y URL Pooler.
+   La URL Dashboard es opcional: si la URL Supabase tiene formato
+   `https://PROJECT_REF.supabase.co`, el panel deriva el enlace al Dashboard.
 
 Tambien puedes copiar `tools/lucy-admin-dashboard/clients.example.json` a
 `tools/lucy-admin-dashboard/clients.local.json` y editarlo a mano si lo prefieres.

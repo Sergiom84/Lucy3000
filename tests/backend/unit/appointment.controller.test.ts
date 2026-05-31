@@ -32,6 +32,7 @@ describe('appointment.controller', () => {
     prismaMock.sale.findMany.mockResolvedValue([])
     prismaMock.quote.findMany.mockResolvedValue([])
     prismaMock.user.findUnique.mockResolvedValue({ id: 'user-1', name: 'Lucy' })
+    prismaMock.client.findUnique.mockResolvedValue({ id: 'client-1' })
     prismaMock.service.findMany.mockResolvedValue([
       {
         id: 'service-1',
@@ -202,6 +203,34 @@ describe('appointment.controller', () => {
       })
     )
     expect(res.status).toHaveBeenCalledWith(201)
+  })
+
+  it('rejects appointment creation when the selected client is outside the tenant context', async () => {
+    prismaMock.googleCalendarConfig.findFirst.mockResolvedValue(null)
+    prismaMock.appointment.findMany.mockResolvedValue([])
+    prismaMock.client.findUnique.mockResolvedValue(null)
+
+    const req = createMockRequest({
+      body: {
+        clientId: 'other-tenant-client',
+        userId: 'user-1',
+        serviceId: 'service-1',
+        cabin: 'LUCY',
+        professional: 'Lucy',
+        date: '2099-06-15T10:00:00.000Z',
+        startTime: '10:00',
+        endTime: '10:30',
+        status: 'SCHEDULED',
+        reminder: true
+      }
+    })
+    const res = createMockResponse()
+
+    await createAppointment(req as any, res)
+
+    expect(res.status).toHaveBeenCalledWith(404)
+    expect(res.json).toHaveBeenCalledWith({ error: 'Client not found' })
+    expect(prismaMock.appointment.create).not.toHaveBeenCalled()
   })
 
   it('creates appointment with multiple services and keeps the requested end time', async () => {

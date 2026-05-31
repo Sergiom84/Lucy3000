@@ -6,7 +6,7 @@ import {
   startCurrentTenantTrial,
   updateTenantLicense
 } from '../controllers/tenant.controller'
-import { authMiddleware, platformAdminMiddleware } from '../middleware/auth.middleware'
+import { adminMiddleware, authMiddleware, platformAdminMiddleware } from '../middleware/auth.middleware'
 import { validateRequest } from '../middleware/validation.middleware'
 import {
   createTenantBodySchema,
@@ -19,7 +19,7 @@ const router = Router()
 router.use(authMiddleware)
 
 router.get('/current/license', getCurrentTenantLicense)
-router.post('/current/start-trial', startCurrentTenantTrial)
+router.post('/current/start-trial', adminMiddleware, startCurrentTenantTrial)
 
 router.use(platformAdminMiddleware)
 

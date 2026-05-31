@@ -17,6 +17,7 @@ vi.mock('../../../src/backend/db', async () => import('../mocks/db.mock'))
 describe('bono.controller createBonoPack', () => {
   beforeEach(() => {
     resetPrismaMock()
+    prismaMock.client.findUnique.mockResolvedValue({ id: 'client-1' })
   })
 
   it('stores bonoTemplateId when the pack comes from the imported catalog', async () => {

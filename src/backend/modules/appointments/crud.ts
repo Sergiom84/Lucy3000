@@ -38,6 +38,37 @@ const buildSchedulingError = (validation: Awaited<ReturnType<typeof validateAppo
   })
 }
 
+const validateAppointmentTenantReferences = async (data: {
+  clientId?: unknown
+  userId?: unknown
+}) => {
+  const clientId = normalizeNullableId(data.clientId)
+  if (clientId) {
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      select: { id: true }
+    })
+
+    if (!client) {
+      throw new AppointmentModuleError(404, 'Client not found')
+    }
+  }
+
+  if (data.userId !== undefined) {
+    const userId = String(data.userId || '').trim()
+    const user = userId
+      ? await prisma.user.findUnique({
+          where: { id: userId },
+          select: { id: true }
+        })
+      : null
+
+    if (!user) {
+      throw new AppointmentModuleError(404, 'User not found')
+    }
+  }
+}
+
 export const createAppointmentRecord = async (payload: Record<string, unknown>) => {
   const requestedServiceIds = deriveAppointmentServiceIds(payload)
   let selectedServices
@@ -70,6 +101,7 @@ export const createAppointmentRecord = async (payload: Record<string, unknown>) 
   }
 
   data.professional = resolvedProfessional
+  await validateAppointmentTenantReferences(data)
 
   const validation = await validateAppointmentSlot(
     {
@@ -150,6 +182,10 @@ export const updateAppointmentRecord = async (id: string, payload: Record<string
   const updateData = buildAppointmentUpdatePayload(payload, {
     serviceId: selectedServices[0].id,
     endTime: requestedEndTime
+  })
+  await validateAppointmentTenantReferences({
+    clientId: updateData.clientId,
+    userId: updateData.userId
   })
   const partyValidationError = validateAppointmentPartyUpdate(existing, updateData)
 

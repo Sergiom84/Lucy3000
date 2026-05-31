@@ -186,6 +186,15 @@ export const createBonoPack = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'clientId, name and totalSessions (>= 1) are required' })
     }
 
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      select: { id: true }
+    })
+
+    if (!client) {
+      return res.status(404).json({ error: 'Client not found' })
+    }
+
     const parsedTotalSessions = Number.parseInt(String(totalSessions), 10)
     if (!Number.isFinite(parsedTotalSessions) || parsedTotalSessions < 1) {
       return res.status(400).json({ error: 'totalSessions must be a positive integer' })

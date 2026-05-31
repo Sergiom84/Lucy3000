@@ -1,20 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mockLoadAppointmentClients = vi.fn()
+const mockGet = vi.fn()
 
 vi.mock('../../../src/renderer/utils/appointmentCatalogs', () => ({
   loadActiveProducts: vi.fn(),
-  loadAppointmentClients: mockLoadAppointmentClients,
   loadAppointmentLegendItems: vi.fn(),
   loadAppointmentProfessionals: vi.fn(),
   loadAppointmentServices: vi.fn(),
-  loadBonoTemplates: vi.fn(),
-  preloadPointOfSaleCatalogs: vi.fn()
+  loadBonoTemplates: vi.fn()
 }))
 
 vi.mock('../../../src/renderer/utils/api', () => ({
   default: {
-    get: vi.fn(),
+    get: mockGet,
     post: vi.fn()
   }
 }))
@@ -22,24 +20,26 @@ vi.mock('../../../src/renderer/utils/api', () => ({
 describe('salesApi', () => {
   beforeEach(() => {
     vi.resetModules()
-    mockLoadAppointmentClients.mockReset()
+    mockGet.mockReset()
   })
 
-  it('refreshes clients instead of reusing a stale catalog balance', async () => {
-    mockLoadAppointmentClients.mockResolvedValueOnce([
-      {
-        id: 'client-1',
-        firstName: 'Lucy',
-        lastName: 'Lara',
-        phone: '600000000',
-        loyaltyPoints: 0,
-        accountBalance: 98
-      }
-    ])
+  it('searches a limited client catalog instead of loading every client', async () => {
+    mockGet.mockResolvedValueOnce({
+      data: [
+        {
+          id: 'client-1',
+          firstName: 'Lucy',
+          lastName: 'Lara',
+          phone: '600000000',
+          loyaltyPoints: 0,
+          accountBalance: 98
+        }
+      ]
+    })
 
     const { fetchSalesClients } = await import('../../../src/renderer/features/sales/salesApi')
 
-    await expect(fetchSalesClients()).resolves.toEqual([
+    await expect(fetchSalesClients('lucy')).resolves.toEqual([
       {
         id: 'client-1',
         firstName: 'Lucy',
@@ -49,6 +49,6 @@ describe('salesApi', () => {
         accountBalance: 98
       }
     ])
-    expect(mockLoadAppointmentClients).toHaveBeenCalledWith({ forceRefresh: true })
+    expect(mockGet).toHaveBeenCalledWith('/clients/catalog?isActive=true&limit=50&search=lucy')
   })
 })

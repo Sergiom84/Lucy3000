@@ -3,6 +3,7 @@ import toast from 'react-hot-toast'
 import {
   fetchGlobalAccountBalanceHistory,
   fetchPendingCollectionSaleDetail,
+  fetchSalesClientById,
   fetchSaleDetail,
   fetchSalesCatalog,
   fetchSalesClients,
@@ -48,14 +49,33 @@ export const useSalesPageData = () => {
     }
   }
 
-  const loadClients = async () => {
+  const loadClients = async (search = '') => {
     try {
       setClientsLoading(true)
-      const nextClients = await fetchSalesClients()
+      const nextClients = await fetchSalesClients(search)
       setClients(nextClients)
     } catch (error) {
       console.error('Error loading clients:', error)
       toast.error('Error al cargar clientes')
+    } finally {
+      setClientsLoading(false)
+    }
+  }
+
+  const loadClientById = async (clientId: string) => {
+    try {
+      setClientsLoading(true)
+      const client = await fetchSalesClientById(clientId)
+      if (client) {
+        setClients((currentClients) =>
+          currentClients.some((item) => item.id === client.id) ? currentClients : [client, ...currentClients]
+        )
+      }
+      return client
+    } catch (error) {
+      console.error('Error loading client:', error)
+      toast.error('Error al cargar la clienta')
+      return null
     } finally {
       setClientsLoading(false)
     }
@@ -122,6 +142,7 @@ export const useSalesPageData = () => {
     legendItems,
     loadAccountBalanceHistory,
     loadCatalog,
+    loadClientById,
     loadClients,
     loadPendingCollectionSale,
     loadSales,

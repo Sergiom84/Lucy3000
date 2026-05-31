@@ -1,12 +1,10 @@
 import api from '../../utils/api'
 import {
   loadActiveProducts,
-  loadAppointmentClients,
   loadAppointmentLegendItems,
   loadAppointmentProfessionals,
   loadAppointmentServices,
-  loadBonoTemplates,
-  preloadPointOfSaleCatalogs
+  loadBonoTemplates
 } from '../../utils/appointmentCatalogs'
 import type {
   AccountBalanceHistoryRow,
@@ -15,7 +13,7 @@ import type {
   SalesCatalogState
 } from './types'
 
-export const preloadSalesCatalogs = () => preloadPointOfSaleCatalogs()
+const CLIENT_SEARCH_LIMIT = 50
 
 export const fetchSalesCatalog = async (): Promise<SalesCatalogState> => {
   const [productsResult, servicesResult, bonosResult, professionalsResult, legendItemsResult] = await Promise.allSettled([
@@ -35,9 +33,24 @@ export const fetchSalesCatalog = async (): Promise<SalesCatalogState> => {
   }
 }
 
-export const fetchSalesClients = async (): Promise<Client[]> => {
-  const nextClients = await loadAppointmentClients({ forceRefresh: true })
-  return nextClients as Client[]
+export const fetchSalesClients = async (search = ''): Promise<Client[]> => {
+  const params = new URLSearchParams({
+    isActive: 'true',
+    limit: String(CLIENT_SEARCH_LIMIT)
+  })
+  const normalizedSearch = search.trim()
+  if (normalizedSearch) {
+    params.set('search', normalizedSearch)
+  }
+
+  const response = await api.get(`/clients/catalog?${params.toString()}`)
+  return Array.isArray(response.data) ? (response.data as Client[]) : []
+}
+
+export const fetchSalesClientById = async (clientId: string): Promise<Client | null> => {
+  if (!clientId) return null
+  const response = await api.get(`/clients/${clientId}`)
+  return response.data as Client
 }
 
 export const fetchSalesHistory = async (dateFilter: { startDate: string; endDate: string }) => {
