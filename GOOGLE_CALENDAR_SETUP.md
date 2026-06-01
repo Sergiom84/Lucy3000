@@ -1,6 +1,6 @@
 # Google Calendar Setup
 
-Estado actualizado: 2026-04-21
+Estado actualizado: 2026-05-31
 
 ## Qué integra Lucy3000
 
@@ -19,7 +19,7 @@ Las invitaciones las gestiona Google Calendar, no Lucy3000 por SMTP.
 ## Requisitos
 - usuario `ADMIN`;
 - variables de entorno OAuth configuradas;
-- backend local accesible en la callback;
+- API/backend accesible en la callback;
 - instalación con acceso real a internet.
 
 ## Variables necesarias
@@ -30,11 +30,17 @@ GOOGLE_CALENDAR_CLIENT_SECRET="tu-client-secret"
 GOOGLE_CALENDAR_REDIRECT_URI="http://localhost:3001/api/calendar/callback"
 ```
 
-La callback debe coincidir exactamente con la configurada en Google Cloud.
+La callback debe coincidir exactamente con la configurada en Google Cloud. En
+desarrollo puede ser `localhost`; en produccion compartida debe ser la URL HTTPS
+de la API central, por ejemplo:
+
+```env
+GOOGLE_CALENDAR_REDIRECT_URI="https://api.tu-dominio.com/api/calendar/callback"
+```
 
 ## Dónde poner el `.env`
 
-En empaquetado, Lucy3000 puede leer `.env` desde:
+En desarrollo o soporte local, Lucy3000 puede leer `.env` desde:
 - la carpeta de datos local del usuario;
 - la carpeta del `.exe`;
 - `resources/`.
@@ -47,6 +53,9 @@ La pantalla `Settings` ya muestra:
 - qué variables faltan;
 - la redirect URI esperada;
 - la ruta recomendada donde colocar el `.env`.
+
+En el modelo compartido real, los secretos OAuth viven en la API central, no en
+el PC del cliente ni dentro del instalador.
 
 ## Configuración en Google Cloud
 
@@ -108,7 +117,7 @@ Revisa:
 ### La callback falla
 Revisa:
 - coincidencia exacta de la redirect URI;
-- que el backend local esté levantado;
+- que la API/backend este levantado y accesible por HTTPS en produccion;
 - que el popup o navegador no esté bloqueando la redirección.
 
 ### Las citas o bloqueos no sincronizan
@@ -136,3 +145,7 @@ Empieza con:
 - una sola cuenta del negocio;
 - `calendarId=primary`;
 - invitaciones activadas solo después de verificar el flujo con una cuenta real de cliente.
+
+Cada configuracion de Google Calendar queda asociada al `tenantId` del usuario
+que la conecta. En la base compartida no reutilices tokens ni calendarios entre
+tenants salvo decision explicita del negocio.

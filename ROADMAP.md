@@ -7,6 +7,7 @@ Estado actualizado: 2026-05-31
 Convertir Lucy3000 en producto SaaS web/PWA multi-equipo, manteniendo Electron como wrapper opcional para escritorio:
 - API central Express;
 - PostgreSQL compartido con aislamiento por `tenantId`;
+- una unica base Supabase/PostgreSQL compartida para varios centros, no un proyecto por cliente;
 - licencia/trial controlado en servidor;
 - Google Calendar sincronizado por tenant;
 - migracion controlada desde el historico SQLite local.
@@ -28,6 +29,10 @@ La base tecnica ya refleja el giro multi-tenant:
 - Google Calendar guarda estado OAuth con `tenantId`;
 - el login del renderer acepta centro opcional y muestra el bloqueo de licencia;
 - `build:prepare-db` ya no prepara SQLite empaquetada por defecto.
+- El ultimo cambio de seguridad separo admin de tenant y admin de plataforma:
+  el bootstrap crea `ADMIN` con `isPlatformAdmin=false`.
+- Se redujo carga pesada en ventas/caja: usan catalogo ligero de clientas bajo demanda
+  en vez de precargar miles de clientas.
 
 La refactorizacion incremental previa sigue vigente:
 - `src/backend/controllers/*` se usa como capa HTTP fina;
@@ -39,6 +44,11 @@ La refactorizacion incremental previa sigue vigente:
 
 ## Prioridad alta
 
+- Antes de dar de alta el segundo cliente real en la base compartida:
+  desplegar la API central, aplicar migraciones, probar `ID cliente` en login y
+  comprobar Electron en modo API remota.
+- Definir un flujo seguro para crear/gestionar `platformAdmin` sin que el primer
+  admin de cliente sea admin de plataforma.
 - Probar migracion/importacion real desde instalaciones SQLite antiguas hacia PostgreSQL tenant-aware.
 - Endurecer permisos por rol en rutas de negocio, no solo autenticacion.
 - Evolucionar la consola local interna si hace falta ampliacion de trial, auditoria o facturacion.
@@ -71,8 +81,10 @@ La refactorizacion incremental previa sigue vigente:
 - El runtime oficial de datos es remoto y multi-tenant.
 - La base operativa oficial es PostgreSQL.
 - Electron es wrapper opcional, no fuente de verdad ni barrera de proteccion.
-- El primer admin se crea por bootstrap junto con el primer tenant y su trial.
+- El primer admin de tenant se crea por bootstrap junto con el primer tenant y su licencia, pero no debe ser `platformAdmin`.
 - La licencia/trial se comprueba en servidor; no depende del reloj local ni de flags del instalador.
+- El `ID cliente` sera un alias publico para login/dashboard; el aislamiento real
+  sigue siendo `tenantId` en servidor.
 - Las importaciones de operacion normal usan `.xlsx`.
 - La restauracion SQL legacy es una herramienta admin separada y de alcance parcial.
 - Google Calendar es opcional y debe permanecer aislado por tenant.
@@ -84,6 +96,8 @@ La refactorizacion incremental previa sigue vigente:
 
 - La politica de permisos todavia es desigual entre modulos.
 - El scoping tenant-aware de Prisma reduce riesgo, pero las consultas raw y procesos background requieren revision continua.
+- Mientras Electron pueda guardar `DATABASE_URL` compartida, no es seguro entregarlo a un segundo cliente contra la misma base.
+- Falta RLS/policies en Supabase como defensa en profundidad para base compartida.
 - La migracion de datos desde SQLite real todavia necesita una pasada operativa con copias de clientes.
 - El asistente SQL omite ventas, caja y referencias legacy de fotos; no sirve como reconstruccion total.
 - El auto-backup local es deuda legacy y no sustituye backups SaaS de PostgreSQL/Storage.

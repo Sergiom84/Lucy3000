@@ -9,28 +9,46 @@ SQLite queda como legado de migracion, importacion o soporte puntual.
 
 ## Modelo de distribucion vigente (2026-05-31)
 
-Decision de Sergio: distribuir como **app Electron instalada por cliente**, cada
-instalacion contra **su propio proyecto Supabase** (datos aislados entre negocios,
-sin servidor central, sin cuota ni cold start). El control de trial vive en la
-tabla `tenant_licenses` del Supabase del cliente y usa **hora de servidor**
-(`getServerNow()` -> `SELECT NOW()`), no el reloj del PC.
+Decision actual de Sergio: **no habra un proyecto/cuenta Supabase por cliente**.
+El modelo pasa a ser una **API central** con **PostgreSQL/Supabase compartido**
+multi-tenant. Cada negocio vive en un `Tenant` y los datos se aislan por
+`tenantId` desde la API. El frontend, la PWA y el wrapper Electron nunca deben
+recibir una `DATABASE_URL` compartida ni claves secretas de Supabase.
 
-Flujo de licencia: bootstrap en modo Supabase nace `PENDING`; el admin del tenant
-arranca su prueba con `POST /api/tenants/current/start-trial` (boton "Empezar
-prueba"); gracia `PENDING_GRACE_DAYS` (9 dias) antes del bloqueo definitivo
-(`pending-expired`). Alta por cliente: crear Supabase -> `prisma migrate deploy`
--> instalar .exe modo Supabase -> bootstrap -> empezar prueba.
+El `ID cliente` propuesto por Sergio debe implementarse como alias publico del
+tenant, por ejemplo `tenantCode` o `publicTenantCode`. En pantalla puede llamarse
+`ID cliente`, pero internamente **no sustituye a `tenantId`**. Sirve para resolver
+el centro en login (`ID cliente` + usuario + contrasena), no como barrera de
+seguridad. La barrera real sigue siendo: API central, JWT con `tenantId`,
+middleware tenant-aware, validaciones por tenant y, como segunda capa pendiente,
+RLS/policies en Supabase.
+
+Estado importante del codigo a 2026-05-31:
+- `Tenant.id` ya es el identificador interno real.
+- `Tenant.slug` ya existe y el login acepta `tenantSlug` opcional.
+- El `ID cliente` numerico ya existe como `Tenant.tenantCode`, se genera en
+  Prisma/PostgreSQL, se acepta en login y se muestra en dashboard/consola.
+- Electron compartido debe operar en modo API remota (`LUCY3000_API_URL` /
+  `VITE_API_URL`), sin guardar `DATABASE_URL` de Supabase en el PC del cliente.
+
+Flujo de licencia actual: el tenant nace `PENDING`; el admin del tenant puede
+arrancar su prueba con `POST /api/tenants/current/start-trial` (boton "Empezar
+prueba"); hay gracia `PENDING_GRACE_DAYS` (9 dias) antes del bloqueo definitivo
+(`pending-expired`). La licencia/trial vive en `tenant_licenses` y usa hora de
+servidor (`getServerNow()` -> `SELECT NOW()`), no el reloj del PC.
 
 <!--
-  CANAL CENTRAL WEB/PWA EN RENDER (DORMIDO, no usado por el modelo vigente).
-  Se monto el 2026-05-31 por si en el futuro se vuelve a un SaaS central:
+  CANAL CENTRAL WEB/PWA EN RENDER.
+  Se monto el 2026-05-31 y vuelve a ser el camino recomendado para el modelo
+  compartido, aunque puede requerir configurar secretos antes de uso real:
     - render.yaml (Blueprint) en la raiz define lucy3000-api + lucy3000-web.
     - Workspace Render "Lucy3000" tea-d8dlksh9rddc73a25e50 (cuenta sergio.hlara84).
     - Servicio API: srv-d8dlmoojs32c73fmfee0  -> https://lucy3000-2hnv.onrender.com
     - Servicio front estatico: srv-d8dlqkvavr4c73ft9kl0 -> https://lucy3000-web.onrender.com
     - El front PWA (public/manifest.webmanifest, public/sw.js, public/_redirects)
-      y los scripts build:web / deploy:web siguen en el repo, inertes para Electron.
-  Si se reactiva: poner DATABASE_URL/BOOTSTRAP_TOKEN en la API y VITE_API_URL en el front.
+      y los scripts build:web / deploy:web siguen en el repo.
+  Para usarlo: poner DATABASE_URL/JWT_SECRET/BOOTSTRAP_TOKEN en la API y
+  VITE_API_URL en el front. No poner DATABASE_URL en el cliente final.
 -->
 
 
@@ -127,7 +145,7 @@ Se ejecutan directamente desde PowerShell:
 ## Entorno y secretos
 
 - El backend carga `.env` y, fuera de produccion, despues `.env.development`.
-- En empaquetado, Electron puede leer `.env` junto al `.exe`, en `resources/` o en `userData`.
+- En empaquetado, Electron puede leer `.env` junto al `.exe`, en `resources/` o en `userData`; esto solo es aceptable para desarrollo, local legacy o soporte controlado, no para entregar una base compartida a clientes.
 - Variables criticas:
   - `DATABASE_URL`
   - `JWT_SECRET`
@@ -141,16 +159,21 @@ Se ejecutan directamente desde PowerShell:
   - `WHATSAPP_*`
   - `SUPABASE_*` para infra, soporte historico o recuperacion
 
-No incluir secretos en renderer, instalador, ASAR, `.env.example`, dumps ni documentacion.
+No incluir secretos ni `DATABASE_URL` productiva en renderer, instalador, ASAR,
+`.env.example`, dumps ni documentacion. En modelo compartido, la `DATABASE_URL`
+vive solo en la API central.
 
 ## Estado funcional observado en codigo
 
-- Login con bootstrap del primer tenant y administrador:
+- Login con bootstrap del primer tenant y administrador de tenant:
   - `GET /api/auth/bootstrap-status`
   - `POST /api/auth/bootstrap-admin`
+- Login actual:
+  - `POST /api/auth/login`
+  - acepta `tenantSlug` opcional; el `ID cliente` numerico es el siguiente cambio decidido.
 - Licencia del tenant actual:
   - `GET /api/tenants/current/license`
-- Administracion interna de tenants:
+- Administracion interna de tenants (solo plataforma o herramienta interna):
   - `GET /api/tenants`
   - `POST /api/tenants`
   - `PUT /api/tenants/:id/license`
@@ -181,6 +204,9 @@ No incluir secretos en renderer, instalador, ASAR, `.env.example`, dumps ni docu
 - El frontend no debe hablar directo con Supabase para datos sensibles.
 - La licencia/trial se comprueba en servidor, no en reloj local ni instalador.
 - Supabase RLS puede aniadirse como segunda capa, pero la autorizacion diaria vive en la API.
+- No usar `ID cliente`, `tenantSlug` ni valores del cliente como permiso. Solo
+  seleccionan tenant durante login; los permisos salen del usuario autenticado
+  y del `tenantId` validado en servidor.
 
 ## Convenciones de backend
 
@@ -203,7 +229,8 @@ Estado actual de seguridad:
 - Solo plataforma/admin segun ruta:
   - `POST /api/auth/register`
   - `/api/users/*`
-  - `/api/tenants/*` salvo `/current/license`
+  - `/api/tenants/current/start-trial` requiere admin de tenant
+  - `/api/tenants/*` de gestion comercial salvo `/current/license` y `/current/start-trial` requiere `platformAdmin`
   - `/api/calendar/*` salvo callback
   - `/api/sql/*`
 - Muchos modulos de negocio siguen protegidos solo por autenticacion, no por rol fino.
@@ -215,6 +242,9 @@ Estado actual de seguridad:
 - Cuando un contrato IPC ya sea estable, tiparlo o reutilizarlo desde `src/shared/electron.ts`.
 - Reutilizar `src/main/backup.ts` como servicio tecnico de snapshots legacy; no duplicar esa logica en `main.ts`.
 - No asumir que Electron protege secretos. ASAR/EXE/MSI son distribucion, no seguridad.
+- Para el modelo compartido, Electron debe apuntar a API remota o cargar una URL
+  publica de API. No debe pedir ni guardar `DATABASE_URL` de Supabase compartida
+  en `userData\.env`.
 
 ## Convenciones de frontend
 
@@ -273,7 +303,13 @@ Estado actual de seguridad:
 ## Riesgos y deuda activa
 
 - Endurecimiento de permisos por rol todavia incompleto.
+- Antes de aniadir el segundo cliente real: desplegar la API central, aplicar
+  migraciones, configurar Render/Supabase y probar login con `ID cliente`.
+- Hace falta un flujo claro para usuario `platformAdmin`; el bootstrap crea admin
+  de tenant (`isPlatformAdmin=false`) y no debe convertir al cliente en admin de
+  plataforma.
 - Consultas raw y procesos background requieren vigilancia extra para aislamiento por tenant.
+- Supabase RLS/policies esta pendiente como defensa en profundidad para la base compartida.
 - Migracion real desde SQLite antigua a PostgreSQL tenant-aware pendiente de validacion con copias reales.
 - Assets de clienta deben moverse a Storage/S3 para SaaS.
 - El asistente SQL tiene alcance deliberadamente parcial.

@@ -15,9 +15,11 @@ La guia detallada vive en `AGENTS.md`.
 
 ## Distribucion vigente (2026-05-31)
 
-- Modelo elegido: app Electron por cliente, cada una contra su propio Supabase. Sin servidor central.
+- Modelo elegido: API central + PostgreSQL/Supabase compartido multi-tenant. No se usara un proyecto Supabase por cliente.
+- Cliente: web/PWA como canal recomendado; Electron queda como wrapper opcional, pero no debe guardar `DATABASE_URL` compartida en el PC del cliente.
 - Trial controlado en `tenant_licenses` con hora de servidor; bootstrap nace `PENDING`, el cliente arranca con `start-trial`, gracia de 9 dias.
-- El canal central web/PWA en Render queda DORMIDO (no borrado). Detalle e IDs en el comentario de `AGENTS.md` y en `render.yaml`.
+- Render ya no debe tratarse como canal dormido: es el camino natural para API central + front estatico cuando se configuren secretos y dominio.
+- El `ID cliente` visible en login/dashboard ya existe como alias publico del tenant (`tenantCode`). No sustituye a `tenantId`.
 
 ## Resumen operativo
 
@@ -25,6 +27,7 @@ La guia detallada vive en `AGENTS.md`.
 - Cliente: React/Vite web/PWA; Electron queda como wrapper opcional de escritorio.
 - Supabase puede usarse como infraestructura de Postgres/Storage, pero el frontend no debe saltarse la API para datos sensibles.
 - SQLite queda como legado de migracion, importacion o soporte puntual.
+- `tenantId` es la frontera interna real. `tenantSlug` existe como selector compatible; `ID cliente` numerico usa `tenantCode`.
 - Bootstrap inicial:
   - `GET /api/auth/bootstrap-status`
   - `POST /api/auth/bootstrap-admin`
@@ -51,4 +54,6 @@ La guia detallada vive en `AGENTS.md`.
 - No reintroduzcas logica pesada en `src/main/main.ts`, `src/backend/controllers/*` ni `src/renderer/pages/*`.
 - Todo dato de negocio nuevo debe tener `tenantId`.
 - Toda licencia/trial se decide en servidor.
+- No entregar `DATABASE_URL` ni secretos de Supabase dentro de Electron/ASAR/instalador.
+- Antes de meter un segundo cliente real en la base compartida: desplegar API central, aplicar migraciones, probar modo API remota para Electron y revisar RLS/aislamiento.
 - Usa `AGENTS.md` para convenciones de backend, frontend, migraciones, testing y riesgos activos.

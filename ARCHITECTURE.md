@@ -1,10 +1,14 @@
 # Arquitectura de Lucy3000
 
-Estado actualizado: 2026-05-26
+Estado actualizado: 2026-05-31
 
 ## Topologia oficial
 
 Lucy3000 se esta convirtiendo en una aplicacion SaaS web/PWA multi-tenant. Electron queda como wrapper opcional para escritorio y capacidades locales, pero la fuente de verdad vive en la API central.
+
+Decision vigente de distribucion: una API central con PostgreSQL/Supabase
+compartido por tenants. No se usara un proyecto Supabase por cliente. Ningun
+cliente web/PWA/Electron debe recibir la `DATABASE_URL` compartida.
 
 ```text
 Browser / PWA / Electron Wrapper
@@ -34,10 +38,16 @@ Google Calendar y otros servicios externos se integran desde el backend y siempr
 
 Responsabilidades actuales:
 - crear la ventana principal cuando se usa el canal escritorio;
-- iniciar o apuntar al backend segun entorno;
+- iniciar backend local solo en desarrollo/legacy o apuntar a API remota segun canal;
 - exponer bridge seguro al renderer;
 - gestionar logs, impresion y utilidades locales;
 - conservar flujos legacy de backup/restore mientras se migra a SaaS.
+
+Riesgo actual: el runtime de Electron conserva configuracion para guardar
+`DATABASE_URL` en `userData\.env`. Ese modo no puede usarse con una base
+compartida real porque el cliente podria saltarse la API. Antes de incorporar un
+segundo cliente al Supabase compartido hay que dejar Electron en modo API remota
+o usar la PWA.
 
 Archivos clave:
 - `src/main/main.ts`
@@ -172,7 +182,8 @@ El backend usa `AsyncLocalStorage` en `src/backend/tenant/context.ts` para asoci
 - `CANCELLED`.
 
 Reglas actuales:
-- al crear un tenant se genera una prueba de 7 dias;
+- al crear/bootstrap un tenant la licencia nace `PENDING`;
+- el trial arranca despues con `POST /api/tenants/current/start-trial` o por accion interna equivalente;
 - login y operaciones autenticadas consultan tenant/licencia en servidor;
 - un centro bloqueado o expirado no debe depender del reloj local del cliente;
 - el frontend puede mostrar el estado, pero no decide permisos.
@@ -187,6 +198,12 @@ Login UI -> POST /api/auth/login -> JWT con tenantId -> authStore
 
 El login admite `tenantSlug` opcional para resolver usuarios con el mismo identificador en distintos centros.
 
+El login acepta un `ID cliente` numerico visible (`tenantCode`) ademas del
+selector compatible `tenantSlug`. Ese codigo solo resuelve el tenant durante
+login; no es secreto ni autorizacion. La autorizacion vive en el usuario
+autenticado, el JWT con `tenantId`, el middleware tenant-aware y las validaciones
+de servidor.
+
 ### Flujo de bootstrap
 
 ```text
@@ -195,6 +212,11 @@ Login UI -> GET /api/auth/bootstrap-status
           -> POST /api/auth/bootstrap-admin
           -> Tenant + TenantLicense + usuario ADMIN + JWT
 ```
+
+El bootstrap crea un administrador del tenant (`role=ADMIN`) con
+`isPlatformAdmin=false`. La gestion de plataforma debe usar un flujo separado y
+controlado para usuarios `platformAdmin`; no debe convertir al primer cliente en
+dueno de la plataforma.
 
 Roles observados:
 - `ADMIN`
@@ -206,6 +228,9 @@ Estado actual de permisos:
 - `/api/tenants` combina ruta de licencia para usuario autenticado y endpoints internos de plataforma;
 - la gestion comercial de centros ya no se muestra en el renderer del cliente; vive en `tools/lucy-admin-dashboard/` como consola local de Sergio;
 - muchos modulos de negocio siguen siendo `auth only` y necesitan permisos finos.
+- Supabase RLS/policies queda pendiente como defensa en profundidad. La primera
+  frontera sigue siendo la API central; no exponer `DATABASE_URL` compartida en
+  el cliente es obligatorio.
 
 ## Persistencia
 

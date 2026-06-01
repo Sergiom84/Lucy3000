@@ -7,8 +7,11 @@ Lucy3000 es una app de gestion de estetica orientada a SaaS multi-equipo: una AP
 - Topologia oficial: React/Vite + Express + Prisma + PostgreSQL multi-tenant.
 - Electron se mantiene como canal opcional de escritorio, no como propietario de los datos.
 - Cada centro vive en un `Tenant`; los datos de negocio se aislan por `tenantId`.
-- El alta inicial crea el primer centro, su licencia de prueba y el primer `ADMIN`.
+- El alta inicial crea el primer centro, su licencia `PENDING` y el primer `ADMIN` de tenant.
 - Supabase encaja como proveedor inicial de Postgres/Storage/infra, pero el backend sigue siendo el duenio de la logica y de los permisos.
+- Decision vigente: una base Supabase/PostgreSQL compartida, no un proyecto Supabase por cliente.
+- El cliente final no debe recibir la `DATABASE_URL` compartida. Web/PWA o Electron deben hablar con la API central.
+- El login usa `ID cliente` visible como alias publico del tenant (`tenantCode`). Internamente se mantiene `tenantId`.
 - La antigua ruta SQLite queda como legado de importacion, restore o soporte puntual.
 
 ## Estado de la refactorizacion
@@ -46,7 +49,7 @@ Lucy3000 es una app de gestion de estetica orientada a SaaS multi-equipo: una AP
   - `GET /api/tenants`
   - `POST /api/tenants`
   - `PUT /api/tenants/:id/license`
-- Consola local de Sergio para control comercial por Supabase de cliente:
+- Consola local de Sergio para control comercial y supervision:
   - `npm run admin:dashboard`
   - `tools/lucy-admin-dashboard/`
 
@@ -61,6 +64,20 @@ Páginas admin-only en renderer:
 - `Sql`
 
 La licencia se valida en servidor en login y en operaciones autenticadas. Cuando un trial expira o una licencia queda bloqueada, el backend limita el acceso operativo y conserva rutas necesarias para login, estado de licencia, soporte y administracion.
+
+### ID cliente y tenant
+
+El codigo actual tiene `Tenant.id` como UUID interno, `Tenant.slug` como
+selector compatible y `Tenant.tenantCode` como codigo humano mostrado en UI como
+`ID cliente`:
+
+- Lucy Lara podria ser `ID cliente = 1`; nuevos centros, `2`, `3`, etc.
+- Ese ID solo sirve para elegir el centro en login junto a usuario y contrasena.
+- La seguridad real no depende de ocultar ese numero, sino de la API central,
+  el JWT con `tenantId`, el middleware tenant-aware, validaciones por tenant y
+  una capa pendiente de RLS/policies en Supabase.
+- Si Electron guarda una `DATABASE_URL` compartida en `userData\.env`, el cliente
+  podria saltarse la API. Ese modo no es apto para multi-tenant compartido.
 
 ## Desarrollo local
 
@@ -191,6 +208,7 @@ Ese pipeline:
 
 En produccion, la proteccion real esta en el servidor:
 - no incluir secretos en el cliente;
+- no incluir `DATABASE_URL` compartida en Electron/ASAR/instalador;
 - validar tenant, usuario, rol y licencia en la API;
 - firmar el instalador cuando se distribuya a clientes;
 - usar Electron/NSIS/MSIX solo como experiencia de instalacion, no como barrera de secreto.

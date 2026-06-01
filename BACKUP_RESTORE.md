@@ -1,6 +1,6 @@
 # Backup y Restauracion
 
-Estado actualizado: 2026-05-26
+Estado actualizado: 2026-05-31
 
 ## Alcance
 
@@ -11,13 +11,15 @@ En el repositorio conviven tres flujos distintos y no deben mezclarse:
 
 ## 1. Backup SaaS actual
 
-La fuente de verdad del producto multi-equipo es PostgreSQL. En produccion, el backup operativo debe vivir en la infraestructura central:
+La fuente de verdad del producto multi-equipo es PostgreSQL/Supabase compartido
+por tenants. En produccion, el backup operativo debe vivir en la infraestructura
+central:
 - snapshots o backups gestionados del proveedor PostgreSQL;
 - dumps controlados por entorno;
 - backups de Storage/S3 para fotos y documentos;
 - retencion y restauracion probadas por tenant o por instancia completa.
 
-Si se usa Supabase, Neon, Render, Railway, Fly o VPS, la decision de backup debe documentarse junto al despliegue real. Supabase Free puede valer para demo o piloto, pero no debe tratarse como canal comercial estable.
+Si se usa Supabase, Neon, Render, Railway, Fly o VPS, la decision de backup debe documentarse junto al despliegue real. Supabase Free puede valer para demo o piloto, pero no debe tratarse como canal comercial estable. No hay un proyecto Supabase por cliente; las restauraciones deben respetar `tenantId` y evitar pisar datos de otros centros.
 
 ### Que debe cubrir
 
@@ -37,6 +39,7 @@ Si se usa Supabase, Neon, Render, Railway, Fly o VPS, la decision de backup debe
 - probar restore antes de vender el servicio;
 - medir tamano de base, Storage y egress con datos equivalentes a 6 o 7 centros;
 - mantener exportacion por tenant para soporte, baja o portabilidad;
+- probar restauracion puntual por tenant antes de vender el modelo compartido;
 - no guardar fotos o documentos binarios dentro de PostgreSQL.
 
 ## 2. Restore SQL legacy asistido
@@ -151,5 +154,6 @@ Se ejecutan directamente, no desde `npm run`.
 - no uses el asistente SQL como si fuera backup diario;
 - no reemplaces datos de otro tenant durante importaciones;
 - no guardes secretos ni credenciales de proveedor dentro del cliente;
+- no guardes la `DATABASE_URL` compartida en Electron o en backups entregados a clientes;
 - no confies en MSI/EXE/ASAR como barrera real de proteccion;
 - no toques migraciones historicas ya aplicadas para arreglar un restore puntual.
