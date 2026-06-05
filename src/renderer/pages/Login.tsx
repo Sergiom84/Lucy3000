@@ -2,13 +2,9 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Download, Hash, ShieldCheck, Sparkles, Mail, Lock, User } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
+import { usePwaInstallPrompt } from '../hooks/usePwaInstallPrompt'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
-
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>
-}
 
 export default function Login() {
   const navigate = useNavigate()
@@ -24,8 +20,7 @@ export default function Login() {
   const [bootstrapPasswordConfirm, setBootstrapPasswordConfirm] = useState('')
   const [loading, setLoading] = useState(false)
   const [checkingBootstrap, setCheckingBootstrap] = useState(!bootstrapChecked)
-  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
-  const [isStandalone, setIsStandalone] = useState(false)
+  const { canPromptInstall, install, isStandalone } = usePwaInstallPrompt()
 
   useEffect(() => {
     let cancelled = false
@@ -56,48 +51,6 @@ export default function Login() {
       cancelled = true
     }
   }, [setBootstrapStatus])
-
-  useEffect(() => {
-    const standalone =
-      window.matchMedia('(display-mode: standalone)').matches ||
-      (window.navigator as Navigator & { standalone?: boolean }).standalone === true
-
-    setIsStandalone(standalone)
-
-    const handleBeforeInstallPrompt = (event: Event) => {
-      event.preventDefault()
-      setInstallPrompt(event as BeforeInstallPromptEvent)
-    }
-
-    const handleAppInstalled = () => {
-      setInstallPrompt(null)
-      setIsStandalone(true)
-      toast.success('Lucy3000 instalada')
-    }
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
-    window.addEventListener('appinstalled', handleAppInstalled)
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
-      window.removeEventListener('appinstalled', handleAppInstalled)
-    }
-  }, [])
-
-  const handleInstallClick = async () => {
-    if (!installPrompt) {
-      toast('Usa el menu del navegador para instalar Lucy3000')
-      return
-    }
-
-    await installPrompt.prompt()
-    const choice = await installPrompt.userChoice
-    setInstallPrompt(null)
-
-    if (choice.outcome === 'accepted') {
-      toast.success('Instalando Lucy3000')
-    }
-  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -366,10 +319,10 @@ export default function Login() {
             </form>
           )}
 
-          {!isBootstrapMode && !isStandalone && installPrompt ? (
+          {!isBootstrapMode && !isStandalone && canPromptInstall ? (
             <button
               type="button"
-              onClick={handleInstallClick}
+              onClick={() => void install()}
               className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg border border-primary-200 bg-primary-50 px-4 py-3 text-sm font-semibold text-primary-700 transition-colors hover:bg-primary-100 dark:border-primary-800 dark:bg-primary-950/30 dark:text-primary-200 dark:hover:bg-primary-900/40"
             >
               <Download className="h-4 w-4" />

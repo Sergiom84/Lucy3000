@@ -6,6 +6,7 @@ import api, { setApiBaseUrl } from './utils/api'
 import type { DatabaseConfigStatus } from '../shared/electron'
 
 const Layout = lazy(() => import('./components/Layout'))
+const PublicAccess = lazy(() => import('./pages/PublicAccess'))
 const Login = lazy(() => import('./pages/Login'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Clients = lazy(() => import('./pages/Clients'))
@@ -186,10 +187,11 @@ function App() {
 
       <Suspense fallback={<RouteLoader />}>
         <Routes>
+          <Route path="/" element={!isAuthenticated ? <PublicAccess /> : <Navigate to="/dashboard" />} />
           <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to="/" />} />
 
           <Route element={isAuthenticated ? <LicensedArea /> : <Navigate to="/login" />}>
-            <Route path="/" element={<Dashboard />} />
+            <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/clients" element={<Clients />} />
             <Route path="/clients/:id" element={<ClientDetail />} />
             <Route path="/appointments" element={<Appointments />} />
