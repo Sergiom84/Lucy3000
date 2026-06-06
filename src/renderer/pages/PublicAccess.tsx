@@ -36,14 +36,14 @@ function getInstallGuide() {
   if (userAgent.includes('edg/')) {
     return {
       title: 'Microsoft Edge',
-      steps: ['Menu del navegador', 'Aplicaciones', 'Instalar Lucy3000']
+      steps: ['Icono de instalacion junto a la barra', 'Instalar Lucy3000', 'Confirmar']
     }
   }
 
   if (userAgent.includes('chrome') || userAgent.includes('chromium')) {
     return {
       title: 'Chrome',
-      steps: ['Menu del navegador', 'Aplicaciones', 'Instalar Lucy3000']
+      steps: ['Icono de instalacion junto a la estrella', 'Instalar Lucy3000', 'Confirmar']
     }
   }
 
@@ -148,15 +148,12 @@ function InstallPanel() {
           : {
               icon: Download,
               title: 'Instalacion desde el navegador',
-              text: `${guide.title} no ha ofrecido el instalador automatico en esta visita.`
+              text: 'Usa el icono de instalacion que aparece en la barra superior del navegador.'
             }
 
   const StatusIcon = status.icon
-  const installLabel = isStandalone
-    ? 'App instalada'
-    : canPromptInstall
-      ? 'Instalar Lucy3000'
-      : 'Comprobar instalacion'
+  const showInstallButton = canPromptInstall || !isServiceWorkerReady || isStandalone || !isSupportedContext
+  const installLabel = isStandalone ? 'App instalada' : canPromptInstall ? 'Instalar Lucy3000' : 'Comprobar instalacion'
 
   return (
     <section className="border-t border-gray-200 pt-6">
@@ -186,19 +183,21 @@ function InstallPanel() {
         ) : null}
 
         <div className="flex flex-col gap-3 sm:flex-row">
-          <button
-            type="button"
-            onClick={() => void install()}
-            disabled={isStandalone || !isSupportedContext}
-            className="inline-flex items-center justify-center gap-2 rounded-sm bg-gray-900 px-5 py-3 text-[11px] font-medium uppercase tracking-[0.15em] text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isServiceWorkerReady || canPromptInstall || isStandalone ? (
-              <Download className="h-4 w-4" aria-hidden="true" />
-            ) : (
-              <RefreshCw className="h-4 w-4" aria-hidden="true" />
-            )}
-            {installLabel}
-          </button>
+          {showInstallButton ? (
+            <button
+              type="button"
+              onClick={() => void install()}
+              disabled={isStandalone || !isSupportedContext}
+              className="inline-flex items-center justify-center gap-2 rounded-sm bg-gray-900 px-5 py-3 text-[11px] font-medium uppercase tracking-[0.15em] text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isServiceWorkerReady || canPromptInstall || isStandalone ? (
+                <Download className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              )}
+              {installLabel}
+            </button>
+          ) : null}
           <Link
             to="/login"
             className="inline-flex items-center justify-center gap-2 rounded-sm border border-gray-300 bg-white px-5 py-3 text-[11px] font-medium uppercase tracking-[0.15em] text-gray-900 transition hover:border-gray-500 hover:bg-gray-50"

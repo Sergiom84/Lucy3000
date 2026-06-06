@@ -74,7 +74,7 @@ export function usePwaInstallPrompt() {
         return false
       }
 
-      toast('Instalacion disponible desde el menu del navegador')
+      toast('Pulsa el icono de instalacion en la barra del navegador')
       return false
     }
 
