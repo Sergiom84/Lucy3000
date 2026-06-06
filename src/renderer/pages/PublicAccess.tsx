@@ -78,7 +78,7 @@ function AccountPanel() {
 }
 
 function InstallPanel() {
-  const { canPromptInstall, install, isStandalone, isSupportedContext } = usePwaInstallPrompt()
+  const { install, isStandalone, isSupportedContext } = usePwaInstallPrompt()
 
   return (
     <section className="border-t border-gray-200 pt-6">
@@ -86,7 +86,7 @@ function InstallPanel() {
         <button
           type="button"
           onClick={() => void install()}
-          disabled={!canPromptInstall || isStandalone || !isSupportedContext}
+          disabled={isStandalone || !isSupportedContext}
           className="inline-flex rounded-sm bg-gray-900 px-5 py-3 text-[11px] font-medium uppercase tracking-[0.15em] text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
         >
           Instalar app
