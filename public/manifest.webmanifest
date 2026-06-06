@@ -2,11 +2,12 @@
   "name": "Lucy3000",
   "short_name": "Lucy3000",
   "description": "Sistema de gestion para centros de estetica",
+  "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#7c3aed",
+  "theme_color": "#9a5a63",
   "lang": "es",
   "icons": [
     {

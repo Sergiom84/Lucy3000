@@ -44,7 +44,7 @@ export function usePwaInstallPrompt() {
 
   const install = async () => {
     if (!installPrompt) {
-      toast('Abre Lucy3000 en una ventana normal de Chrome o Edge para instalarla')
+      toast('Chrome no ofrece instalacion automatica. Menu del navegador > Aplicaciones > Instalar Lucy3000')
       return false
     }
 
