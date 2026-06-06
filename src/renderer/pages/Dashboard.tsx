@@ -147,14 +147,14 @@ export default function Dashboard() {
   const serifStyle = { fontFamily: '"Cormorant Garamond", ui-serif, Georgia, serif' }
 
   return (
-    <div className="animate-fade-in space-y-8">
+    <div className="animate-fade-in space-y-6 sm:space-y-8">
       <section className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-[10px] uppercase tracking-[0.22em] text-gray-500 dark:text-gray-400">
             {formatLongDate()}
           </p>
           <h1
-            className="mt-2 text-5xl font-normal tracking-tight text-gray-900 dark:text-white md:text-6xl"
+            className="mt-2 text-4xl font-normal tracking-tight text-gray-900 dark:text-white sm:text-5xl md:text-6xl"
             style={{ ...serifStyle, lineHeight: 1 }}
           >
             {getGreeting()}
@@ -188,7 +188,7 @@ export default function Dashboard() {
       </section>
 
       <section className="grid grid-cols-1 border-y border-gray-200 dark:border-gray-700 lg:grid-cols-3">
-        <div className="relative p-6 lg:border-r lg:border-gray-200 lg:dark:border-gray-700">
+        <div className="relative p-4 sm:p-6 lg:border-r lg:border-gray-200 lg:dark:border-gray-700">
           {todayAppointmentsCount > 0 ? (
             <span
               className="absolute bottom-6 left-0 top-6 w-[2px]"
@@ -207,7 +207,7 @@ export default function Dashboard() {
           <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">Programadas</p>
         </div>
 
-        <div className="border-t border-gray-200 p-6 lg:border-r lg:border-t-0 lg:border-gray-200 lg:dark:border-gray-700 dark:border-gray-700">
+        <div className="border-t border-gray-200 p-4 sm:p-6 lg:border-r lg:border-t-0 lg:border-gray-200 lg:dark:border-gray-700 dark:border-gray-700">
           <div className="[&>.card]:min-h-0 [&>.card]:border-0 [&>.card]:bg-transparent [&>.card]:p-0 [&>.card]:shadow-none">
             <DashboardReminderCard />
           </div>
@@ -216,7 +216,7 @@ export default function Dashboard() {
         <button
           type="button"
           onClick={() => void handleOpenLowStockModal()}
-          className="relative border-t border-gray-200 p-6 text-left transition hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800/50 lg:border-t-0"
+          className="relative border-t border-gray-200 p-4 text-left transition hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800/50 sm:p-6 lg:border-t-0"
         >
           {lowStockProductsCount > 0 ? (
             <span
@@ -243,20 +243,20 @@ export default function Dashboard() {
 
       <section className="grid grid-cols-1 gap-8 lg:grid-cols-[1.3fr_1fr]">
         <div>
-          <div className="mb-4 flex items-end justify-between">
+          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-[10px] uppercase tracking-[0.22em] text-gray-500 dark:text-gray-400">
                 Ingresos
               </p>
               <h2
-                className="mt-1 text-3xl font-normal tracking-tight text-gray-900 dark:text-white"
+                className="mt-1 text-2xl font-normal tracking-tight text-gray-900 dark:text-white sm:text-3xl"
                 style={serifStyle}
               >
                 Últimos 7 días
               </h2>
             </div>
             {todayRevenue !== null ? (
-              <div className="text-2xl font-normal text-gray-900 dark:text-white" style={serifStyle}>
+              <div className="text-xl font-normal text-gray-900 dark:text-white sm:text-2xl" style={serifStyle}>
                 {formatCurrency(todayRevenue)}
                 <span
                   className="ml-2 text-[11px] font-normal uppercase tracking-wider"
@@ -337,7 +337,7 @@ export default function Dashboard() {
                 Agenda
               </p>
               <h2
-                className="mt-1 text-3xl font-normal tracking-tight text-gray-900 dark:text-white"
+                className="mt-1 text-2xl font-normal tracking-tight text-gray-900 dark:text-white sm:text-3xl"
                 style={serifStyle}
               >
                 Próximas citas
@@ -409,7 +409,7 @@ export default function Dashboard() {
               Movimientos
             </p>
             <h2
-              className="mt-1 text-3xl font-normal tracking-tight text-gray-900 dark:text-white"
+              className="mt-1 text-2xl font-normal tracking-tight text-gray-900 dark:text-white sm:text-3xl"
               style={serifStyle}
             >
               Ventas recientes

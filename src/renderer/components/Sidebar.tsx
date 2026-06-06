@@ -26,7 +26,7 @@ type NavItem = {
   adminOnly?: boolean
 }
 
-const navigation: NavItem[] = [
+export const navigation: NavItem[] = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Clientes', href: '/clients', icon: Users },
   { name: 'Ranking', href: '/ranking', icon: Trophy },
@@ -41,7 +41,12 @@ const navigation: NavItem[] = [
   { name: 'SQL', href: '/sql', icon: Database, adminOnly: true },
 ]
 
-export default function Sidebar() {
+type SidebarProps = {
+  className?: string
+  onNavigate?: () => void
+}
+
+export default function Sidebar({ className, onNavigate }: SidebarProps = {}) {
   const { user } = useAuthStore()
   const [appVersion, setAppVersion] = useState('2.0.0')
 
@@ -69,7 +74,7 @@ export default function Sidebar() {
   })
 
   return (
-    <div className="w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
+    <div className={cn('w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col', className)}>
       {/* Logo */}
       <div className="h-16 flex items-center justify-center border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center space-x-2">
@@ -88,9 +93,10 @@ export default function Sidebar() {
               <NavLink
                 to={item.href}
                 end={item.href === '/'}
+                onClick={onNavigate}
                 className={({ isActive }) =>
                   cn(
-                    'flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                    'flex min-h-11 items-center space-x-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
                     isActive
                       ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/20 dark:text-primary-400'
                       : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'
