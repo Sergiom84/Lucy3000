@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { CheckCircle2, Download, LogIn, RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { usePwaInstallPrompt } from '../hooks/usePwaInstallPrompt'
 
@@ -12,6 +13,45 @@ const portalModes: Array<{ id: PortalMode; title: string }> = [
   { id: 'account', title: 'Cliente con cuenta' },
   { id: 'install', title: 'Instalacion' }
 ]
+
+function getInstallGuide() {
+  const userAgent = window.navigator.userAgent.toLowerCase()
+  const platform = window.navigator.platform.toLowerCase()
+  const isIpadOs = platform.includes('mac') && window.navigator.maxTouchPoints > 1
+
+  if (/iphone|ipad|ipod/.test(userAgent) || isIpadOs) {
+    return {
+      title: 'iPhone o iPad',
+      steps: ['Abrir en Safari', 'Compartir', 'Anadir a pantalla de inicio']
+    }
+  }
+
+  if (userAgent.includes('android')) {
+    return {
+      title: 'Android',
+      steps: ['Menu del navegador', 'Anadir a pantalla de inicio', 'Confirmar instalacion']
+    }
+  }
+
+  if (userAgent.includes('edg/')) {
+    return {
+      title: 'Microsoft Edge',
+      steps: ['Menu del navegador', 'Aplicaciones', 'Instalar Lucy3000']
+    }
+  }
+
+  if (userAgent.includes('chrome') || userAgent.includes('chromium')) {
+    return {
+      title: 'Chrome',
+      steps: ['Menu del navegador', 'Aplicaciones', 'Instalar Lucy3000']
+    }
+  }
+
+  return {
+    title: 'Navegador',
+    steps: ['Abrir en Chrome o Edge', 'Menu del navegador', 'Instalar Lucy3000']
+  }
+}
 
 function PortalCard({
   active,
@@ -78,25 +118,95 @@ function AccountPanel() {
 }
 
 function InstallPanel() {
-  const { install, isStandalone, isSupportedContext } = usePwaInstallPrompt()
+  const { canPromptInstall, install, isStandalone, isServiceWorkerReady, isSupportedContext } = usePwaInstallPrompt()
+  const guide = getInstallGuide()
+
+  const status = isStandalone
+    ? {
+        icon: CheckCircle2,
+        title: 'Lucy3000 ya esta instalada',
+        text: 'Puedes abrirla desde el acceso de aplicaciones del equipo.'
+      }
+    : canPromptInstall
+      ? {
+          icon: Download,
+          title: 'Instalacion directa disponible',
+          text: 'Pulsa el boton y confirma la instalacion en la ventana del navegador.'
+        }
+      : !isSupportedContext
+        ? {
+            icon: Download,
+            title: 'Instalacion no disponible aqui',
+            text: 'Abre Lucy3000 desde la direccion segura https://lucy3000-web.onrender.com/.'
+          }
+        : !isServiceWorkerReady
+          ? {
+              icon: RefreshCw,
+              title: 'Preparando instalacion',
+              text: 'Espera unos segundos. Si Chrome no activa el boton, recarga esta pagina una vez.'
+            }
+          : {
+              icon: Download,
+              title: 'Instalacion desde el navegador',
+              text: `${guide.title} no ha ofrecido el instalador automatico en esta visita.`
+            }
+
+  const StatusIcon = status.icon
+  const installLabel = isStandalone
+    ? 'App instalada'
+    : canPromptInstall
+      ? 'Instalar Lucy3000'
+      : 'Comprobar instalacion'
 
   return (
     <section className="border-t border-gray-200 pt-6">
-      <div className="flex flex-col gap-3 sm:flex-row">
-        <button
-          type="button"
-          onClick={() => void install()}
-          disabled={isStandalone || !isSupportedContext}
-          className="inline-flex rounded-sm bg-gray-900 px-5 py-3 text-[11px] font-medium uppercase tracking-[0.15em] text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Instalar app
-        </button>
-        <Link
-          to="/login"
-          className="inline-flex rounded-sm border border-gray-300 bg-white px-5 py-3 text-[11px] font-medium uppercase tracking-[0.15em] text-gray-900 transition hover:border-gray-500 hover:bg-gray-50"
-        >
-          Entrar sin instalar
-        </Link>
+      <div className="space-y-6">
+        <div className="flex items-start gap-3">
+          <StatusIcon className="mt-0.5 h-5 w-5 shrink-0 text-gray-900" aria-hidden="true" />
+          <div>
+            <p className="text-sm font-semibold text-gray-900">{status.title}</p>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-gray-600">{status.text}</p>
+          </div>
+        </div>
+
+        {!canPromptInstall && !isStandalone ? (
+          <div className="border-t border-gray-200 pt-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">{guide.title}</p>
+            <ol className="mt-3 grid gap-2 sm:grid-cols-3">
+              {guide.steps.map((step, index) => (
+                <li key={step} className="flex items-center gap-3 text-sm text-gray-700">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-gray-300 text-xs font-semibold text-gray-900">
+                    {index + 1}
+                  </span>
+                  <span>{step}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ) : null}
+
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <button
+            type="button"
+            onClick={() => void install()}
+            disabled={isStandalone || !isSupportedContext}
+            className="inline-flex items-center justify-center gap-2 rounded-sm bg-gray-900 px-5 py-3 text-[11px] font-medium uppercase tracking-[0.15em] text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isServiceWorkerReady || canPromptInstall || isStandalone ? (
+              <Download className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+            )}
+            {installLabel}
+          </button>
+          <Link
+            to="/login"
+            className="inline-flex items-center justify-center gap-2 rounded-sm border border-gray-300 bg-white px-5 py-3 text-[11px] font-medium uppercase tracking-[0.15em] text-gray-900 transition hover:border-gray-500 hover:bg-gray-50"
+          >
+            <LogIn className="h-4 w-4" aria-hidden="true" />
+            Entrar sin instalar
+          </Link>
+        </div>
       </div>
     </section>
   )

@@ -9,9 +9,14 @@ type BeforeInstallPromptEvent = Event & {
 export function usePwaInstallPrompt() {
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
   const [isStandalone, setIsStandalone] = useState(false)
+  const [isServiceWorkerReady, setIsServiceWorkerReady] = useState(false)
 
   const isSupportedContext = useMemo(
-    () => window.location.protocol === 'https:' || window.location.hostname === 'localhost',
+    () =>
+      window.location.protocol === 'https:' ||
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1' ||
+      window.location.hostname === '[::1]',
     []
   )
 
@@ -36,15 +41,40 @@ export function usePwaInstallPrompt() {
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
     window.addEventListener('appinstalled', handleAppInstalled)
 
+    const shouldWaitForServiceWorker = import.meta.env.PROD && 'serviceWorker' in navigator && isSupportedContext
+
+    if (shouldWaitForServiceWorker) {
+      void navigator.serviceWorker.ready
+        .then(() => setIsServiceWorkerReady(true))
+        .catch(() => setIsServiceWorkerReady(false))
+    } else {
+      setIsServiceWorkerReady(true)
+    }
+
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
       window.removeEventListener('appinstalled', handleAppInstalled)
     }
-  }, [])
+  }, [isSupportedContext])
 
   const install = async () => {
+    if (isStandalone) {
+      toast.success('Lucy3000 ya esta instalada')
+      return false
+    }
+
+    if (!isSupportedContext) {
+      toast('Abre Lucy3000 desde HTTPS para instalarla como app')
+      return false
+    }
+
     if (!installPrompt) {
-      toast('Chrome no ofrece instalacion automatica. Menu del navegador > Aplicaciones > Instalar Lucy3000')
+      if ('serviceWorker' in navigator && !isServiceWorkerReady) {
+        toast('Preparando instalacion. Espera unos segundos o recarga la pagina')
+        return false
+      }
+
+      toast('Instalacion disponible desde el menu del navegador')
       return false
     }
 
@@ -64,6 +94,7 @@ export function usePwaInstallPrompt() {
     canPromptInstall: Boolean(installPrompt),
     install,
     isStandalone,
+    isServiceWorkerReady,
     isSupportedContext
   }
 }
