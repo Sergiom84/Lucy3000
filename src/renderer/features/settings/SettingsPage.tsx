@@ -100,9 +100,8 @@ export default function Settings() {
                 </p>
                 <ol className="list-decimal space-y-1 pl-4 text-xs text-blue-800 dark:text-blue-300">
                   <li>Pulsa <strong>Imprimir prueba</strong> y abre el diálogo.</li>
-                  <li>Selecciona tu impresora <strong>POS-80c</strong>.</li>
-                  <li>En Chrome/Edge: activa <em>"Recordar impresora"</em> o establécela como predeterminada en Configuración del sistema.</li>
-                  <li>Las siguientes impresiones irán directas a esa impresora.</li>
+                  <li>Selecciona tu impresora de tickets en la lista.</li>
+                  <li>Establécela como predeterminada en la Configuración del sistema para que las siguientes impresiones vayan directas.</li>
                 </ol>
               </div>
 
