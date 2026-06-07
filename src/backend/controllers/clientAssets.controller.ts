@@ -9,14 +9,47 @@ import {
   getSignedUrls,
   deleteFiles
 } from '../services/supabaseStorage.service'
-import type {
-  ClientAsset,
-  ClientAssetsResponse,
-  ClientAssetKind,
-  PhotoCategoryId,
-  ClientPhotoCategorySummary
-} from '../../shared/clientAssets'
-import { PHOTO_CATEGORIES } from '../../shared/clientAssets'
+// Types inlined here to stay within rootDir (tsconfig.backend.json: rootDir=src/backend)
+type ClientAssetKind = 'photos' | 'consents' | 'documents'
+type PhotoCategoryId = 'before' | 'after' | 'treatments' | 'unclassified'
+type ClientAssetPreviewType = 'image' | 'pdf' | 'file'
+
+type ClientAsset = {
+  id: string
+  kind: ClientAssetKind
+  fileName: string
+  originalName: string
+  addedAt: string
+  takenAt?: string | null
+  photoCategory?: PhotoCategoryId | null
+  absolutePath: string
+  previewUrl: string
+  previewType: ClientAssetPreviewType
+  isPrimaryPhoto: boolean
+}
+
+type ClientPhotoCategorySummary = {
+  id: PhotoCategoryId
+  label: string
+  photoCount: number
+  coverUrl: string | null
+}
+
+type ClientAssetsResponse = {
+  baseDir: string
+  primaryPhotoUrl: string | null
+  photoCategories: ClientPhotoCategorySummary[]
+  photos: ClientAsset[]
+  consents: ClientAsset[]
+  documents: ClientAsset[]
+}
+
+const PHOTO_CATEGORIES = [
+  { id: 'before' as PhotoCategoryId, label: 'Antes' },
+  { id: 'after' as PhotoCategoryId, label: 'Después' },
+  { id: 'treatments' as PhotoCategoryId, label: 'Tratamientos' },
+  { id: 'unclassified' as PhotoCategoryId, label: 'Sin clasificar' }
+] as const
 
 let bucketReady = false
 const ensureBucketOnce = async () => {

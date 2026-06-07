@@ -49,7 +49,7 @@ export const uploadFile = async (
       'Content-Type': mimeType,
       'x-upsert': 'false'
     },
-    body: buffer
+    body: new Uint8Array(buffer)
   })
   if (!res.ok) {
     const body = await res.text()
