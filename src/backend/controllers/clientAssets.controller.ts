@@ -214,6 +214,7 @@ export const uploadClientAsset = async (req: AuthRequest, res: Response) => {
 
     await (prisma as any).clientFile.create({
       data: {
+        tenantId: req.user!.tenantId,
         clientId: req.params.id,
         kind,
         originalName: req.file.originalname,

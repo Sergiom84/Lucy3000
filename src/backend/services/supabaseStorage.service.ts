@@ -73,7 +73,11 @@ export const getSignedUrl = async (key: string): Promise<string> => {
     throw new Error(`Signed URL failed: ${res.status} ${body}`)
   }
   const data = await res.json() as { signedURL: string }
-  return `${getSupabaseUrl()}${data.signedURL}`
+  const base = getSupabaseUrl()
+  const path = data.signedURL.startsWith('/storage/v1')
+    ? data.signedURL
+    : `/storage/v1${data.signedURL}`
+  return `${base}${path}`
 }
 
 /** Generate signed URLs for multiple keys in one request. */
@@ -99,7 +103,12 @@ export const getSignedUrls = async (
   const base = getSupabaseUrl()
   for (const item of items) {
     if (item.signedURL && !item.error) {
-      map.set(item.path, `${base}${item.signedURL}`)
+      // Supabase batch-sign returns signedURL relative to /storage/v1 (e.g. /object/sign/...)
+      // Single-sign returns the full path including /storage/v1 already.
+      const path = item.signedURL.startsWith('/storage/v1')
+        ? item.signedURL
+        : `/storage/v1${item.signedURL}`
+      map.set(item.path, `${base}${path}`)
     }
   }
   return map
