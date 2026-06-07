@@ -28,6 +28,7 @@ import calendarRoutes from './routes/calendar.routes'
 import quoteRoutes from './routes/quote.routes'
 import sqlRoutes from './routes/sql.routes'
 import tenantRoutes from './routes/tenant.routes'
+import clientAssetsRoutes from './routes/clientAssets.routes'
 
 export const app = express()
 
@@ -100,6 +101,7 @@ app.use('/api/calendar', calendarRoutes)
 app.use('/api/quotes', quoteRoutes)
 app.use('/api/sql', sqlRoutes)
 app.use('/api/tenants', tenantRoutes)
+app.use('/api/clients/:id/assets', clientAssetsRoutes)
 
 // Static frontend build (Vite)
 const clientDir = path.resolve(__dirname, '..')

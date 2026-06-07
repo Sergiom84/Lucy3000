@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft,
   CheckCircle2,
@@ -28,6 +28,13 @@ import {
   type ClientAssetsResponse,
   type PhotoCategoryId
 } from '../utils/desktop'
+import {
+  webDeleteClientAsset,
+  webListClientAssets,
+  webSetClientPhotoCategory,
+  webSetPrimaryClientPhoto,
+  webUploadClientAsset
+} from '../utils/clientAssetsApi'
 
 type ExplorerFolderId = PhotoCategoryId | 'consents' | 'documents'
 
@@ -193,6 +200,22 @@ export default function ClientAssetExplorer({
   const [previewState, setPreviewState] = useState<{ folderId: ExplorerFolderId; assetId: string } | null>(null)
   const [photoImportPickerOpen, setPhotoImportPickerOpen] = useState(false)
 
+  // Web-mode file input refs
+  const photoInputRef = useRef<HTMLInputElement>(null)
+  const consentInputRef = useRef<HTMLInputElement>(null)
+  const docInputRef = useRef<HTMLInputElement>(null)
+  const pendingPhotoCategoryRef = useRef<PhotoCategoryId | null>(null)
+
+  // Load web assets on mount (web mode only)
+  useEffect(() => {
+    if (isDesktop() || clientAssets !== null) return
+    onAssetsLoadingChange(true)
+    webListClientAssets(clientId)
+      .then(onAssetsChange)
+      .catch((err: any) => toast.error(err.message || 'Error al cargar archivos'))
+      .finally(() => onAssetsLoadingChange(false))
+  }, [clientId])
+
   const sortedPhotos = useMemo(() => sortAssetsByRecency(clientAssets?.photos || []), [clientAssets?.photos])
   const sortedConsents = useMemo(() => sortAssetsByRecency(clientAssets?.consents || []), [clientAssets?.consents])
   const sortedDocuments = useMemo(() => sortAssetsByRecency(clientAssets?.documents || []), [clientAssets?.documents])
@@ -303,6 +326,14 @@ export default function ClientAssetExplorer({
   }
 
   const handleImport = async (kind: FolderDefinition['kind'], photoCategory?: PhotoCategoryId | null) => {
+    if (!isDesktop()) {
+      // Web mode: trigger hidden file input
+      pendingPhotoCategoryRef.current = photoCategory ?? null
+      if (kind === 'photos') photoInputRef.current?.click()
+      else if (kind === 'consents') consentInputRef.current?.click()
+      else docInputRef.current?.click()
+      return
+    }
     await runAssetMutation(
       () => importClientAssets(clientId, clientName, kind, { photoCategory: photoCategory ?? null }),
       {
@@ -313,14 +344,50 @@ export default function ClientAssetExplorer({
     )
   }
 
+  const handleWebFileChange = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+    kind: FolderDefinition['kind']
+  ) => {
+    const files = Array.from(event.target.files || [])
+    event.target.value = ''
+    if (files.length === 0) return
+
+    const photoCategory = pendingPhotoCategoryRef.current
+    onAssetsLoadingChange(true)
+    try {
+      let lastResponse: ClientAssetsResponse | null = null
+      for (const file of files) {
+        lastResponse = await webUploadClientAsset(clientId, file, kind as any, {
+          photoCategory: photoCategory ?? null
+        })
+      }
+      if (lastResponse) onAssetsChange(lastResponse)
+      toast.success(
+        kind === 'photos'
+          ? `${files.length > 1 ? files.length + ' fotos subidas' : 'Foto subida'}`
+          : kind === 'consents'
+          ? 'Consentimiento subido'
+          : 'Documento subido'
+      )
+    } catch (err: any) {
+      toast.error(err.message || 'No se pudo subir el archivo')
+    } finally {
+      onAssetsLoadingChange(false)
+    }
+  }
+
   const handleDeleteAsset = async (asset: ClientAsset) => {
     const confirmed = window.confirm(`¿Eliminar ${asset.originalName}?`)
     if (!confirmed) return
 
-    const result = await runAssetMutation(
-      () => deleteClientAsset(clientId, clientName, asset.id),
-      { successMessage: 'Archivo eliminado', errorMessage: 'No se pudo eliminar el archivo' }
-    )
+    const deleteFn = isDesktop()
+      ? () => deleteClientAsset(clientId, clientName, asset.id)
+      : () => webDeleteClientAsset(clientId, asset.id)
+
+    const result = await runAssetMutation(deleteFn, {
+      successMessage: 'Archivo eliminado',
+      errorMessage: 'No se pudo eliminar el archivo'
+    })
 
     if (result && previewState?.assetId === asset.id) {
       setPreviewState(null)
@@ -328,20 +395,24 @@ export default function ClientAssetExplorer({
   }
 
   const handleSetPrimaryPhoto = async (assetId: string) => {
-    await runAssetMutation(
-      () => setPrimaryClientPhoto(clientId, clientName, assetId),
-      { successMessage: 'Foto principal actualizada', errorMessage: 'No se pudo actualizar la foto principal' }
-    )
+    const fn = isDesktop()
+      ? () => setPrimaryClientPhoto(clientId, clientName, assetId)
+      : () => webSetPrimaryClientPhoto(clientId, assetId)
+    await runAssetMutation(fn, {
+      successMessage: 'Foto principal actualizada',
+      errorMessage: 'No se pudo actualizar la foto principal'
+    })
   }
 
   const handleSetPhotoCategory = async (assetId: string, photoCategory: PhotoCategoryId) => {
-    await runAssetMutation(
-      () => setClientPhotoCategory(clientId, clientName, assetId, photoCategory),
-      { errorMessage: 'No se pudo mover la foto de carpeta' }
-    )
+    const fn = isDesktop()
+      ? () => setClientPhotoCategory(clientId, clientName, assetId, photoCategory)
+      : () => webSetClientPhotoCategory(clientId, assetId, photoCategory)
+    await runAssetMutation(fn, { errorMessage: 'No se pudo mover la foto de carpeta' })
   }
 
   const handleOpenClientFolder = async () => {
+    if (!isDesktop()) return
     try {
       await openClientFolder(clientId, clientName)
     } catch (error: any) {
@@ -350,6 +421,11 @@ export default function ClientAssetExplorer({
   }
 
   const handleOpenAsset = async (asset: ClientAsset) => {
+    if (!isDesktop()) {
+      // Web: open signed URL in new tab
+      if (asset.previewUrl) window.open(asset.previewUrl, '_blank', 'noopener')
+      return
+    }
     try {
       await openClientAsset(clientId, clientName, asset.id)
     } catch (error: any) {
@@ -363,16 +439,36 @@ export default function ClientAssetExplorer({
     setPreviewState({ folderId: previewState.folderId, assetId: previewAssets[nextIndex].id })
   }
 
-  if (!isDesktop()) {
-    return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-300">
-        Disponible solo en la app de escritorio Electron.
-      </div>
-    )
-  }
-
   return (
     <>
+      {/* Hidden file inputs for web mode */}
+      {!isDesktop() && (
+        <>
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif"
+            multiple
+            className="hidden"
+            onChange={(e) => handleWebFileChange(e, 'photos')}
+          />
+          <input
+            ref={consentInputRef}
+            type="file"
+            accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            className="hidden"
+            onChange={(e) => handleWebFileChange(e, 'consents')}
+          />
+          <input
+            ref={docInputRef}
+            type="file"
+            accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,image/*"
+            className="hidden"
+            onChange={(e) => handleWebFileChange(e, 'documents')}
+          />
+        </>
+      )}
+
       <div className="space-y-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
@@ -384,9 +480,11 @@ export default function ClientAssetExplorer({
               </div>
             )}
           </div>
-          <button type="button" onClick={handleOpenClientFolder} className="btn btn-secondary btn-sm">
-            Abrir carpeta
-          </button>
+          {isDesktop() && (
+            <button type="button" onClick={handleOpenClientFolder} className="btn btn-secondary btn-sm">
+              Abrir carpeta
+            </button>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-3">

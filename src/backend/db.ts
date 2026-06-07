@@ -35,6 +35,7 @@ const loadRuntimePrismaClient = () => {
 const TENANT_SCOPED_MODELS = new Set([
   'User',
   'Client',
+  'ClientFile',
   'ClientHistory',
   'Service',
   'Appointment',

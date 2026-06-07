@@ -183,12 +183,34 @@ model Client {
   linkedClient    Client?   @relation("ClientLink", fields: [linkedClientId], references: [id], onDelete: SetNull)
   relatedClients  Client[]  @relation("ClientLink")
   tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  clientFiles     ClientFile[]
 
   @@unique([tenantId, email])
   @@unique([id, tenantId])
   @@index([tenantId, isActive, createdAt])
   @@index([tenantId, lastVisit])
   @@map("clients")
+}
+
+model ClientFile {
+  id            String    @id @default(uuid())
+  tenantId      String    @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
+  clientId      String
+  kind          String
+  originalName  String
+  storageKey    String
+  mimeType      String
+  sizeBytes     Int
+  photoCategory String?
+  isPrimary     Boolean   @default(false)
+  takenAt       DateTime?
+  addedAt       DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+
+  client        Client    @relation(fields: [clientId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@index([tenantId, clientId])
+  @@map("client_files")
 }
 
 model ClientHistory {
