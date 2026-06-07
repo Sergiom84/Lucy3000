@@ -599,7 +599,7 @@ export default function Appointments() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Agenda de Citas</h1>
         </div>
@@ -755,7 +755,7 @@ export default function Appointments() {
         </div>
       </div>
 
-      <div className="card" style={{ height: '760px' }}>
+      <div className="card appointment-calendar-shell overflow-x-auto p-2 sm:p-4">
         <BigCalendar
           localizer={calendarLocalizer}
           culture={calendarCulture}

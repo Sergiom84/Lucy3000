@@ -467,7 +467,114 @@ export default function Clients() {
                 </button>
               </div>
             ) : null}
-            <div className="overflow-x-auto">
+            <div className="space-y-3 lg:hidden">
+              {clients.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-gray-300 px-4 py-8 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                  {emptyStateMessage}
+                </div>
+              ) : (
+                clients.map((client) => (
+                  <article
+                    key={client.id}
+                    className={`rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800 ${
+                      highlightedClientId === client.id ? 'ring-2 ring-cyan-300 dark:ring-cyan-700' : ''
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-base font-semibold text-gray-900 dark:text-white">
+                          {client.firstName} {client.lastName}
+                        </p>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          {client.externalCode ? `#${client.externalCode}` : 'Sin nº cliente'} · {client._count?.appointments ?? 0} citas · {client._count?.sales ?? 0} ventas
+                        </p>
+                      </div>
+                      <span className={`badge ${client.isActive ? 'badge-success' : 'badge-danger'} flex-shrink-0`}>
+                        {client.isActive ? 'Activo' : 'Inactivo'}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 grid gap-2 text-sm text-gray-600 dark:text-gray-300">
+                      {client.phone ? (
+                        <div className="flex min-w-0 items-center gap-2">
+                          <Phone className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                          <span className="truncate">{formatPhone(client.phone)}</span>
+                        </div>
+                      ) : null}
+                      {client.email ? (
+                        <div className="flex min-w-0 items-center gap-2">
+                          <Mail className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                          <span className="truncate">{client.email}</span>
+                        </div>
+                      ) : null}
+                      {client.effectiveLastVisit ? (
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                          Última visita: {formatDate(client.effectiveLastVisit)}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-2 gap-3 rounded-lg bg-gray-50 p-3 text-sm dark:bg-gray-900/50">
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Facturado</p>
+                        <button
+                          type="button"
+                          onClick={() => handleViewBilling(client)}
+                          className="mt-1 font-semibold text-gray-900 underline-offset-2 hover:underline dark:text-white"
+                        >
+                          {formatCurrency(client.totalSpent)}
+                        </button>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Pendiente</p>
+                        {Number(client.pendingAmount || 0) > 0 ? (
+                          <p className="mt-1 font-semibold text-red-600">{formatCurrency(client.pendingAmount)}</p>
+                        ) : (
+                          <p className="mt-1 text-gray-500 dark:text-gray-400">-</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-4 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleViewClientCalendar(client)}
+                        className="btn btn-secondary btn-sm px-2"
+                        title="Ver citas"
+                      >
+                        <Calendar className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleView(client.id)}
+                        className="btn btn-secondary btn-sm px-2"
+                        title="Ver detalles"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleEdit(client)}
+                        className="btn btn-secondary btn-sm px-2"
+                        title="Editar"
+                      >
+                        <Edit className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(client.id)}
+                        className="btn btn-secondary btn-sm px-2 text-red-600"
+                        title="Eliminar"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </article>
+                ))
+              )}
+            </div>
+
+            <div className="hidden overflow-x-auto lg:block">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-gray-200 dark:border-gray-700">
@@ -754,7 +861,7 @@ export default function Clients() {
         maxWidth="2xl"
       >
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-gray-600 dark:text-gray-400">
               Total facturado:{' '}
               <span className="font-semibold text-gray-900 dark:text-white">
@@ -773,7 +880,7 @@ export default function Clients() {
               No hay ventas registradas para este cliente.
             </div>
           ) : (
-            <div className="max-h-[28rem] overflow-y-auto">
+            <div className="max-h-[28rem] overflow-auto">
               <table className="table">
                 <thead>
                   <tr>

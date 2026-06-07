@@ -927,7 +927,7 @@ export default function Cash() {
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Caja</h1>
         </div>
 
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <button onClick={() => void handleOpenSummaryModal()} className="btn btn-secondary">
             Resumen
           </button>

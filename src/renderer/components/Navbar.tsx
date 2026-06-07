@@ -1,10 +1,14 @@
 import { useState, useEffect } from 'react'
-import { Bell, Moon, Sun, LogOut, User } from 'lucide-react'
+import { Bell, Menu, Moon, Sun, LogOut, User } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import { useThemeStore } from '../stores/themeStore'
 import api from '../utils/api'
 
-export default function Navbar() {
+type NavbarProps = {
+  onMenuClick?: () => void
+}
+
+export default function Navbar({ onMenuClick }: NavbarProps = {}) {
   const { user, logout } = useAuthStore()
   const { isDark, toggleTheme } = useThemeStore()
   const [notifications, setNotifications] = useState<any[]>([])
@@ -28,18 +32,27 @@ export default function Navbar() {
   }
 
   return (
-    <header className="h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-6">
-      <div className="flex items-center space-x-4">
-        <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
+    <header className="h-16 flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3 px-4 sm:px-6">
+      <div className="flex min-w-0 items-center gap-3">
+        <button
+          type="button"
+          onClick={onMenuClick}
+          className="inline-flex h-11 w-11 items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors lg:hidden"
+          title="Abrir navegación"
+          aria-label="Abrir navegación"
+        >
+          <Menu className="h-5 w-5 text-gray-700 dark:text-gray-200" />
+        </button>
+        <h1 className="truncate text-lg font-semibold text-gray-900 dark:text-white sm:text-xl">
           Sistema de Gestión
         </h1>
       </div>
 
-      <div className="flex items-center space-x-4">
+      <div className="flex flex-shrink-0 items-center gap-2 sm:gap-4">
         {/* Theme Toggle */}
         <button
           onClick={toggleTheme}
-          className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
           title={isDark ? 'Modo claro' : 'Modo oscuro'}
         >
           {isDark ? (
@@ -53,7 +66,7 @@ export default function Navbar() {
         <div className="relative">
           <button
             onClick={() => setShowNotifications(!showNotifications)}
-            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors relative"
+            className="relative inline-flex h-11 w-11 items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
             title="Notificaciones"
           >
             <Bell className="w-5 h-5 text-gray-600 dark:text-gray-300" />
@@ -63,7 +76,7 @@ export default function Navbar() {
           </button>
 
           {showNotifications && (
-            <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50">
+            <div className="absolute right-0 z-50 mt-2 w-[calc(100vw-2rem)] max-w-sm rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800 sm:w-80">
               <div className="p-4 border-b border-gray-200 dark:border-gray-700">
                 <h3 className="font-semibold text-gray-900 dark:text-white">
                   Notificaciones
@@ -95,8 +108,8 @@ export default function Navbar() {
         </div>
 
         {/* User Menu */}
-        <div className="flex items-center space-x-3 pl-4 border-l border-gray-200 dark:border-gray-700">
-          <div className="flex items-center space-x-2">
+        <div className="flex items-center gap-2 pl-2 sm:gap-3 sm:border-l sm:border-gray-200 sm:pl-4 sm:dark:border-gray-700">
+          <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-primary-600 rounded-full flex items-center justify-center">
               <User className="w-5 h-5 text-white" />
             </div>
@@ -112,7 +125,7 @@ export default function Navbar() {
 
           <button
             onClick={handleLogout}
-            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
             title="Cerrar sesión"
           >
             <LogOut className="w-5 h-5 text-gray-600 dark:text-gray-300" />

@@ -1294,22 +1294,23 @@ export default function Sales() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Ventas</h1>
         </div>
 
-        <div className="flex gap-2 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg">
+        <div className="flex w-full gap-2 overflow-x-auto rounded-lg bg-gray-100 p-1 dark:bg-gray-800 lg:w-auto">
           <button
             onClick={() => {
               setView('pos')
               navigate('/sales', { replace: true })
             }}
-            className={`px-4 py-2 rounded-md transition-colors ${
+            className={[
+              'flex-shrink-0 whitespace-nowrap rounded-md px-3 py-2 transition-colors sm:px-4',
               view === 'pos'
                 ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
                 : 'text-gray-600 dark:text-gray-400'
-            }`}
+            ].join(' ')}
           >
             <ShoppingCart className="w-5 h-5 inline-block mr-2" />
             Punto de Venta
@@ -1319,11 +1320,12 @@ export default function Sales() {
               setView('history')
               navigate('/sales?view=history', { replace: true })
             }}
-            className={`px-4 py-2 rounded-md transition-colors ${
+            className={[
+              'flex-shrink-0 whitespace-nowrap rounded-md px-3 py-2 transition-colors sm:px-4',
               view === 'history'
                 ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
                 : 'text-gray-600 dark:text-gray-400'
-            }`}
+            ].join(' ')}
           >
             <Clock className="w-5 h-5 inline-block mr-2" />
             Historial
@@ -1333,11 +1335,12 @@ export default function Sales() {
               setView('account-balance')
               navigate('/sales?view=account-balance', { replace: true })
             }}
-            className={`px-4 py-2 rounded-md transition-colors ${
+            className={[
+              'flex-shrink-0 whitespace-nowrap rounded-md px-3 py-2 transition-colors sm:px-4',
               view === 'account-balance'
                 ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
                 : 'text-gray-600 dark:text-gray-400'
-            }`}
+            ].join(' ')}
           >
             <CreditCard className="w-5 h-5 inline-block mr-2" />
             Historial Abono
@@ -1577,7 +1580,7 @@ export default function Sales() {
             )}
 
             <div className="card">
-              <div className="flex flex-col sm:flex-row gap-4 mb-6">
+              <div className="mb-6 flex flex-col gap-4 sm:flex-row">
                 <div className="flex-1 relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                   <input
@@ -1589,7 +1592,7 @@ export default function Sales() {
                   />
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   {[
                     { value: 'services', label: 'Servicios' },
                     { value: 'products', label: 'Productos' },
@@ -1599,7 +1602,7 @@ export default function Sales() {
                     <button
                       key={option.value}
                       onClick={() => handleCatalogTypeChange(option.value as typeof catalogType)}
-                      className={`btn ${catalogType === option.value ? 'btn-primary' : 'btn-secondary'}`}
+                      className={`btn flex-1 sm:flex-none ${catalogType === option.value ? 'btn-primary' : 'btn-secondary'}`}
                     >
                       {option.label}
                     </button>
@@ -1691,7 +1694,7 @@ export default function Sales() {
               )}
 
               {catalogItemsExpanded ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto">
+                <div className="grid max-h-[600px] grid-cols-1 gap-4 overflow-y-auto sm:grid-cols-2 xl:grid-cols-3">
                   {filteredCatalog.length === 0 ? (
                     <div className="sm:col-span-2 xl:col-span-3 rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
                       No hay elementos para este filtro.

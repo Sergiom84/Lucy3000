@@ -7,19 +7,36 @@
     @apply border-gray-200 dark:border-gray-700;
   }
 
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
   body {
     @apply bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100;
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
   }
 }
 
 @layer components {
   .btn {
-    @apply px-4 py-2 rounded-lg font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2;
+    @apply inline-flex min-h-11 items-center justify-center px-4 py-2 rounded-lg font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2;
   }
 
   .btn-sm {
-    @apply px-3 py-1.5 text-sm rounded-md;
+    @apply min-h-9 px-3 py-1.5 text-sm rounded-md;
   }
 
   .btn-primary {
@@ -39,11 +56,11 @@
   }
 
   .card {
-    @apply bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6;
+    @apply bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 sm:rounded-xl sm:p-6;
   }
 
   .input {
-    @apply w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100;
+    @apply w-full min-h-11 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white dark:bg-gray-700 text-base text-gray-900 dark:text-gray-100 sm:text-sm;
   }
 
   .label {
@@ -83,7 +100,7 @@
   }
 
   .table th {
-    @apply px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 whitespace-nowrap;
+    @apply px-3 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 whitespace-nowrap sm:px-4;
   }
 
   .table tbody tr {
@@ -95,7 +112,7 @@
   }
 
   .table td {
-    @apply px-4 py-3 text-gray-900 dark:text-gray-100;
+    @apply px-3 py-3 text-gray-900 dark:text-gray-100 sm:px-4;
   }
 }
 
@@ -157,5 +174,48 @@
 
 .client-calendar-dock-calendar .rbc-event-content > div {
   height: 100%;
+}
+
+.appointment-calendar-shell {
+  height: min(760px, calc(100dvh - 12rem));
+  min-height: 560px;
+}
+
+.appointment-calendar-shell .rbc-toolbar {
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+.appointment-calendar-shell .rbc-btn-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.appointment-calendar-shell .rbc-btn-group button {
+  min-height: 2.5rem;
+  border-radius: 0.5rem;
+}
+
+@media (max-width: 767px) {
+  .appointment-calendar-shell {
+    height: calc(100dvh - 12.5rem);
+    min-height: 520px;
+  }
+
+  .appointment-calendar-shell .rbc-calendar {
+    min-width: 740px;
+  }
+
+  .appointment-calendar-shell .rbc-toolbar {
+    flex-direction: column;
+  }
+
+  .appointment-calendar-shell .rbc-toolbar-label {
+    order: -1;
+    padding: 0.25rem 0;
+    text-align: left;
+    font-weight: 700;
+  }
 }
 
