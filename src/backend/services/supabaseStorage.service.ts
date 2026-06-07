@@ -23,16 +23,25 @@ const authHeaders = () => ({
   apikey: getServiceKey()
 })
 
-/** Ensure the bucket exists. Idempotent — ignores 409. */
+/** Ensure the bucket exists. Idempotent — ignores duplicate errors.
+ *  Supabase may return HTTP 400 with body statusCode "409" instead of HTTP 409. */
 export const ensureBucket = async (): Promise<void> => {
   const res = await fetch(`${getSupabaseUrl()}/storage/v1/bucket`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ id: BUCKET, name: BUCKET, public: false })
   })
-  if (!res.ok && res.status !== 409) {
+  if (!res.ok) {
     const body = await res.text()
-    throw new Error(`Failed to ensure bucket: ${res.status} ${body}`)
+    // Treat both HTTP 409 and bodies with statusCode/error "409"/"Duplicate" as success
+    const isAlreadyExists =
+      res.status === 409 ||
+      body.includes('"409"') ||
+      body.includes('"Duplicate"') ||
+      body.includes('already exists')
+    if (!isAlreadyExists) {
+      throw new Error(`Failed to ensure bucket: ${res.status} ${body}`)
+    }
   }
 }
 
