@@ -82,15 +82,28 @@ export default function Settings() {
                 Impresora de tickets
               </h2>
             </div>
-            <button onClick={loadPrinters} className="btn btn-secondary" disabled={!desktopMode || loading}>
-              Recargar
-            </button>
+            {desktopMode && (
+              <button onClick={loadPrinters} className="btn btn-secondary" disabled={loading}>
+                Recargar
+              </button>
+            )}
           </div>
 
           {!desktopMode ? (
             <div className="space-y-4">
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-                En navegador no hay acceso a Electron ni configuración silenciosa de impresora. Lucy3000 usará el diálogo de impresión del navegador y podrás elegir `POS-80c` manualmente.
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950/30">
+                <p className="mb-3 text-sm font-medium text-blue-900 dark:text-blue-200">
+                  La impresión funciona desde el navegador. Al pulsar imprimir se abrirá el diálogo del sistema.
+                </p>
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-400">
+                  Para imprimir sin elegir impresora cada vez:
+                </p>
+                <ol className="list-decimal space-y-1 pl-4 text-xs text-blue-800 dark:text-blue-300">
+                  <li>Pulsa <strong>Imprimir prueba</strong> y abre el diálogo.</li>
+                  <li>Selecciona tu impresora <strong>POS-80c</strong>.</li>
+                  <li>En Chrome/Edge: activa <em>"Recordar impresora"</em> o establécela como predeterminada en Configuración del sistema.</li>
+                  <li>Las siguientes impresiones irán directas a esa impresora.</li>
+                </ol>
               </div>
 
               <button
@@ -98,7 +111,7 @@ export default function Settings() {
                 className="btn btn-primary"
                 disabled={testingPrinter}
               >
-                {testingPrinter ? 'Abriendo impresión...' : 'Imprimir prueba en navegador'}
+                {testingPrinter ? 'Abriendo impresión...' : 'Imprimir prueba'}
               </button>
             </div>
           ) : (
