@@ -63,8 +63,13 @@ const TENANT_SCOPED_MODELS = new Set([
   'QuoteItem'
 ])
 
+// Models excluded here use plain { id } for update/delete (their @id is globally unique).
+// ClientFile: no @@unique([id, tenantId]) in schema — id UUID is globally unique.
+// AppointmentService: no @id, uses composite key.
 const TENANT_ID_UNIQUE_MODELS = new Set(
-  [...TENANT_SCOPED_MODELS].filter((model) => model !== 'AppointmentService')
+  [...TENANT_SCOPED_MODELS].filter(
+    (model) => model !== 'AppointmentService' && model !== 'ClientFile'
+  )
 )
 
 const TENANT_UNIQUE_FIELDS: Record<string, Record<string, string>> = {
