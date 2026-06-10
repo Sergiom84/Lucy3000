@@ -36,6 +36,10 @@ services:
         generateValue: true
       - key: BOOTSTRAP_TOKEN
         sync: false
+      # Origenes permitidos para CORS (separados por coma). Las peticiones sin
+      # cabecera Origin (Electron, healthchecks) pasan siempre.
+      - key: CORS_ORIGINS
+        value: https://lucy3000-web.onrender.com
 
   - type: web
     name: lucy3000-web

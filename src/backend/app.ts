@@ -1,5 +1,7 @@
 import express, { type NextFunction, type Request, type Response } from 'express'
 import cors from 'cors'
+import helmet from 'helmet'
+import rateLimit from 'express-rate-limit'
 import multer from 'multer'
 import path from 'path'
 import {
@@ -33,7 +35,39 @@ import clientAssetsRoutes from './routes/clientAssets.routes'
 export const app = express()
 
 // Middleware
-app.use(cors())
+// CSP desactivada: el mismo Express sirve el build de Vite (scripts inline del SPA).
+app.use(helmet({ contentSecurityPolicy: false }))
+
+// CORS: con CORS_ORIGINS definido (produccion Render) solo se aceptan esos
+// origenes; peticiones sin cabecera Origin (Electron file://, curl, healthchecks)
+// pasan siempre. Sin la variable (dev/local) se mantiene abierto.
+const allowedOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim().replace(/\/$/, ''))
+  .filter(Boolean)
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+        return callback(null, true)
+      }
+      return callback(new Error('Origin not allowed by CORS'))
+    }
+  })
+)
+
+// Render/proxies: necesario para que el rate limit vea la IP real del cliente.
+app.set('trust proxy', 1)
+
+const authRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Demasiados intentos. Espera unos minutos y vuelve a intentarlo.' }
+})
+
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 app.use((req, res, next) => {
@@ -83,6 +117,9 @@ app.get('/health', (_req, res) => {
 })
 
 // Routes
+// Solo endpoints sin autenticar (fuerza bruta); /me y /register quedan fuera.
+app.use('/api/auth/login', authRateLimiter)
+app.use('/api/auth/bootstrap-admin', authRateLimiter)
 app.use('/api/auth', authRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/clients', clientRoutes)

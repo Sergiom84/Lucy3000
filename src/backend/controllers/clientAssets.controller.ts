@@ -74,6 +74,40 @@ const ALLOWED_MIME_TYPES = new Set([
 
 const MAX_ASSET_SIZE_BYTES = 15 * 1024 * 1024 // 15 MB
 
+// El mimetype lo declara el cliente y es falsificable: contrastar con la firma
+// real del fichero (magic bytes) antes de aceptarlo.
+const matchesMagicBytes = (buffer: Buffer, mime: string): boolean => {
+  if (buffer.length < 12) return false
+
+  const startsWith = (bytes: number[], offset = 0) =>
+    bytes.every((byte, index) => buffer[offset + index] === byte)
+
+  switch (mime) {
+    case 'image/jpeg':
+      return startsWith([0xff, 0xd8, 0xff])
+    case 'image/png':
+      return startsWith([0x89, 0x50, 0x4e, 0x47])
+    case 'image/gif':
+      return startsWith([0x47, 0x49, 0x46, 0x38])
+    case 'image/webp':
+      return startsWith([0x52, 0x49, 0x46, 0x46]) && startsWith([0x57, 0x45, 0x42, 0x50], 8)
+    case 'image/heic':
+    case 'image/heif':
+      // ISO-BMFF: 'ftyp' en offset 4
+      return startsWith([0x66, 0x74, 0x79, 0x70], 4)
+    case 'application/pdf':
+      return startsWith([0x25, 0x50, 0x44, 0x46]) // %PDF
+    case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+    case 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
+      return startsWith([0x50, 0x4b]) // ZIP (docx/xlsx)
+    case 'application/msword':
+    case 'application/vnd.ms-excel':
+      return startsWith([0xd0, 0xcf, 0x11, 0xe0]) // OLE2 (doc/xls)
+    default:
+      return false
+  }
+}
+
 const mimeToPreviewType = (mime: string): ClientAsset['previewType'] => {
   if (mime.startsWith('image/')) return 'image'
   if (mime === 'application/pdf') return 'pdf'
@@ -195,6 +229,10 @@ export const uploadClientAsset = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: `Tipo de archivo no permitido: ${req.file.mimetype}` })
     }
 
+    if (!matchesMagicBytes(req.file.buffer, req.file.mimetype)) {
+      return res.status(400).json({ error: 'El contenido del archivo no coincide con su tipo declarado' })
+    }
+
     if (req.file.size > MAX_ASSET_SIZE_BYTES) {
       return res.status(400).json({
         error: `El archivo supera el límite de ${MAX_ASSET_SIZE_BYTES / 1024 / 1024}MB`
@@ -271,7 +309,15 @@ export const deleteClientAsset = async (req: AuthRequest, res: Response) => {
 /** PATCH /api/clients/:id/assets/:assetId/primary */
 export const setPrimaryClientAsset = async (req: AuthRequest, res: Response) => {
   try {
-    const db = prisma
+    // ClientFile no tiene unique compuesto (id, tenantId): verificar pertenencia
+    // antes de escribir, igual que en deleteClientAsset.
+    const file = await (prisma as any).clientFile.findFirst({
+      where: { id: req.params.assetId, clientId: req.params.id }
+    })
+
+    if (!file) {
+      return res.status(404).json({ error: 'Archivo no encontrado' })
+    }
 
     // Clear existing primary
     await (prisma as any).clientFile.updateMany({
@@ -281,7 +327,7 @@ export const setPrimaryClientAsset = async (req: AuthRequest, res: Response) => 
 
     // Set new primary
     await (prisma as any).clientFile.update({
-      where: { id: req.params.assetId },
+      where: { id: file.id },
       data: { isPrimary: true }
     })
 
@@ -303,8 +349,16 @@ export const setClientAssetCategory = async (req: AuthRequest, res: Response) =>
   try {
     const { photoCategory } = req.body as { photoCategory: string | null }
 
+    const file = await (prisma as any).clientFile.findFirst({
+      where: { id: req.params.assetId, clientId: req.params.id }
+    })
+
+    if (!file) {
+      return res.status(404).json({ error: 'Archivo no encontrado' })
+    }
+
     await (prisma as any).clientFile.update({
-      where: { id: req.params.assetId },
+      where: { id: file.id },
       data: { photoCategory: photoCategory ?? null }
     })
 

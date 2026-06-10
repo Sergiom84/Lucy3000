@@ -321,13 +321,14 @@ export const getServerNow = async (): Promise<Date> => {
     return new Date()
   }
 
-  try {
-    const rows = await prisma.$queryRawUnsafe<Array<{ now: Date }>>('SELECT NOW() as now')
-    const value = rows?.[0]?.now
-    return value ? new Date(value) : new Date()
-  } catch {
-    return new Date()
+  // Fail-closed: si la base no responde, no caer al reloj local (manipulable
+  // en el PC del cliente para alargar el trial). Sin hora fiable, sin acceso.
+  const rows = await prisma.$queryRawUnsafe<Array<{ now: Date }>>('SELECT NOW() as now')
+  const value = rows?.[0]?.now
+  if (!value) {
+    throw new Error('Could not read authoritative server time')
   }
+  return new Date(value)
 }
 
 export const ensureSqliteCompatibilityMigrations = async () => {
