@@ -126,6 +126,26 @@ model PasswordResetToken {
   @@map("password_reset_tokens")
 }
 
+model TrialRequest {
+  id                         String    @id @default(uuid())
+  name                       String
+  email                      String
+  normalizedEmail            String    @unique
+  phone                      String?
+  normalizedPhone            String?   @unique
+  status                     String    @default("PENDING_REPLY")
+  ownerEmailDeliveredAt      DateTime?
+  requesterEmailDeliveredAt  DateTime?
+  ownerEmailId               String?
+  requesterEmailId           String?
+  lastDeliveryError          String?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@map("trial_requests")
+}
+
 // ============================================
 // CLIENTES
 // ============================================

@@ -2,7 +2,7 @@ import { logError, logInfo, logWarn } from '../utils/logger'
 import type { CreateTrialRequestBody } from '../validators/trialRequest.schemas'
 
 const DEFAULT_TRIAL_REQUEST_TO = 'sergiohernandezlara07@gmail.com'
-const DEFAULT_TRIAL_REQUEST_FROM = 'Lucy3000 <onboarding@resend.dev>'
+const DEFAULT_TRIAL_REQUEST_FROM = 'Lucy3000 <Info@sohl.dev>'
 
 type ResendEmailResponse = {
   id?: string
@@ -18,7 +18,9 @@ type ResendEmailError = Error & {
 export type TrialRequestEmailResult = {
   copiedToRequester: boolean
   delivered: boolean
+  ownerEmailId?: string
   recipient: string
+  requesterEmailId?: string
   requesterEmail: string
 }
 
@@ -113,12 +115,12 @@ export const sendTrialRequestEmail = async (
     '<li><strong>Prueba solicitada:</strong> 10 dias</li>',
     '</ul>'
   ].join('')
-  const requesterSubject = 'Hemos recibido tu solicitud de informacion de Lucy3000'
+  const requesterSubject = 'Solicitud de prueba - Lucy3000'
   const requesterText = [
     `Hola ${input.name},`,
     '',
-    'Hemos recibido tu solicitud para probar Lucy3000 durante 10 dias.',
-    'Sergio revisara tus datos y te enviara el ID cliente, usuario y contrasena cuando este todo listo.',
+    'He recibido tu solicitud para probar Lucy3000.',
+    'Te enviaré a éste correo electrónico el ID cliente, usuario y contraseña.',
     '',
     'Resumen de tu solicitud:',
     `Nombre: ${input.name}`,
@@ -129,8 +131,8 @@ export const sendTrialRequestEmail = async (
   ].join('\n')
   const requesterHtml = [
     `<p>Hola ${escapeHtml(input.name)},</p>`,
-    '<p>Hemos recibido tu solicitud para probar Lucy3000 durante 10 dias.</p>',
-    '<p>Sergio revisara tus datos y te enviara el ID cliente, usuario y contrasena cuando este todo listo.</p>',
+    '<p>He recibido tu solicitud para probar Lucy3000.</p>',
+    '<p>Te enviaré a éste correo electrónico el ID cliente, usuario y contraseña.</p>',
     '<h3>Resumen de tu solicitud</h3>',
     '<ul>',
     `<li><strong>Nombre:</strong> ${escapeHtml(input.name)}</li>`,
@@ -150,7 +152,7 @@ export const sendTrialRequestEmail = async (
     html: ownerHtml
   })
 
-  void sendResendEmail({
+  const requesterResponse = await sendResendEmail({
       apiKey,
       from,
       to: input.email,
@@ -159,28 +161,25 @@ export const sendTrialRequestEmail = async (
       text: requesterText,
       html: requesterHtml
     })
-    .then((requesterResponse) => {
-      logInfo('Trial request requester copy delivered', {
-        requesterEmailId: requesterResponse.id || null,
-        requesterEmail: input.email
-      })
-    })
-    .catch((error) => {
-      const resendError = error as ResendEmailError
-      logWarn('Trial request requester copy failed', {
-        requesterEmail: input.email,
-        status: resendError.status || null,
-        responseBody: resendError.responseBody || null,
-        message: resendError.message
-      })
-    })
+
+  logInfo('Trial request requester copy delivered', {
+    requesterEmailId: requesterResponse.id || null,
+    requesterEmail: input.email
+  })
 
   logInfo('Trial request owner email delivered', {
-    copiedToRequester: false,
+    copiedToRequester: true,
     ownerEmailId: ownerResponse.id || null,
     recipient,
     requesterEmail: input.email
   })
 
-  return { copiedToRequester: false, delivered: true, recipient, requesterEmail: input.email }
+  return {
+    copiedToRequester: true,
+    delivered: true,
+    ownerEmailId: ownerResponse.id,
+    recipient,
+    requesterEmail: input.email,
+    requesterEmailId: requesterResponse.id
+  }
 }

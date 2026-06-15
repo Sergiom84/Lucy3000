@@ -36,7 +36,8 @@ export default function PublicAccess() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
-  const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'fallback'>('idle')
+  const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'duplicate' | 'fallback'>('idle')
+  const [statusMessage, setStatusMessage] = useState('')
 
   const mailtoHref = useMemo(
     () => buildMailtoHref({ email: email.trim(), name: name.trim(), phone: phone.trim() }),
@@ -53,6 +54,7 @@ export default function PublicAccess() {
     }
 
     setStatus('sending')
+    setStatusMessage('')
 
     try {
       const response = await api.post('/trial-requests', {
@@ -67,7 +69,13 @@ export default function PublicAccess() {
       }
 
       setStatus('fallback')
-    } catch {
+    } catch (requestError: any) {
+      if (requestError?.response?.status === 409) {
+        setStatus('duplicate')
+        setStatusMessage(requestError?.response?.data?.error || 'Ya existe una solicitud con estos datos.')
+        return
+      }
+
       setStatus('fallback')
     }
   }
@@ -199,6 +207,12 @@ export default function PublicAccess() {
                       <a className="underline" href={mailtoHref}>
                         Abrir correo manual
                       </a>
+                    </p>
+                  ) : null}
+
+                  {status === 'duplicate' ? (
+                    <p className="text-sm font-medium text-gray-900">
+                      {statusMessage || 'Ya existe una solicitud con estos datos.'}
                     </p>
                   ) : null}
                 </div>

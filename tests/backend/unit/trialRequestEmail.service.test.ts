@@ -40,9 +40,11 @@ describe('trial request email service', () => {
     })
 
     expect(result).toEqual({
-      copiedToRequester: false,
+      copiedToRequester: true,
       delivered: true,
+      ownerEmailId: 'email-1',
       recipient: 'ventas@lucy3000.test',
+      requesterEmailId: 'email-1',
       requesterEmail: 'demo@example.com'
     })
     expect(fetchMock).toHaveBeenCalledTimes(2)
@@ -66,11 +68,12 @@ describe('trial request email service', () => {
       from: 'Lucy3000 <hola@lucy3000.test>',
       to: ['demo@example.com'],
       reply_to: 'ventas@lucy3000.test',
-      subject: 'Hemos recibido tu solicitud de informacion de Lucy3000'
+      subject: 'Solicitud de prueba - Lucy3000',
+      text: expect.stringContaining('contraseña')
     })
   })
 
-  it('does not wait for the requester copy before returning the delivered request', async () => {
+  it('waits for the requester copy before returning the delivered request', async () => {
     process.env.RESEND_API_KEY = 'resend-test-key'
     process.env.TRIAL_REQUEST_TO = 'ventas@lucy3000.test'
     process.env.TRIAL_REQUEST_FROM = 'Lucy3000 <hola@lucy3000.test>'
@@ -87,23 +90,34 @@ describe('trial request email service', () => {
       } as Response)
       .mockReturnValueOnce(requesterCopy)
 
-    const result = await sendTrialRequestEmail({
+    const resultPromise = sendTrialRequestEmail({
       email: 'demo@example.com',
       name: 'Centro Demo'
     })
 
-    expect(result).toEqual({
-      copiedToRequester: false,
-      delivered: true,
-      recipient: 'ventas@lucy3000.test',
-      requesterEmail: 'demo@example.com'
+    let settled = false
+    resultPromise.then(() => {
+      settled = true
     })
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    await Promise.resolve()
+    expect(settled).toBe(false)
 
     resolveRequesterCopy({
       ok: true,
       status: 200,
       json: async () => ({ id: 'requester-copy-1' })
     } as Response)
+
+    const result = await resultPromise
+    expect(result).toEqual({
+      copiedToRequester: true,
+      delivered: true,
+      ownerEmailId: 'owner-email-1',
+      recipient: 'ventas@lucy3000.test',
+      requesterEmailId: 'requester-copy-1',
+      requesterEmail: 'demo@example.com'
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })

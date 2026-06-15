@@ -4,18 +4,25 @@ import { Link } from 'react-router-dom'
 import api from '../utils/api'
 
 type PlatformDashboardRow = {
-  tenantId: string
+  id: string
+  source: 'tenant' | 'trialRequest'
+  tenantId: string | null
+  requestId: string | null
   tenantName: string
   tenantCode: number | null
   userName: string
   email: string
   phone: string
   signedUpAt: string
+  requestedAt: string | null
   trialStartedAt: string | null
   trialEndsAt: string | null
   paidAt: string | null
   licenseStatus: string
   commercialStatus: string
+  emailStatus: string
+  replyStatus: string
+  requestStatus: string | null
 }
 
 type PlatformDashboardResponse = {
@@ -106,7 +113,7 @@ export default function PlatformDashboard() {
               <Metric label="En prueba" value={data.totals.trial} />
               <Metric label="Pagados" value={data.totals.paid} />
               <Metric label="No siguieron" value={data.totals.notContinued} />
-              <Metric label="Pendientes" value={data.totals.pending} />
+              <Metric label="Por contestar" value={data.totals.pending} />
             </section>
 
             <div className="overflow-hidden rounded-lg border border-slate-800 bg-slate-900">
@@ -117,7 +124,9 @@ export default function PlatformDashboard() {
                       <th className="px-4 py-3">Usuario</th>
                       <th className="px-4 py-3">Correo</th>
                       <th className="px-4 py-3">Teléfono</th>
-                      <th className="px-4 py-3">Alta</th>
+                      <th className="px-4 py-3">Solicitud / alta</th>
+                      <th className="px-4 py-3">Confirmación</th>
+                      <th className="px-4 py-3">Contestación</th>
                       <th className="px-4 py-3">Prueba</th>
                       <th className="px-4 py-3">Pago</th>
                       <th className="px-4 py-3">Estado</th>
@@ -125,16 +134,31 @@ export default function PlatformDashboard() {
                   </thead>
                   <tbody className="divide-y divide-slate-800">
                     {rows.map((row) => (
-                      <tr key={row.tenantId} className="align-top">
+                      <tr key={row.id} className="align-top">
                         <td className="px-4 py-3">
                           <div className="font-medium text-white">{row.userName}</div>
                           <div className="text-xs text-slate-400">
-                            {row.tenantCode ? `ID cliente ${row.tenantCode}` : 'Sin ID'} · {row.tenantName}
+                            {row.tenantCode ? `ID cliente ${row.tenantCode}` : row.source === 'trialRequest' ? 'Solicitud web' : 'Sin ID'} · {row.tenantName}
                           </div>
                         </td>
                         <td className="px-4 py-3 text-slate-200">{row.email}</td>
                         <td className="px-4 py-3 text-slate-200">{row.phone || '-'}</td>
-                        <td className="px-4 py-3 text-slate-300">{formatDate(row.signedUpAt)}</td>
+                        <td className="px-4 py-3 text-slate-300">
+                          <div>{formatDate(row.requestedAt || row.signedUpAt)}</div>
+                          <div className="text-xs text-slate-500">
+                            {row.source === 'trialRequest' ? 'Solicitud recibida' : 'Alta creada'}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-slate-300">{row.emailStatus}</td>
+                        <td className="px-4 py-3">
+                          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                            row.replyStatus === 'Pendiente de mi contestación'
+                              ? 'bg-amber-400/15 text-amber-100'
+                              : 'bg-slate-800 text-cyan-100'
+                          }`}>
+                            {row.replyStatus}
+                          </span>
+                        </td>
                         <td className="px-4 py-3 text-slate-300">
                           <div>{row.trialStartedAt ? `Inicio ${formatDate(row.trialStartedAt)}` : '-'}</div>
                           <div className="text-xs text-slate-500">{row.trialEndsAt ? `Fin ${formatDate(row.trialEndsAt)}` : ''}</div>

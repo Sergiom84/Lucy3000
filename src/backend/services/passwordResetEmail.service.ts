@@ -1,6 +1,6 @@
 import { logInfo, logWarn } from '../utils/logger'
 
-const DEFAULT_PASSWORD_RESET_FROM = 'Lucy3000 <onboarding@resend.dev>'
+const DEFAULT_PASSWORD_RESET_FROM = 'Lucy3000 <Info@sohl.dev>'
 const DEFAULT_PASSWORD_RESET_BASE_URL = 'https://lucy3000-web.onrender.com'
 
 type ResendEmailResponse = {
