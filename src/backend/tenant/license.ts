@@ -23,7 +23,7 @@ export type TenantLicenseAccess = {
   trialEndsAt: Date
 }
 
-export const TRIAL_DAYS = 7
+export const TRIAL_DAYS = 10
 
 // Dias que un tenant PENDING puede quedarse sin arrancar la prueba antes de
 // bloquearse del todo. Permite instalar, configurar y posponer el "Si" del

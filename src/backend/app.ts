@@ -31,6 +31,7 @@ import quoteRoutes from './routes/quote.routes'
 import sqlRoutes from './routes/sql.routes'
 import tenantRoutes from './routes/tenant.routes'
 import clientAssetsRoutes from './routes/clientAssets.routes'
+import trialRequestRoutes from './routes/trialRequest.routes'
 
 export const app = express()
 
@@ -66,6 +67,14 @@ const authRateLimiter = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Demasiados intentos. Espera unos minutos y vuelve a intentarlo.' }
+})
+
+const trialRequestRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 12,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Demasiadas solicitudes. Intentalo de nuevo mas tarde.' }
 })
 
 app.use(express.json())
@@ -120,7 +129,9 @@ app.get('/health', (_req, res) => {
 // Solo endpoints sin autenticar (fuerza bruta); /me y /register quedan fuera.
 app.use('/api/auth/login', authRateLimiter)
 app.use('/api/auth/bootstrap-admin', authRateLimiter)
+app.use('/api/trial-requests', trialRequestRateLimiter)
 app.use('/api/auth', authRoutes)
+app.use('/api/trial-requests', trialRequestRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/clients', clientRoutes)
 app.use('/api/appointments', appointmentRoutes)

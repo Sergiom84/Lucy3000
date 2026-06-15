@@ -32,7 +32,7 @@ Lucy3000 es una app de gestion de estetica orientada a SaaS multi-equipo: una AP
 - Ventas, cobros pendientes, caja y arqueos.
 - Bonos, packs, sesiones y saldo a cuenta.
 - Usuarios, cuentas internas, roles y tenant asociado.
-- Licencia por centro con prueba de 7 dias, bloqueo y estados de suscripcion.
+- Licencia por centro con prueba de 10 dias, bloqueo y estados de suscripcion.
 - Reportes y presupuestos.
 - Integracion opcional con Google Calendar aislada por tenant.
 - Asistente admin para analizar e importar un `01dat.sql` o `01dat.sqlx` legacy, siempre que el contenido sea SQL plano.

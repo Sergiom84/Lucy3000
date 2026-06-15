@@ -357,6 +357,7 @@ describe('API smoke tests', () => {
   beforeEach(() => {
     resetPrismaMock()
     process.env.JWT_SECRET = 'test-jwt-secret'
+    delete process.env.RESEND_API_KEY
     prismaMock.appointment.findMany.mockResolvedValue([])
     prismaMock.agendaBlock.findMany.mockResolvedValue([])
     prismaMock.agendaDayNote.findMany.mockResolvedValue([])
@@ -386,6 +387,20 @@ describe('API smoke tests', () => {
         status: 'ok'
       })
     )
+  })
+
+  it('POST /api/trial-requests accepts public trial requests', async () => {
+    const response = await request(app).post('/api/trial-requests').send({
+      email: 'centro@example.com',
+      name: 'Centro Demo'
+    })
+
+    expect(response.status).toBe(202)
+    expect(response.body).toEqual({
+      ok: true,
+      delivered: false,
+      copiedToRequester: false
+    })
   })
 
   it('GET /api/auth/bootstrap-status returns required=true when there are no users', async () => {
@@ -424,7 +439,7 @@ describe('API smoke tests', () => {
             license: {
               status: 'TRIAL',
               plan: 'trial',
-              trialEndsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+              trialEndsAt: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000),
               blockedAt: null,
               cancelledAt: null
             }

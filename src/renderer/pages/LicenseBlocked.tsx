@@ -29,7 +29,7 @@ const REASON_CONTENT: Record<
     icon: Hourglass,
     title: 'Tu cuenta esta lista',
     description:
-      'Cuando termines de configurar tu centro, empieza tu prueba gratuita de 7 dias. Hasta entonces puedes cerrar y volver otro dia; el reloj solo arranca cuando pulses "Empezar prueba".'
+      'Cuando termines de configurar tu centro, empieza tu prueba gratuita de 10 dias. Hasta entonces puedes cerrar y volver otro dia; el reloj solo arranca cuando pulses "Empezar prueba".'
   },
   'pending-expired': {
     icon: Lock,
@@ -41,7 +41,7 @@ const REASON_CONTENT: Record<
     icon: Clock,
     title: 'Tu prueba ha finalizado',
     description:
-      'El periodo de prueba de 7 dias ha terminado. Contacta con nosotros para activar tu suscripcion y recuperar el acceso completo.'
+      'El periodo de prueba de 10 dias ha terminado. Contacta con nosotros para activar tu suscripcion y recuperar el acceso completo.'
   },
   blocked: {
     icon: Lock,
@@ -79,7 +79,7 @@ export default function LicenseBlocked({ license }: { license: LicenseInfo }) {
       await api.post('/tenants/current/start-trial')
       const me = await api.get('/auth/me')
       updateUser({ ...(user as any), ...me.data })
-      toast.success('Prueba de 7 dias iniciada. ¡A trabajar!')
+      toast.success('Prueba de 10 dias iniciada. ¡A trabajar!')
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'No se pudo iniciar la prueba')
     } finally {
@@ -137,7 +137,7 @@ export default function LicenseBlocked({ license }: { license: LicenseInfo }) {
                   className="w-full btn btn-primary py-3 flex items-center justify-center gap-2"
                 >
                   <PlayCircle className="w-4 h-4" />
-                  {startingTrial ? 'Iniciando prueba...' : 'Empezar prueba de 7 dias'}
+                  {startingTrial ? 'Iniciando prueba...' : 'Empezar prueba de 10 dias'}
                 </button>
               ) : (
                 <button

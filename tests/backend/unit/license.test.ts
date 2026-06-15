@@ -65,8 +65,8 @@ describe('evaluateTenantLicense', () => {
     expect(access.reason).toBe('active')
   })
 
-  it('getTrialEndDate adds 7 days to the given start', () => {
+  it('getTrialEndDate adds 10 days to the given start', () => {
     const start = new Date('2026-03-01T00:00:00.000Z')
-    expect(getTrialEndDate(start).toISOString()).toBe('2026-03-08T00:00:00.000Z')
+    expect(getTrialEndDate(start).toISOString()).toBe('2026-03-11T00:00:00.000Z')
   })
 })

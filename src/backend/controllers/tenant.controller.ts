@@ -101,7 +101,7 @@ export const getCurrentTenantLicense = async (req: AuthRequest, res: Response) =
     res.status(500).json({ error: 'Internal server error' })
   }
 }
-// El propio admin del tenant arranca su prueba de 7 dias (boton "Si" del
+// El propio admin del tenant arranca su prueba de 10 dias (boton "Si" del
 // pop-up). Solo permitido desde PENDING y dentro de la gracia; el reloj se
 // fija con la hora de la base (Supabase), no la del PC.
 export const startCurrentTenantTrial = async (req: AuthRequest, res: Response) => {
@@ -251,7 +251,7 @@ export const updateTenantLicense = async (req: AuthRequest, res: Response) => {
         ...(trialEndsAt ? { trialEndsAt: new Date(trialEndsAt) } : {}),
         ...(blockedAt !== undefined ? { blockedAt: blockedAt ? new Date(blockedAt) : null } : {}),
         ...(cancelledAt !== undefined ? { cancelledAt: cancelledAt ? new Date(cancelledAt) : null } : {}),
-        // Al dar el OK de prueba, el reloj de 7 dias arranca AHORA (no en la
+        // Al dar el OK de prueba, el reloj de 10 dias arranca AHORA (no en la
         // instalacion), salvo que se pase un trialEndsAt explicito.
         ...(status === 'TRIAL'
           ? {
