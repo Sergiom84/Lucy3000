@@ -559,6 +559,87 @@ describe('API smoke tests', () => {
     )
   })
 
+  it('POST /api/auth/forgot-password creates a reset token for matching active users', async () => {
+    prismaMock.user.findFirst.mockResolvedValue({
+      id: 'admin-1',
+      tenantId: 'tenant-1',
+      email: 'owner@example.com',
+      name: 'Owner',
+      tenant: { name: 'Lucy3000' }
+    })
+    prismaMock.passwordResetToken.create.mockResolvedValue({ id: 'reset-1' })
+
+    const response = await request(app).post('/api/auth/forgot-password').send({
+      tenantCode: '1',
+      identifier: 'owner'
+    })
+
+    expect(response.status).toBe(202)
+    expect(response.body).toEqual({ ok: true, delivered: false })
+    expect(prismaMock.user.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenant: { tenantCode: 1, status: 'ACTIVE' },
+          OR: [{ email: 'owner' }, { username: 'owner' }]
+        })
+      })
+    )
+    expect(prismaMock.passwordResetToken.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          tenantId: 'tenant-1',
+          userId: 'admin-1',
+          tokenHash: expect.any(String),
+          expiresAt: expect.any(Date)
+        })
+      })
+    )
+  })
+
+  it('POST /api/auth/reset-password updates the password and consumes reset tokens', async () => {
+    prismaMock.passwordResetToken.findUnique.mockResolvedValue({
+      id: 'reset-1',
+      tenantId: 'tenant-1',
+      userId: 'admin-1',
+      expiresAt: new Date('2026-05-31T10:30:00.000Z'),
+      usedAt: null,
+      user: {
+        id: 'admin-1',
+        tenantId: 'tenant-1',
+        isActive: true
+      }
+    })
+
+    const tx: any = {
+      user: { update: vi.fn().mockResolvedValue({ id: 'admin-1' }) },
+      passwordResetToken: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) }
+    }
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(tx))
+
+    const response = await request(app).post('/api/auth/reset-password').send({
+      token: 'valid-reset-token-with-enough-length-123',
+      password: 'newsecure123'
+    })
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ ok: true })
+    expect(tx.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'admin-1' },
+        data: { password: expect.any(String) }
+      })
+    )
+    expect(tx.passwordResetToken.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId: 'tenant-1',
+          userId: 'admin-1',
+          usedAt: null
+        })
+      })
+    )
+  })
+
   it('GET /api/tenants rejects tenant admins without platform access', async () => {
     const response = await request(app)
       .get('/api/tenants')

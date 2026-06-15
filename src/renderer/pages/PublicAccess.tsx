@@ -12,7 +12,7 @@ const backgroundStyle = {
     'radial-gradient(125% 125% at 50% 101%, rgba(245,87,2,1) 10.5%, rgba(245,120,2,1) 16%, rgba(245,170,100,1) 25%, rgba(238,174,202,1) 42%, rgba(202,179,214,1) 67%, rgba(148,201,233,1) 100%)'
 }
 
-const buildMailtoHref = ({ email, name }: { email: string; name: string }) => {
+const buildMailtoHref = ({ email, name, phone }: { email: string; name: string; phone: string }) => {
   const subject = encodeURIComponent('Solicitud version de prueba Lucy3000')
   const body = encodeURIComponent(
     [
@@ -22,6 +22,7 @@ const buildMailtoHref = ({ email, name }: { email: string; name: string }) => {
       '',
       `Nombre: ${name}`,
       `Email: ${email}`,
+      `Telefono: ${phone || '-'}`,
       '',
       'Gracias.'
     ].join('\n')
@@ -34,11 +35,12 @@ export default function PublicAccess() {
   const [isRequestOpen, setIsRequestOpen] = useState(false)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
   const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'fallback'>('idle')
 
   const mailtoHref = useMemo(
-    () => buildMailtoHref({ email: email.trim(), name: name.trim() }),
-    [email, name]
+    () => buildMailtoHref({ email: email.trim(), name: name.trim(), phone: phone.trim() }),
+    [email, name, phone]
   )
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -55,7 +57,8 @@ export default function PublicAccess() {
     try {
       const response = await api.post('/trial-requests', {
         name: trimmedName,
-        email: trimmedEmail
+        email: trimmedEmail,
+        phone: phone.trim()
       })
 
       if (response.data?.delivered) {
@@ -118,7 +121,7 @@ export default function PublicAccess() {
                 onSubmit={handleSubmit}
                 className="rounded-lg border border-white/65 bg-white/78 p-4 shadow-[0_14px_42px_rgba(27,31,45,0.16)] backdrop-blur lg:col-span-2 sm:p-5"
               >
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-3 md:grid-cols-3">
                   <label className="block">
                     <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-gray-700">
                       Email
@@ -143,6 +146,19 @@ export default function PublicAccess() {
                       onChange={(event) => setName(event.target.value)}
                       required
                       autoComplete="name"
+                      className="h-10 w-full rounded-md border border-gray-300 bg-white/90 px-4 text-sm text-gray-950 outline-none transition focus:border-gray-950 focus:ring-2 focus:ring-gray-950/15"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-gray-700">
+                      Teléfono
+                    </span>
+                    <input
+                      type="tel"
+                      value={phone}
+                      onChange={(event) => setPhone(event.target.value)}
+                      autoComplete="tel"
                       className="h-10 w-full rounded-md border border-gray-300 bg-white/90 px-4 text-sm text-gray-950 outline-none transition focus:border-gray-950 focus:ring-2 focus:ring-gray-950/15"
                     />
                   </label>

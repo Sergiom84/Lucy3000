@@ -1,8 +1,10 @@
 import { Request, Response } from 'express'
 import bcrypt from 'bcryptjs'
+import { createHash, randomBytes } from 'crypto'
 import jwt from 'jsonwebtoken'
 import { getServerNow, prisma } from '../db'
 import { AuthRequest } from '../middleware/auth.middleware'
+import { getPasswordResetBaseUrl, sendPasswordResetEmail } from '../services/passwordResetEmail.service'
 import { evaluateTenantLicense, getTrialEndDate } from '../tenant/license'
 import { getJwtSecret } from '../utils/jwt'
 
@@ -30,10 +32,16 @@ const normalizeTenantSlug = (value: unknown) =>
     .slice(0, 80)
 
 const DEFAULT_TENANT_NAME = 'Lucy3000'
+const PASSWORD_RESET_TTL_MINUTES = 30
 const isLocalSqliteMode = () => String(process.env.DATABASE_URL || '').startsWith('file:')
 
 const buildTenantSlug = (name: unknown, fallback = 'lucy3000') =>
   normalizeTenantSlug(name) || normalizeTenantSlug(fallback) || 'lucy3000'
+
+const hashPasswordResetToken = (token: string) => createHash('sha256').update(token).digest('hex')
+
+const buildPasswordResetUrl = (token: string) =>
+  `${getPasswordResetBaseUrl()}/reset-password?token=${encodeURIComponent(token)}`
 
 const buildAuthResponse = (user: {
   id: string
@@ -125,7 +133,7 @@ export const bootstrapAdmin = async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'Bootstrap token required' })
     }
 
-    const { email, username, password, name, businessName, businessSlug } = req.body
+    const { email, username, password, name, phone, businessName, businessSlug } = req.body
     const tenantName = String(businessName || DEFAULT_TENANT_NAME).trim() || DEFAULT_TENANT_NAME
     const tenantSlug = buildTenantSlug(businessSlug || tenantName)
 
@@ -159,6 +167,7 @@ export const bootstrapAdmin = async (req: Request, res: Response) => {
           tenantId: tenant.id,
           email: normalizeEmail(email),
           username: normalizeUsername(username),
+          phone: String(phone || '').trim() || null,
           password: await bcrypt.hash(password, 10),
           name: String(name).trim(),
           role: 'ADMIN',
@@ -256,9 +265,122 @@ export const login = async (req: Request, res: Response) => {
   }
 }
 
+export const forgotPassword = async (req: Request, res: Response) => {
+  try {
+    const { identifier, tenantCode } = req.body
+    const normalizedIdentifier = normalizeLoginIdentifier(identifier)
+    const normalizedTenantCode = normalizeTenantCode(tenantCode)
+    const genericResponse = { ok: true, delivered: false }
+
+    if (!normalizedTenantCode) {
+      return res.status(202).json(genericResponse)
+    }
+
+    const user = await prisma.user.findFirst({
+      where: {
+        isActive: true,
+        tenant: {
+          tenantCode: normalizedTenantCode,
+          status: 'ACTIVE'
+        },
+        OR: [{ email: normalizedIdentifier }, { username: normalizedIdentifier }]
+      },
+      select: {
+        id: true,
+        tenantId: true,
+        email: true,
+        name: true,
+        tenant: {
+          select: {
+            name: true
+          }
+        }
+      }
+    })
+
+    if (!user) {
+      return res.status(202).json(genericResponse)
+    }
+
+    const rawToken = randomBytes(32).toString('base64url')
+    const now = await getServerNow()
+    const expiresAt = new Date(now)
+    expiresAt.setMinutes(expiresAt.getMinutes() + PASSWORD_RESET_TTL_MINUTES)
+
+    await prisma.passwordResetToken.create({
+      data: {
+        tenantId: user.tenantId,
+        userId: user.id,
+        tokenHash: hashPasswordResetToken(rawToken),
+        expiresAt
+      }
+    })
+
+    const result = await sendPasswordResetEmail({
+      email: user.email,
+      name: user.name,
+      tenantName: user.tenant.name,
+      resetUrl: buildPasswordResetUrl(rawToken)
+    })
+
+    res.status(result.delivered ? 200 : 202).json({ ok: true, delivered: result.delivered })
+  } catch (error) {
+    console.error('Forgot password error:', error)
+    res.status(202).json({ ok: true, delivered: false })
+  }
+}
+
+export const resetPassword = async (req: Request, res: Response) => {
+  try {
+    const { token, password } = req.body
+    const tokenHash = hashPasswordResetToken(String(token || '').trim())
+    const now = await getServerNow()
+
+    const resetToken = await prisma.passwordResetToken.findUnique({
+      where: { tokenHash },
+      include: {
+        user: {
+          select: {
+            id: true,
+            tenantId: true,
+            isActive: true
+          }
+        }
+      }
+    })
+
+    if (!resetToken || resetToken.usedAt || resetToken.expiresAt.getTime() < now.getTime() || !resetToken.user?.isActive) {
+      return res.status(400).json({ error: 'El enlace no es valido o ha caducado' })
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10)
+
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: resetToken.userId },
+        data: { password: hashedPassword }
+      })
+
+      await tx.passwordResetToken.updateMany({
+        where: {
+          tenantId: resetToken.tenantId,
+          userId: resetToken.userId,
+          usedAt: null
+        },
+        data: { usedAt: now }
+      })
+    })
+
+    res.json({ ok: true })
+  } catch (error) {
+    console.error('Reset password error:', error)
+    res.status(500).json({ error: 'No se pudo restablecer la contrasena' })
+  }
+}
+
 export const register = async (req: AuthRequest, res: Response) => {
   try {
-    const { email, username, password, name, role } = req.body
+    const { email, username, password, name, phone, role } = req.body
 
     if (!email || !password || !name) {
       return res.status(400).json({ error: 'Email, password and name are required' })
@@ -306,6 +428,7 @@ export const register = async (req: AuthRequest, res: Response) => {
         tenantId,
         email: normalizedEmail,
         username: normalizedUsername,
+        phone: String(phone || '').trim() || null,
         password: hashedPassword,
         name: String(name).trim(),
         role: sanitizedRole

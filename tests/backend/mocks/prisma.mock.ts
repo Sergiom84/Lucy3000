@@ -29,6 +29,12 @@ export const prismaMock: any = {
     update: vi.fn()
   },
 
+  passwordResetToken: {
+    create: vi.fn(),
+    findUnique: vi.fn(),
+    updateMany: vi.fn()
+  },
+
   sale: {
     count: vi.fn(),
     findFirst: vi.fn(),

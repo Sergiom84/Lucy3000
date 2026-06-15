@@ -6,7 +6,7 @@ import Navbar from './Navbar'
 import { cn } from '../utils/cn'
 import { useAuthStore } from '../stores/authStore'
 
-const mobilePrimaryRoutes = new Set(['/dashboard', '/clients', '/appointments', '/sales', '/cash'])
+const mobilePrimaryRoutes = new Set(['/app/dashboard', '/clients', '/appointments', '/sales', '/cash'])
 
 export default function Layout() {
   const { user } = useAuthStore()

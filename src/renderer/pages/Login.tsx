@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Download, Hash, ShieldCheck, Sparkles, Mail, Lock, User } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import { usePwaInstallPrompt } from '../hooks/usePwaInstallPrompt'
@@ -316,6 +316,13 @@ export default function Login() {
               >
                 {loading ? 'Iniciando sesión...' : 'Iniciar sesión'}
               </button>
+
+              <Link
+                to="/forgot-password"
+                className="block text-center text-sm font-semibold text-primary-700 transition-colors hover:text-primary-900 dark:text-primary-300 dark:hover:text-primary-100"
+              >
+                ¿Has olvidado tu contraseña?
+              </Link>
             </form>
           )}
 

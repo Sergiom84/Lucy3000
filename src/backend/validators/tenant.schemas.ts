@@ -9,7 +9,8 @@ export const createTenantBodySchema = z
     adminEmail: z.string().trim().email('Invalid email format'),
     adminUsername: z.string().trim().min(2).max(120).optional(),
     adminPassword: z.string().min(8, 'Password must be at least 8 characters'),
-    adminName: z.string().trim().min(2, 'Admin name is required').max(120, 'Admin name is too long')
+    adminName: z.string().trim().min(2, 'Admin name is required').max(120, 'Admin name is too long'),
+    adminPhone: z.string().trim().max(40, 'Phone is too long').optional()
   })
   .strict()
 

@@ -32,6 +32,7 @@ import sqlRoutes from './routes/sql.routes'
 import tenantRoutes from './routes/tenant.routes'
 import clientAssetsRoutes from './routes/clientAssets.routes'
 import trialRequestRoutes from './routes/trialRequest.routes'
+import platformDashboardRoutes from './routes/platformDashboard.routes'
 
 export const app = express()
 
@@ -129,8 +130,11 @@ app.get('/health', (_req, res) => {
 // Solo endpoints sin autenticar (fuerza bruta); /me y /register quedan fuera.
 app.use('/api/auth/login', authRateLimiter)
 app.use('/api/auth/bootstrap-admin', authRateLimiter)
+app.use('/api/auth/forgot-password', authRateLimiter)
+app.use('/api/auth/reset-password', authRateLimiter)
 app.use('/api/trial-requests', trialRequestRateLimiter)
 app.use('/api/auth', authRoutes)
+app.use('/api/platform-dashboard', platformDashboardRoutes)
 app.use('/api/trial-requests', trialRequestRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/clients', clientRoutes)

@@ -115,6 +115,8 @@ export const ensureLocalTenantSupport = async ({
       'ALTER TABLE "users" ADD COLUMN "isPlatformAdmin" BOOLEAN NOT NULL DEFAULT false'
     )
 
+    await addColumnIfMissing('users', 'phone', 'ALTER TABLE "users" ADD COLUMN "phone" TEXT')
+
     await prisma.$executeRawUnsafe(`
       UPDATE "users"
       SET "tenantId" = '${LOCAL_TENANT_ID}'
@@ -127,4 +129,27 @@ export const ensureLocalTenantSupport = async ({
       WHERE "role" = 'ADMIN'
     `)
   }
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "password_reset_tokens" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "tenantId" TEXT NOT NULL,
+      "userId" TEXT NOT NULL,
+      "tokenHash" TEXT NOT NULL,
+      "expiresAt" DATETIME NOT NULL,
+      "usedAt" DATETIME,
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY ("userId", "tenantId") REFERENCES "users"("id", "tenantId") ON DELETE CASCADE ON UPDATE CASCADE
+    )
+  `)
+
+  await prisma.$executeRawUnsafe(
+    'CREATE UNIQUE INDEX IF NOT EXISTS "password_reset_tokens_tokenHash_key" ON "password_reset_tokens"("tokenHash")'
+  )
+  await prisma.$executeRawUnsafe(
+    'CREATE INDEX IF NOT EXISTS "password_reset_tokens_tenantId_userId_createdAt_idx" ON "password_reset_tokens"("tenantId", "userId", "createdAt")'
+  )
+  await prisma.$executeRawUnsafe(
+    'CREATE INDEX IF NOT EXISTS "password_reset_tokens_expiresAt_idx" ON "password_reset_tokens"("expiresAt")'
+  )
 }

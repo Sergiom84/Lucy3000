@@ -14,6 +14,7 @@
 #   - DATABASE_URL    : cadena Session Pooler de Supabase (postgres...:pass@...pooler...:5432/postgres?sslmode=require)
 #   - BOOTSTRAP_TOKEN : token para crear el primer platform admin (POST /api/auth/bootstrap-admin)
 #   - RESEND_API_KEY  : clave de Resend para recibir solicitudes de prueba por email
+#   - PASSWORD_RESET_BASE_URL : URL publica del front para enlaces de recuperacion
 #   - VITE_API_URL    : URL publica de lucy3000-api (se conoce tras el primer deploy de la API)
 
 services:
@@ -42,6 +43,10 @@ services:
       - key: TRIAL_REQUEST_TO
         value: sergiohernandezlara07@gmail.com
       - key: TRIAL_REQUEST_FROM
+        value: Lucy3000 <onboarding@resend.dev>
+      - key: PASSWORD_RESET_BASE_URL
+        value: https://lucy3000-web.onrender.com
+      - key: PASSWORD_RESET_FROM
         value: Lucy3000 <onboarding@resend.dev>
       # Origenes permitidos para CORS (separados por coma). Las peticiones sin
       # cabecera Origin (Electron, healthchecks) pasan siempre.

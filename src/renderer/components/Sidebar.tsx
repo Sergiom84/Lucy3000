@@ -27,7 +27,7 @@ type NavItem = {
 }
 
 export const navigation: NavItem[] = [
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+  { name: 'Dashboard', href: '/app/dashboard', icon: LayoutDashboard },
   { name: 'Clientes', href: '/clients', icon: Users },
   { name: 'Ranking', href: '/ranking', icon: Trophy },
   { name: 'Citas', href: '/appointments', icon: Calendar },

@@ -23,12 +23,27 @@ export const loginBodySchema = z
   })
   .strict()
 
+export const forgotPasswordBodySchema = z
+  .object({
+    tenantCode: tenantCodeSchema,
+    identifier: z.string().trim().min(1, 'User or email is required').max(120, 'User or email is too long')
+  })
+  .strict()
+
+export const resetPasswordBodySchema = z
+  .object({
+    token: z.string().trim().min(32, 'Reset token is required').max(300, 'Reset token is too long'),
+    password: z.string().min(8, 'Password must be at least 8 characters')
+  })
+  .strict()
+
 export const registerBodySchema = z
   .object({
     email: z.string().trim().email('Invalid email format'),
     username: z.string().trim().min(2, 'Username is too short').max(120, 'Username is too long').optional(),
     password: z.string().min(8, 'Password must be at least 8 characters'),
     name: z.string().trim().min(2, 'Name is required').max(120, 'Name is too long'),
+    phone: z.string().trim().max(40, 'Phone is too long').optional(),
     role: userRoleSchema.optional()
   })
   .strict()
@@ -41,6 +56,7 @@ export const bootstrapAdminBodySchema = z
     username: z.string().trim().min(2, 'Username is too short').max(120, 'Username is too long').optional(),
     password: z.string().min(8, 'Password must be at least 8 characters'),
     name: z.string().trim().min(2, 'Name is required').max(120, 'Name is too long'),
+    phone: z.string().trim().max(40, 'Phone is too long').optional(),
     bootstrapToken: z.string().max(200).optional()
   })
   .strict()

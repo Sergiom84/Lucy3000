@@ -28,6 +28,7 @@ const tenantInclude = {
       email: true,
       username: true,
       name: true,
+      phone: true,
       role: true,
       isActive: true,
       isPlatformAdmin: true
@@ -166,7 +167,7 @@ export const getTenants = async (_req: AuthRequest, res: Response) => {
 
 export const createTenant = async (req: AuthRequest, res: Response) => {
   try {
-    const { name, slug, adminEmail, adminUsername, adminPassword, adminName } = req.body
+    const { name, slug, adminEmail, adminUsername, adminPassword, adminName, adminPhone } = req.body
     const normalizedSlug = normalizeTenantSlug(slug || name)
 
     const createdTenant = await prisma.$transaction(async (tx) => {
@@ -197,6 +198,7 @@ export const createTenant = async (req: AuthRequest, res: Response) => {
             create: {
               email: normalizeEmail(adminEmail),
               username: normalizeUsername(adminUsername),
+              phone: String(adminPhone || '').trim() || null,
               password: await bcrypt.hash(adminPassword, 10),
               name: String(adminName).trim(),
               role: 'ADMIN',

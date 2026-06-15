@@ -84,6 +84,7 @@ model User {
   tenantId      String   @default(dbgenerated("current_setting('app.current_tenant_id', true)"))
   email         String
   username      String?
+  phone         String?
   password      String
   name          String
   role          String   @default("EMPLOYEE")
@@ -99,12 +100,29 @@ model User {
   cashCounts    CashCount[]
   pendingPaymentCollections PendingPaymentCollection[]
   sales         Sale[]
+  passwordResetTokens PasswordResetToken[]
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
   @@unique([id, tenantId])
   @@index([tenantId, role])
   @@map("users")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  tenantId  String
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@index([tenantId, userId, createdAt])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
 }
 
 // ============================================

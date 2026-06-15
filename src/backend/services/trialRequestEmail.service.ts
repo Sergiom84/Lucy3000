@@ -101,6 +101,7 @@ export const sendTrialRequestEmail = async (
     '',
     `Nombre: ${input.name}`,
     `Email: ${input.email}`,
+    `Telefono: ${input.phone || '-'}`,
     'Prueba solicitada: 10 dias'
   ].join('\n')
   const ownerHtml = [
@@ -108,6 +109,7 @@ export const sendTrialRequestEmail = async (
     '<ul>',
     `<li><strong>Nombre:</strong> ${escapeHtml(input.name)}</li>`,
     `<li><strong>Email:</strong> ${escapeHtml(input.email)}</li>`,
+    `<li><strong>Telefono:</strong> ${escapeHtml(input.phone || '-')}</li>`,
     '<li><strong>Prueba solicitada:</strong> 10 dias</li>',
     '</ul>'
   ].join('')
@@ -121,6 +123,7 @@ export const sendTrialRequestEmail = async (
     'Resumen de tu solicitud:',
     `Nombre: ${input.name}`,
     `Email: ${input.email}`,
+    `Telefono: ${input.phone || '-'}`,
     '',
     'Gracias por tu interes en Lucy3000.'
   ].join('\n')
@@ -132,6 +135,7 @@ export const sendTrialRequestEmail = async (
     '<ul>',
     `<li><strong>Nombre:</strong> ${escapeHtml(input.name)}</li>`,
     `<li><strong>Email:</strong> ${escapeHtml(input.email)}</li>`,
+    `<li><strong>Telefono:</strong> ${escapeHtml(input.phone || '-')}</li>`,
     '</ul>',
     '<p>Gracias por tu interes en Lucy3000.</p>'
   ].join('')
