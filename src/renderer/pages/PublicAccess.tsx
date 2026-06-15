@@ -35,6 +35,7 @@ export default function PublicAccess() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'fallback'>('idle')
+  const [copiedToRequester, setCopiedToRequester] = useState(false)
 
   const mailtoHref = useMemo(
     () => buildMailtoHref({ email: email.trim(), name: name.trim() }),
@@ -51,6 +52,7 @@ export default function PublicAccess() {
     }
 
     setStatus('sending')
+    setCopiedToRequester(false)
 
     try {
       const response = await api.post('/trial-requests', {
@@ -59,6 +61,7 @@ export default function PublicAccess() {
       })
 
       if (response.data?.delivered) {
+        setCopiedToRequester(Boolean(response.data?.copiedToRequester))
         setStatus('sent')
         return
       }
@@ -71,54 +74,54 @@ export default function PublicAccess() {
 
   return (
     <main className="min-h-screen text-gray-950" style={backgroundStyle}>
-      <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-4 py-8 sm:px-6 lg:px-8">
+      <div className="mx-auto flex min-h-screen w-full max-w-4xl flex-col px-4 py-7 sm:px-6 lg:px-8">
         <header className="flex items-center justify-between">
           <h1
-            className="text-5xl font-normal tracking-normal text-gray-950 sm:text-6xl"
+            className="text-4xl font-normal tracking-normal text-gray-950 sm:text-5xl"
             style={{ ...serifStyle, lineHeight: 1 }}
           >
             Lucy<span className="italic" style={{ color: ACCENT }}>3000</span>
           </h1>
         </header>
 
-        <section className="flex flex-1 items-start pt-16 sm:pt-20 lg:pt-24">
-          <div className="grid w-full gap-4 lg:grid-cols-2">
+        <section className="flex flex-1 items-start pt-10 sm:pt-14 lg:pt-16">
+          <div className="grid w-full gap-3 lg:grid-cols-2">
             <button
               type="button"
               onClick={() => setIsRequestOpen((current) => !current)}
-              className="group flex min-h-[160px] items-end justify-between rounded-lg border border-white/55 bg-white/70 p-6 text-left shadow-[0_18px_60px_rgba(27,31,45,0.18)] backdrop-blur transition hover:bg-white/85 focus:outline-none focus:ring-2 focus:ring-gray-950/60"
+              className="group flex min-h-[116px] items-end justify-between rounded-lg border border-white/55 bg-white/70 p-5 text-left shadow-[0_14px_42px_rgba(27,31,45,0.16)] backdrop-blur transition hover:bg-white/85 focus:outline-none focus:ring-2 focus:ring-gray-950/60"
             >
               <span
-                className="text-4xl font-normal tracking-normal text-gray-950 sm:text-5xl"
+                className="text-3xl font-normal tracking-normal text-gray-950 sm:text-4xl"
                 style={{ ...serifStyle, lineHeight: 0.95 }}
               >
                 Solicitar informacion
               </span>
               <ArrowRight
-                className={`h-6 w-6 shrink-0 transition ${isRequestOpen ? 'rotate-90' : 'group-hover:translate-x-1'}`}
+                className={`h-5 w-5 shrink-0 transition ${isRequestOpen ? 'rotate-90' : 'group-hover:translate-x-1'}`}
                 aria-hidden="true"
               />
             </button>
 
             <Link
               to="/login"
-              className="flex min-h-[160px] items-end justify-between rounded-lg border border-gray-950 bg-gray-950 p-6 text-left text-white shadow-[0_18px_60px_rgba(27,31,45,0.22)] transition hover:bg-black focus:outline-none focus:ring-2 focus:ring-white/80"
+              className="flex min-h-[116px] items-end justify-between rounded-lg border border-gray-950 bg-gray-950 p-5 text-left text-white shadow-[0_14px_42px_rgba(27,31,45,0.2)] transition hover:bg-black focus:outline-none focus:ring-2 focus:ring-white/80"
             >
               <span
-                className="text-4xl font-normal tracking-normal sm:text-5xl"
+                className="text-3xl font-normal tracking-normal sm:text-4xl"
                 style={{ ...serifStyle, lineHeight: 0.95 }}
               >
                 Ya tengo cuenta
               </span>
-              <LogIn className="h-6 w-6 shrink-0" aria-hidden="true" />
+              <LogIn className="h-5 w-5 shrink-0" aria-hidden="true" />
             </Link>
 
             {isRequestOpen ? (
               <form
                 onSubmit={handleSubmit}
-                className="rounded-lg border border-white/65 bg-white/78 p-5 shadow-[0_18px_60px_rgba(27,31,45,0.18)] backdrop-blur lg:col-span-2 sm:p-6"
+                className="rounded-lg border border-white/65 bg-white/78 p-4 shadow-[0_14px_42px_rgba(27,31,45,0.16)] backdrop-blur lg:col-span-2 sm:p-5"
               >
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-3 md:grid-cols-2">
                   <label className="block">
                     <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-gray-700">
                       Email
@@ -129,7 +132,7 @@ export default function PublicAccess() {
                       onChange={(event) => setEmail(event.target.value)}
                       required
                       autoComplete="email"
-                      className="h-12 w-full rounded-md border border-gray-300 bg-white/90 px-4 text-base text-gray-950 outline-none transition focus:border-gray-950 focus:ring-2 focus:ring-gray-950/15"
+                      className="h-10 w-full rounded-md border border-gray-300 bg-white/90 px-4 text-sm text-gray-950 outline-none transition focus:border-gray-950 focus:ring-2 focus:ring-gray-950/15"
                     />
                   </label>
 
@@ -143,29 +146,31 @@ export default function PublicAccess() {
                       onChange={(event) => setName(event.target.value)}
                       required
                       autoComplete="name"
-                      className="h-12 w-full rounded-md border border-gray-300 bg-white/90 px-4 text-base text-gray-950 outline-none transition focus:border-gray-950 focus:ring-2 focus:ring-gray-950/15"
+                      className="h-10 w-full rounded-md border border-gray-300 bg-white/90 px-4 text-sm text-gray-950 outline-none transition focus:border-gray-950 focus:ring-2 focus:ring-gray-950/15"
                     />
                   </label>
                 </div>
 
-                <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
                   <button
                     type="submit"
                     disabled={status === 'sending'}
-                    className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-gray-950 px-5 py-3 text-center text-xs font-semibold uppercase leading-5 tracking-[0.14em] text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-70"
+                    className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-gray-950 px-4 py-2.5 text-center text-[11px] font-semibold uppercase leading-5 tracking-[0.12em] text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-70"
                   >
                     {status === 'sending' ? (
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                     ) : (
                       <Mail className="h-4 w-4" aria-hidden="true" />
                     )}
-                    Si quiero recibir la version de prueba de 10 dias
+                    Pulsa aquí si quieres recibir la versión de prueba de 10 días
                   </button>
 
                   {status === 'sent' ? (
                     <p className="inline-flex items-center gap-2 text-sm font-medium text-gray-900">
                       <CheckCircle2 className="h-4 w-4 text-green-700" aria-hidden="true" />
-                      Solicitud enviada. La persona recibira una copia.
+                      {copiedToRequester
+                        ? 'Solicitud enviada. La persona recibirá una copia.'
+                        : 'Solicitud enviada. La copia al solicitante está pendiente de configuración.'}
                     </p>
                   ) : null}
 

@@ -8,7 +8,7 @@ export const createTrialRequest = async (req: Request, res: Response) => {
     res.status(result.delivered ? 201 : 202).json({
       ok: true,
       delivered: result.delivered,
-      copiedToRequester: result.delivered
+      copiedToRequester: result.copiedToRequester
     })
   } catch (error) {
     console.error('Create trial request error:', error)

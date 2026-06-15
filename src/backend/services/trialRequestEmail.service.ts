@@ -10,7 +10,13 @@ type ResendEmailResponse = {
   name?: string
 }
 
+type ResendEmailError = Error & {
+  responseBody?: ResendEmailResponse
+  status?: number
+}
+
 export type TrialRequestEmailResult = {
+  copiedToRequester: boolean
   delivered: boolean
   recipient: string
   requesterEmail: string
@@ -63,7 +69,10 @@ const sendResendEmail = async ({
   const responseBody = (await response.json().catch(() => ({}))) as ResendEmailResponse
 
   if (!response.ok) {
-    throw new Error(responseBody.message || 'Trial request email delivery failed')
+    const error = new Error(responseBody.message || 'Trial request email delivery failed') as ResendEmailError
+    error.status = response.status
+    error.responseBody = responseBody
+    throw error
   }
 
   return responseBody
@@ -82,7 +91,7 @@ export const sendTrialRequestEmail = async (
       requesterName: input.name
     })
 
-    return { delivered: false, recipient, requesterEmail: input.email }
+    return { copiedToRequester: false, delivered: false, recipient, requesterEmail: input.email }
   }
 
   const from = (process.env.TRIAL_REQUEST_FROM || DEFAULT_TRIAL_REQUEST_FROM).trim()
@@ -127,17 +136,19 @@ export const sendTrialRequestEmail = async (
     '<p>Gracias por tu interes en Lucy3000.</p>'
   ].join('')
 
-  try {
-    const ownerResponse = await sendResendEmail({
-      apiKey,
-      from,
-      to: recipient,
-      replyTo: input.email,
-      subject: ownerSubject,
-      text: ownerText,
-      html: ownerHtml
-    })
+  const ownerResponse = await sendResendEmail({
+    apiKey,
+    from,
+    to: recipient,
+    replyTo: input.email,
+    subject: ownerSubject,
+    text: ownerText,
+    html: ownerHtml
+  })
 
+  let copiedToRequester = false
+
+  try {
     const requesterResponse = await sendResendEmail({
       apiKey,
       from,
@@ -148,19 +159,27 @@ export const sendTrialRequestEmail = async (
       html: requesterHtml
     })
 
-    logInfo('Trial request emails delivered', {
-      ownerEmailId: ownerResponse.id || null,
+    copiedToRequester = true
+    logInfo('Trial request requester copy delivered', {
       requesterEmailId: requesterResponse.id || null,
-      recipient,
       requesterEmail: input.email
     })
-
-    return { delivered: true, recipient, requesterEmail: input.email }
   } catch (error) {
-    logError('Trial request email delivery failed', undefined, {
-      recipient,
-      requesterEmail: input.email
+    const resendError = error as ResendEmailError
+    logWarn('Trial request requester copy failed', {
+      requesterEmail: input.email,
+      status: resendError.status || null,
+      responseBody: resendError.responseBody || null,
+      message: resendError.message
     })
-    throw error
   }
+
+  logInfo('Trial request owner email delivered', {
+    copiedToRequester,
+    ownerEmailId: ownerResponse.id || null,
+    recipient,
+    requesterEmail: input.email
+  })
+
+  return { copiedToRequester, delivered: true, recipient, requesterEmail: input.email }
 }
