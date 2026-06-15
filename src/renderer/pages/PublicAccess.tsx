@@ -35,7 +35,6 @@ export default function PublicAccess() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'fallback'>('idle')
-  const [copiedToRequester, setCopiedToRequester] = useState(false)
 
   const mailtoHref = useMemo(
     () => buildMailtoHref({ email: email.trim(), name: name.trim() }),
@@ -52,7 +51,6 @@ export default function PublicAccess() {
     }
 
     setStatus('sending')
-    setCopiedToRequester(false)
 
     try {
       const response = await api.post('/trial-requests', {
@@ -61,7 +59,6 @@ export default function PublicAccess() {
       })
 
       if (response.data?.delivered) {
-        setCopiedToRequester(Boolean(response.data?.copiedToRequester))
         setStatus('sent')
         return
       }
@@ -162,15 +159,21 @@ export default function PublicAccess() {
                     ) : (
                       <Mail className="h-4 w-4" aria-hidden="true" />
                     )}
-                    Pulsa aquí si quieres recibir la versión de prueba de 10 días
+                    {status === 'sending'
+                      ? 'Enviando solicitud...'
+                      : 'Pulsa aquí si quieres recibir la versión de prueba de 10 días'}
                   </button>
+
+                  {status === 'sending' ? (
+                    <p className="text-sm font-medium text-gray-900">
+                      Esta operación puede tardar unos segundos.
+                    </p>
+                  ) : null}
 
                   {status === 'sent' ? (
                     <p className="inline-flex items-center gap-2 text-sm font-medium text-gray-900">
                       <CheckCircle2 className="h-4 w-4 text-green-700" aria-hidden="true" />
-                      {copiedToRequester
-                        ? 'Solicitud enviada. La persona recibirá una copia.'
-                        : 'Solicitud enviada. La copia al solicitante está pendiente de configuración.'}
+                      Solicitud enviada. Me pondré en contacto contigo en la mayor brevedad.
                     </p>
                   ) : null}
 
@@ -187,8 +190,6 @@ export default function PublicAccess() {
             ) : null}
           </div>
         </section>
-
-        <footer className="pb-2 text-xs font-medium text-gray-900/70">Lucy3000 2026</footer>
       </div>
     </main>
   )

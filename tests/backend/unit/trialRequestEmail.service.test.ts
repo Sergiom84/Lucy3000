@@ -23,7 +23,7 @@ describe('trial request email service', () => {
     })
   })
 
-  it('sends the trial request and requester copy through Resend when configured', async () => {
+  it('sends the trial request through Resend when configured', async () => {
     process.env.RESEND_API_KEY = 'resend-test-key'
     process.env.TRIAL_REQUEST_TO = 'ventas@lucy3000.test'
     process.env.TRIAL_REQUEST_FROM = 'Lucy3000 <hola@lucy3000.test>'
@@ -40,7 +40,7 @@ describe('trial request email service', () => {
     })
 
     expect(result).toEqual({
-      copiedToRequester: true,
+      copiedToRequester: false,
       delivered: true,
       recipient: 'ventas@lucy3000.test',
       requesterEmail: 'demo@example.com'
@@ -70,22 +70,22 @@ describe('trial request email service', () => {
     })
   })
 
-  it('keeps the request delivered when only the requester copy fails', async () => {
+  it('does not wait for the requester copy before returning the delivered request', async () => {
     process.env.RESEND_API_KEY = 'resend-test-key'
     process.env.TRIAL_REQUEST_TO = 'ventas@lucy3000.test'
     process.env.TRIAL_REQUEST_FROM = 'Lucy3000 <hola@lucy3000.test>'
 
-    vi.spyOn(globalThis, 'fetch')
+    let resolveRequesterCopy: (value: Response) => void = () => {}
+    const requesterCopy = new Promise<Response>((resolve) => {
+      resolveRequesterCopy = resolve
+    })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
         json: async () => ({ id: 'owner-email-1' })
       } as Response)
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 403,
-        json: async () => ({ message: 'Domain not verified' })
-      } as Response)
+      .mockReturnValueOnce(requesterCopy)
 
     const result = await sendTrialRequestEmail({
       email: 'demo@example.com',
@@ -98,5 +98,12 @@ describe('trial request email service', () => {
       recipient: 'ventas@lucy3000.test',
       requesterEmail: 'demo@example.com'
     })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    resolveRequesterCopy({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 'requester-copy-1' })
+    } as Response)
   })
 })
