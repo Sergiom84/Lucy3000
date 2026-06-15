@@ -36,7 +36,7 @@ export default function Login() {
       } catch (error) {
         if (!cancelled) {
           setBootstrapStatus(false)
-          toast.error('No se pudo comprobar el estado inicial de la aplicacion')
+          toast.error('No se pudo comprobar el estado inicial de la aplicación')
         }
       } finally {
         if (!cancelled) {
@@ -66,7 +66,7 @@ export default function Login() {
 
       login(user, token)
       if (user?.license?.status === 'TRIAL_EXPIRED' || user?.license?.status === 'BLOCKED') {
-        toast.error('La licencia de este centro no esta activa')
+        toast.error('La licencia de este centro no está activa')
       } else {
         toast.success('¡Bienvenido!')
       }
@@ -77,9 +77,9 @@ export default function Login() {
         login(user, token)
         const reason = user?.license?.reason
         if (reason === 'pending') {
-          toast('Tu cuenta esta pendiente de activacion', { icon: '⏳' })
+          toast('Tu cuenta está pendiente de activación', { icon: '⏳' })
         } else {
-          toast.error('La licencia de este centro no esta activa')
+          toast.error('La licencia de este centro no está activa')
         }
         navigate('/')
         return
@@ -95,7 +95,7 @@ export default function Login() {
     e.preventDefault()
 
     if (bootstrapPassword !== bootstrapPasswordConfirm) {
-      toast.error('Las contrasenas no coinciden')
+      toast.error('Las contraseñas no coinciden')
       return
     }
 
@@ -130,7 +130,7 @@ export default function Login() {
   if (!bootstrapChecked || checkingBootstrap) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-primary-500 to-secondary-500 p-4 text-white">
-        Comprobando configuracion inicial...
+        Comprobando configuración inicial...
       </div>
     )
   }
@@ -153,14 +153,14 @@ export default function Login() {
             <p className="text-gray-600 dark:text-gray-400 mt-2">
               {isBootstrapMode
                 ? 'Configura el primer usuario administrador'
-                : 'Sistema de Gestion para Estetica'}
+                : 'Sistema de Gestión para Estética'}
             </p>
           </div>
 
           {isBootstrapMode ? (
             <form onSubmit={handleBootstrapSubmit} className="space-y-5">
               <div className="rounded-lg bg-amber-50 p-4 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-                Este es un arranque limpio. Crea aqui el primer centro y su administrador.
+                Este es un arranque limpio. Crea aquí el primer centro y su administrador.
               </div>
 
               <div>
@@ -173,7 +173,7 @@ export default function Login() {
                   value={bootstrapBusinessName}
                   onChange={(e) => setBootstrapBusinessName(e.target.value)}
                   className="input"
-                  placeholder="Lucy Estetica"
+                  placeholder="Lucy Estética"
                   required
                 />
               </div>
@@ -196,7 +196,7 @@ export default function Login() {
               <div>
                 <label className="label">
                   <User className="w-4 h-4 inline mr-2" />
-                  Usuario para iniciar sesion
+                  Usuario para iniciar sesión
                 </label>
                 <input
                   type="text"
@@ -210,7 +210,7 @@ export default function Login() {
               <div>
                 <label className="label">
                   <Mail className="w-4 h-4 inline mr-2" />
-                  Correo electronico
+                  Correo electrónico
                 </label>
                 <input
                   type="email"
@@ -225,14 +225,14 @@ export default function Login() {
               <div>
                 <label className="label">
                   <Lock className="w-4 h-4 inline mr-2" />
-                  Contrasena
+                  Contraseña
                 </label>
                 <input
                   type="password"
                   value={bootstrapPassword}
                   onChange={(e) => setBootstrapPassword(e.target.value)}
                   className="input"
-                  placeholder="Minimo 8 caracteres"
+                  placeholder="Mínimo 8 caracteres"
                   minLength={8}
                   required
                 />
@@ -241,14 +241,14 @@ export default function Login() {
               <div>
                 <label className="label">
                   <Lock className="w-4 h-4 inline mr-2" />
-                  Repite la contrasena
+                  Repite la contraseña
                 </label>
                 <input
                   type="password"
                   value={bootstrapPasswordConfirm}
                   onChange={(e) => setBootstrapPasswordConfirm(e.target.value)}
                   className="input"
-                  placeholder="Confirma la contrasena"
+                  placeholder="Confirma la contraseña"
                   minLength={8}
                   required
                 />
@@ -298,7 +298,7 @@ export default function Login() {
               <div>
                 <label className="label">
                   <Lock className="w-4 h-4 inline mr-2" />
-                  Contrasena
+                  Contraseña
                 </label>
                 <input
                   type="password"

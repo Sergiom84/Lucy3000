@@ -62,14 +62,17 @@ describe('trial request email service', () => {
       from: 'Lucy3000 <hola@lucy3000.test>',
       to: ['ventas@lucy3000.test'],
       reply_to: 'demo@example.com',
-      subject: 'Solicitud informacion Lucy3000 - Centro Demo'
+      subject: 'Solicitud información Lucy3000 - Centro Demo',
+      text: expect.stringContaining('10 días'),
+      html: expect.stringContaining('versión')
     })
     expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toMatchObject({
       from: 'Lucy3000 <hola@lucy3000.test>',
       to: ['demo@example.com'],
       reply_to: 'ventas@lucy3000.test',
       subject: 'Solicitud de prueba - Lucy3000',
-      text: expect.stringContaining('contraseña')
+      text: expect.stringContaining('Teléfono'),
+      html: expect.stringContaining('interés')
     })
   })
 

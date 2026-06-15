@@ -332,7 +332,7 @@ export default function Accounts() {
           </div>
 
           <div>
-            <label className="label">Usuario para iniciar sesion</label>
+            <label className="label">Usuario para iniciar sesión</label>
             <input
               type="text"
               value={username}
@@ -343,7 +343,7 @@ export default function Accounts() {
           </div>
 
           <div>
-            <label className="label">Correo electronico</label>
+            <label className="label">Correo electrónico</label>
             <input
               type="email"
               value={email}
@@ -376,7 +376,7 @@ export default function Accounts() {
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               className="input"
-              placeholder="Minimo 8 caracteres"
+              placeholder="Mínimo 8 caracteres"
               minLength={8}
               required
             />
@@ -504,7 +504,7 @@ export default function Accounts() {
             </div>
 
             <div>
-              <label className="label">Usuario para iniciar sesion</label>
+              <label className="label">Usuario para iniciar sesión</label>
               <input
                 type="text"
                 value={settingsUsername}
@@ -515,7 +515,7 @@ export default function Accounts() {
             </div>
 
             <div>
-              <label className="label">Correo electronico</label>
+              <label className="label">Correo electrónico</label>
               <input
                 type="email"
                 value={settingsEmail}

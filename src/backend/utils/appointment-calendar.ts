@@ -50,7 +50,7 @@ export const buildAppointmentCalendarSyncInput = (
 ): AppointmentSyncInput => {
   const clientName = getAppointmentDisplayName(appointment)
   const phone = getAppointmentDisplayPhone(appointment)
-  const phoneLine = phone ? `\nTelefono: ${phone}` : ''
+  const phoneLine = phone ? `\nTeléfono: ${phone}` : ''
   const serviceLabel = getAppointmentServiceLabel(appointment) || String(appointment.service?.name || '').trim()
 
   return {

@@ -392,7 +392,7 @@ export const validateAppointmentPartyUpdate = (
   }
 
   if (nextIsGuest && (!hasText(nextGuestName) || !hasText(nextGuestPhone))) {
-    return 'Las citas puntuales deben conservar nombre y telefono'
+    return 'Las citas puntuales deben conservar nombre y teléfono'
   }
 
   return null

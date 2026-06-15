@@ -13,16 +13,16 @@ const backgroundStyle = {
 }
 
 const buildMailtoHref = ({ email, name, phone }: { email: string; name: string; phone: string }) => {
-  const subject = encodeURIComponent('Solicitud version de prueba Lucy3000')
+  const subject = encodeURIComponent('Solicitud versión de prueba Lucy3000')
   const body = encodeURIComponent(
     [
       'Hola Sergio,',
       '',
-      'Quiero recibir la version de prueba de 10 dias de Lucy3000.',
+      'Quiero recibir la versión de prueba de 10 días de Lucy3000.',
       '',
       `Nombre: ${name}`,
       `Email: ${email}`,
-      `Telefono: ${phone || '-'}`,
+      `Teléfono: ${phone || '-'}`,
       '',
       'Gracias.'
     ].join('\n')
@@ -103,7 +103,7 @@ export default function PublicAccess() {
                 className="text-3xl font-normal tracking-normal text-gray-950 sm:text-4xl"
                 style={{ ...serifStyle, lineHeight: 0.95 }}
               >
-                Solicitar informacion
+                Solicitar información
               </span>
               <ArrowRight
                 className={`h-5 w-5 shrink-0 transition ${isRequestOpen ? 'rotate-90' : 'group-hover:translate-x-1'}`}

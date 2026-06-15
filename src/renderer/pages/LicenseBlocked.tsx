@@ -27,13 +27,13 @@ const REASON_CONTENT: Record<
 > = {
   pending: {
     icon: Hourglass,
-    title: 'Tu cuenta esta lista',
+    title: 'Tu cuenta está lista',
     description:
-      'Cuando termines de configurar tu centro, empieza tu prueba gratuita de 10 dias. Hasta entonces puedes cerrar y volver otro dia; el reloj solo arranca cuando pulses "Empezar prueba".'
+      'Cuando termines de configurar tu centro, empieza tu prueba gratuita de 10 días. Hasta entonces puedes cerrar y volver otro día; el reloj solo arranca cuando pulses "Empezar prueba".'
   },
   'pending-expired': {
     icon: Lock,
-    title: 'Periodo de preparacion agotado',
+    title: 'Periodo de preparación agotado',
     description:
       'Ha pasado el plazo para iniciar la prueba sin activarla. Ponte en contacto con soporte de Lucy3000 para activar tu cuenta.'
   },
@@ -41,25 +41,25 @@ const REASON_CONTENT: Record<
     icon: Clock,
     title: 'Tu prueba ha finalizado',
     description:
-      'El periodo de prueba de 10 dias ha terminado. Contacta con nosotros para activar tu suscripcion y recuperar el acceso completo.'
+      'El periodo de prueba de 10 días ha terminado. Contacta con nosotros para activar tu suscripción y recuperar el acceso completo.'
   },
   blocked: {
     icon: Lock,
     title: 'Acceso bloqueado',
     description:
-      'El acceso a este centro esta bloqueado temporalmente. Ponte en contacto con soporte para resolverlo.'
+      'El acceso a este centro está bloqueado temporalmente. Ponte en contacto con soporte para resolverlo.'
   },
   cancelled: {
     icon: Lock,
-    title: 'Suscripcion cancelada',
+    title: 'Suscripción cancelada',
     description:
-      'La suscripcion de este centro esta cancelada. Contacta con nosotros si quieres reactivarla.'
+      'La suscripción de este centro está cancelada. Contacta con nosotros si quieres reactivarla.'
   },
   inactive: {
     icon: Lock,
     title: 'Licencia no activa',
     description:
-      'La licencia de este centro no esta activa en este momento. Contacta con soporte para continuar.'
+      'La licencia de este centro no está activa en este momento. Contacta con soporte para continuar.'
   }
 }
 
@@ -79,7 +79,7 @@ export default function LicenseBlocked({ license }: { license: LicenseInfo }) {
       await api.post('/tenants/current/start-trial')
       const me = await api.get('/auth/me')
       updateUser({ ...(user as any), ...me.data })
-      toast.success('Prueba de 10 dias iniciada. ¡A trabajar!')
+      toast.success('Prueba de 10 días iniciada. ¡A trabajar!')
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'No se pudo iniciar la prueba')
     } finally {
@@ -93,9 +93,9 @@ export default function LicenseBlocked({ license }: { license: LicenseInfo }) {
       const response = await api.get('/auth/me')
       updateUser({ ...(user as any), ...response.data })
       if (response.data?.license?.reason === 'active') {
-        toast.success('Tu acceso ya esta activo')
+        toast.success('Tu acceso ya está activo')
       } else {
-        toast('Tu acceso todavia no esta activo', { icon: 'ℹ️' })
+        toast('Tu acceso todavía no está activo', { icon: 'ℹ️' })
       }
     } catch {
       toast.error('No se pudo comprobar el estado de la cuenta')
@@ -137,7 +137,7 @@ export default function LicenseBlocked({ license }: { license: LicenseInfo }) {
                   className="w-full btn btn-primary py-3 flex items-center justify-center gap-2"
                 >
                   <PlayCircle className="w-4 h-4" />
-                  {startingTrial ? 'Iniciando prueba...' : 'Empezar prueba de 10 dias'}
+                  {startingTrial ? 'Iniciando prueba...' : 'Empezar prueba de 10 días'}
                 </button>
               ) : (
                 <button
@@ -147,7 +147,7 @@ export default function LicenseBlocked({ license }: { license: LicenseInfo }) {
                   className="w-full btn btn-primary py-3 flex items-center justify-center gap-2"
                 >
                   <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-                  {refreshing ? 'Comprobando...' : 'Ya esta activo, comprobar de nuevo'}
+                  {refreshing ? 'Comprobando...' : 'Ya está activo, comprobar de nuevo'}
                 </button>
               )}
               <button
@@ -156,7 +156,7 @@ export default function LicenseBlocked({ license }: { license: LicenseInfo }) {
                 className="w-full btn btn-secondary py-3 flex items-center justify-center gap-2"
               >
                 <LogOut className="w-4 h-4" />
-                Cerrar sesion
+                Cerrar sesión
               </button>
             </div>
           </div>

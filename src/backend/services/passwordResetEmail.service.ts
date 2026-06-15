@@ -55,20 +55,20 @@ export const sendPasswordResetEmail = async (
   }
 
   const from = (process.env.PASSWORD_RESET_FROM || process.env.TRIAL_REQUEST_FROM || DEFAULT_PASSWORD_RESET_FROM).trim()
-  const subject = 'Restablecer contrasena de Lucy3000'
+  const subject = 'Restablecer contraseña de Lucy3000'
   const text = [
     `Hola ${input.name},`,
     '',
-    `Hemos recibido una solicitud para restablecer la contrasena de ${input.tenantName}.`,
-    'Abre este enlace para crear una contrasena nueva:',
+    `Hemos recibido una solicitud para restablecer la contraseña de ${input.tenantName}.`,
+    'Abre este enlace para crear una contraseña nueva:',
     input.resetUrl,
     '',
     'El enlace caduca en 30 minutos. Si no has solicitado este cambio, puedes ignorar este correo.'
   ].join('\n')
   const html = [
     `<p>Hola ${escapeHtml(input.name)},</p>`,
-    `<p>Hemos recibido una solicitud para restablecer la contrasena de <strong>${escapeHtml(input.tenantName)}</strong>.</p>`,
-    `<p><a href="${escapeHtml(input.resetUrl)}">Crear una contrasena nueva</a></p>`,
+    `<p>Hemos recibido una solicitud para restablecer la contraseña de <strong>${escapeHtml(input.tenantName)}</strong>.</p>`,
+    `<p><a href="${escapeHtml(input.resetUrl)}">Crear una contraseña nueva</a></p>`,
     '<p>El enlace caduca en 30 minutos. Si no has solicitado este cambio, puedes ignorar este correo.</p>'
   ].join('')
 

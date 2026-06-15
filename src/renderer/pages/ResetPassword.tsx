@@ -16,17 +16,17 @@ export default function ResetPassword() {
     event.preventDefault()
 
     if (password !== passwordConfirm) {
-      toast.error('Las contrasenas no coinciden')
+      toast.error('Las contraseñas no coinciden')
       return
     }
 
     setLoading(true)
     try {
       await api.post('/auth/reset-password', { token, password })
-      toast.success('Contrasena actualizada')
+      toast.success('Contraseña actualizada')
       navigate('/login')
     } catch (error: any) {
-      toast.error(error.response?.data?.error || 'No se pudo restablecer la contrasena')
+      toast.error(error.response?.data?.error || 'No se pudo restablecer la contraseña')
     } finally {
       setLoading(false)
     }
@@ -42,22 +42,22 @@ export default function ResetPassword() {
           </Link>
 
           <div className="mb-7">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Nueva contrasena</h1>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Nueva contraseña</h1>
             <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-              Crea una contrasena nueva para tu cuenta de Lucy3000.
+              Crea una contraseña nueva para tu cuenta de Lucy3000.
             </p>
           </div>
 
           {!token ? (
             <div className="rounded-lg bg-red-50 p-4 text-sm text-red-900 dark:bg-red-950/30 dark:text-red-100">
-              El enlace no incluye un token valido. Solicita un nuevo enlace desde el login.
+              El enlace no incluye un token válido. Solicita un nuevo enlace desde el login.
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-5">
               <div>
                 <label className="label">
                   <Lock className="mr-2 inline h-4 w-4" />
-                  Nueva contrasena
+                  Nueva contraseña
                 </label>
                 <input
                   type="password"
@@ -72,7 +72,7 @@ export default function ResetPassword() {
               <div>
                 <label className="label">
                   <Lock className="mr-2 inline h-4 w-4" />
-                  Repite la contrasena
+                  Repite la contraseña
                 </label>
                 <input
                   type="password"
@@ -85,7 +85,7 @@ export default function ResetPassword() {
               </div>
 
               <button type="submit" disabled={loading} className="btn btn-primary w-full py-3 text-base">
-                {loading ? 'Guardando...' : 'Guardar contrasena'}
+                {loading ? 'Guardando...' : 'Guardar contraseña'}
               </button>
             </form>
           )}

@@ -126,7 +126,7 @@ const toAppointmentDateTime = (appointment: { date: Date; startTime: string }) =
 const buildCalendarSyncInput = (appointment: AppointmentRecord): AppointmentSyncInput => {
   const clientName = getAppointmentDisplayName(appointment, 'Cliente')
   const phone = getAppointmentDisplayPhone(appointment)
-  const phoneLine = phone ? `\nTelefono: ${phone}` : ''
+  const phoneLine = phone ? `\nTeléfono: ${phone}` : ''
   const serviceLabel = getAppointmentServiceLabel(appointment) || appointment.service.name
 
   return {

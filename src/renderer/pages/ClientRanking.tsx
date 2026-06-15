@@ -264,7 +264,7 @@ export default function ClientRanking() {
               <th>Cliente</th>
               <th>Puntos</th>
               <th>Facturacion</th>
-              <th>Ratio (dias)</th>
+              <th>Ratio (días)</th>
               <th>Primer Servicio</th>
               <th>Ultimo Servicio</th>
               <th>Faltas</th>

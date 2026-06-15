@@ -20,10 +20,10 @@ export default function ForgotPassword() {
         identifier: identifier.trim()
       })
       setSent(true)
-      toast.success('Si los datos son correctos, recibiras un correo en unos minutos')
+      toast.success('Si los datos son correctos, recibirás un correo en unos minutos')
     } catch {
       setSent(true)
-      toast.success('Si los datos son correctos, recibiras un correo en unos minutos')
+      toast.success('Si los datos son correctos, recibirás un correo en unos minutos')
     } finally {
       setLoading(false)
     }
@@ -39,15 +39,15 @@ export default function ForgotPassword() {
           </Link>
 
           <div className="mb-7">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Recuperar contrasena</h1>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Recuperar contraseña</h1>
             <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-              Indica tu ID cliente y usuario o correo. Te enviaremos un enlace para crear una contrasena nueva.
+              Indica tu ID cliente y usuario o correo. Te enviaremos un enlace para crear una contraseña nueva.
             </p>
           </div>
 
           {sent ? (
             <div className="rounded-lg bg-emerald-50 p-4 text-sm text-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-100">
-              Revisa tu correo. Si existe una cuenta con esos datos, el enlace de recuperacion caduca en 30 minutos.
+              Revisa tu correo. Si existe una cuenta con esos datos, el enlace de recuperación caduca en 30 minutos.
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-5">

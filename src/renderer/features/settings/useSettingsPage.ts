@@ -326,7 +326,7 @@ export const useSettingsPage = () => {
       })
       toast.success('Configuracion de backup guardada')
     } catch {
-      toast.error('Error al guardar configuracion')
+      toast.error('Error al guardar configuración')
     }
   }
 

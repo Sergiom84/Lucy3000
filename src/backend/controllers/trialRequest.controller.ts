@@ -50,7 +50,7 @@ export const createTrialRequest = async (req: Request, res: Response) => {
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       const target = Array.isArray(error.meta?.target) ? error.meta.target.join(', ') : String(error.meta?.target || '')
-      const field = target.includes('normalizedPhone') ? 'telefono' : 'correo'
+      const field = target.includes('normalizedPhone') ? 'teléfono' : 'correo'
 
       return res.status(409).json({
         error: `Ya existe una solicitud con este ${field}. Te responderé en cuanto la revise.`

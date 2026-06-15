@@ -9,9 +9,9 @@ const getCommercialStatus = (license: any) => {
 
   const access = evaluateTenantLicense(license)
   if (access.status === 'ACTIVE') return 'Ya ha pagado'
-  if (access.status === 'TRIAL') return access.reason === 'trial-expired' ? 'Realizo la prueba y no siguio' : 'En prueba'
-  if (access.status === 'PENDING') return access.reason === 'pending-expired' ? 'No inicio la prueba' : 'Pendiente de empezar prueba'
-  if (access.status === 'CANCELLED') return 'Realizo la prueba y no siguio'
+  if (access.status === 'TRIAL') return access.reason === 'trial-expired' ? 'Realizó la prueba y no siguió' : 'En prueba'
+  if (access.status === 'PENDING') return access.reason === 'pending-expired' ? 'No inició la prueba' : 'Pendiente de empezar prueba'
+  if (access.status === 'CANCELLED') return 'Realizó la prueba y no siguió'
   if (access.status === 'BLOCKED') return 'Bloqueado'
   return access.status
 }

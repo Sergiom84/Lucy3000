@@ -97,22 +97,22 @@ export const sendTrialRequestEmail = async (
   }
 
   const from = (process.env.TRIAL_REQUEST_FROM || DEFAULT_TRIAL_REQUEST_FROM).trim()
-  const ownerSubject = `Solicitud informacion Lucy3000 - ${input.name}`
+  const ownerSubject = `Solicitud información Lucy3000 - ${input.name}`
   const ownerText = [
-    'Nueva solicitud de version de prueba de Lucy3000.',
+    'Nueva solicitud de versión de prueba de Lucy3000.',
     '',
     `Nombre: ${input.name}`,
     `Email: ${input.email}`,
-    `Telefono: ${input.phone || '-'}`,
-    'Prueba solicitada: 10 dias'
+    `Teléfono: ${input.phone || '-'}`,
+    'Prueba solicitada: 10 días'
   ].join('\n')
   const ownerHtml = [
-    '<h2>Nueva solicitud de version de prueba de Lucy3000</h2>',
+    '<h2>Nueva solicitud de versión de prueba de Lucy3000</h2>',
     '<ul>',
     `<li><strong>Nombre:</strong> ${escapeHtml(input.name)}</li>`,
     `<li><strong>Email:</strong> ${escapeHtml(input.email)}</li>`,
-    `<li><strong>Telefono:</strong> ${escapeHtml(input.phone || '-')}</li>`,
-    '<li><strong>Prueba solicitada:</strong> 10 dias</li>',
+    `<li><strong>Teléfono:</strong> ${escapeHtml(input.phone || '-')}</li>`,
+    '<li><strong>Prueba solicitada:</strong> 10 días</li>',
     '</ul>'
   ].join('')
   const requesterSubject = 'Solicitud de prueba - Lucy3000'
@@ -125,9 +125,9 @@ export const sendTrialRequestEmail = async (
     'Resumen de tu solicitud:',
     `Nombre: ${input.name}`,
     `Email: ${input.email}`,
-    `Telefono: ${input.phone || '-'}`,
+    `Teléfono: ${input.phone || '-'}`,
     '',
-    'Gracias por tu interes en Lucy3000.'
+    'Gracias por tu interés en Lucy3000.'
   ].join('\n')
   const requesterHtml = [
     `<p>Hola ${escapeHtml(input.name)},</p>`,
@@ -137,9 +137,9 @@ export const sendTrialRequestEmail = async (
     '<ul>',
     `<li><strong>Nombre:</strong> ${escapeHtml(input.name)}</li>`,
     `<li><strong>Email:</strong> ${escapeHtml(input.email)}</li>`,
-    `<li><strong>Telefono:</strong> ${escapeHtml(input.phone || '-')}</li>`,
+    `<li><strong>Teléfono:</strong> ${escapeHtml(input.phone || '-')}</li>`,
     '</ul>',
-    '<p>Gracias por tu interes en Lucy3000.</p>'
+    '<p>Gracias por tu interés en Lucy3000.</p>'
   ].join('')
 
   const ownerResponse = await sendResendEmail({

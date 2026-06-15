@@ -795,7 +795,7 @@ export default function AppointmentForm({
   const clientOptions = useMemo<SearchableOption[]>(() => {
     return clients.map((client) => {
       const fullName = `${client.firstName || ''} ${client.lastName || ''}`.trim()
-      const phone = String(client.phone || 'Sin telefono')
+      const phone = String(client.phone || 'Sin teléfono')
       const email = client.email ? String(client.email) : ''
       const detail = email ? `${phone} · ${email}` : phone
 
@@ -1287,7 +1287,7 @@ export default function AppointmentForm({
       }
 
       if (guestMode && !formData.guestPhone.trim()) {
-        toast.error('Debe indicar el telefono del cliente puntual')
+        toast.error('Debe indicar el teléfono del cliente puntual')
         setLoading(false)
         return
       }
@@ -1299,7 +1299,7 @@ export default function AppointmentForm({
       }
 
       if (totalSelectedServiceDuration <= 0) {
-        toast.error('Los servicios seleccionados no tienen una duracion valida')
+        toast.error('Los servicios seleccionados no tienen una duración válida')
         setLoading(false)
         return
       }
@@ -1495,7 +1495,7 @@ export default function AppointmentForm({
           reminder: dataToSend.reminder
         }
         const response = await api.post(`/bonos/${fromBonoPackId}/appointments`, bonoPayload)
-        showCalendarSyncWarning(response.data, 'Cita creada y sesion reservada')
+        showCalendarSyncWarning(response.data, 'Cita creada y sesión reservada')
       } else {
         const createdAppointments: any[] = []
         const mainResponse = await api.post('/appointments', dataToSend)
@@ -1636,14 +1636,14 @@ export default function AppointmentForm({
                     />
                   </div>
                   <div>
-                    <label className="label">Telefono</label>
+                    <label className="label">Teléfono</label>
                     <input
                       type="text"
                       name="guestPhone"
                       value={formData.guestPhone}
                       onChange={handleChange}
                       className="input"
-                      placeholder="Telefono de contacto"
+                      placeholder="Teléfono de contacto"
                     />
                   </div>
                 </div>
@@ -1654,7 +1654,7 @@ export default function AppointmentForm({
                   value={formData.clientId}
                   options={clientOptions}
                   onSelect={handleClientSelect}
-                  placeholder="Buscar cliente por nombre, telefono o email..."
+                  placeholder="Buscar cliente por nombre, teléfono o email..."
                   emptyText="No se encontraron clientes"
                   loading={clientsLoading}
                   loadingText="Cargando clientes..."
@@ -1800,7 +1800,7 @@ export default function AppointmentForm({
             )}
             {!normalizedStartTime && (
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Se calculara automaticamente al indicar la hora de inicio.
+                Se calculará automáticamente al indicar la hora de inicio.
               </p>
             )}
           </div>
@@ -1836,7 +1836,7 @@ export default function AppointmentForm({
         })()}
         {totalSelectedServiceDuration > 0 && normalizedStartTime && !normalizedEndTime && (
           <p className="mt-2 text-sm text-red-600 dark:text-red-400">
-            La duracion total de los servicios supera el horario de cierre. Elige una hora de inicio anterior.
+            La duración total de los servicios supera el horario de cierre. Elige una hora de inicio anterior.
           </p>
         )}
       </div>

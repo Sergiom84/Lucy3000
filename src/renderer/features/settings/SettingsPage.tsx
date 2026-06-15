@@ -327,7 +327,7 @@ export default function Settings() {
                   onClick={handleSaveCalendarConfig}
                   className="btn btn-primary w-full"
                   disabled={calendarAction !== null}
-                  title="Guardar la configuracion actual de Google Calendar"
+                  title="Guardar la configuración actual de Google Calendar"
                 >
                   {calendarAction === 'save' ? 'Guardando...' : 'Guardar'}
                 </button>
@@ -536,7 +536,7 @@ export default function Settings() {
               </label>
 
               <button onClick={handleSaveBackupConfig} className="btn btn-secondary w-full">
-                Guardar configuracion de backup
+                Guardar configuración de backup
               </button>
             </div>
 

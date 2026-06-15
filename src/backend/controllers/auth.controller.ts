@@ -374,7 +374,7 @@ export const resetPassword = async (req: Request, res: Response) => {
     res.json({ ok: true })
   } catch (error) {
     console.error('Reset password error:', error)
-    res.status(500).json({ error: 'No se pudo restablecer la contrasena' })
+    res.status(500).json({ error: 'No se pudo restablecer la contraseña' })
   }
 }
 

@@ -34,14 +34,14 @@ export default function DatabaseSetup({ initialStatus }: DatabaseSetupProps) {
       })
 
       if (!result?.success) {
-        const message = result?.error || 'No se pudo guardar la configuracion.'
+        const message = result?.error || 'No se pudo guardar la configuración.'
         setError(message)
         toast.error(message)
         return
       }
 
       setSavedEnvPath(result.envPath || null)
-      toast.success('Configuracion guardada')
+      toast.success('Configuración guardada')
     } finally {
       setSaving(false)
     }
@@ -65,8 +65,8 @@ export default function DatabaseSetup({ initialStatus }: DatabaseSetupProps) {
             </div>
             <h1 className="text-2xl font-semibold">Base de datos configurada</h1>
             <p className="mt-3 text-sm leading-6 text-gray-600 dark:text-gray-300">
-              Lucy3000 guardo la configuracion en la carpeta de datos. Reinicia la aplicacion para arrancar el backend
-              con esta conexion.
+              Lucy3000 guardó la configuración en la carpeta de datos. Reinicia la aplicación para arrancar el backend
+              con esta conexión.
             </p>
             <div className="mt-5 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-300">
               {savedEnvPath}
@@ -122,7 +122,7 @@ export default function DatabaseSetup({ initialStatus }: DatabaseSetupProps) {
               <Laptop className="mb-4 h-6 w-6" />
               <span className="block text-sm font-semibold">Cliente local</span>
               <span className="mt-2 block text-xs leading-5 text-gray-600 dark:text-gray-300">
-                Un solo portatil con SQLite local.
+                Un solo portátil con SQLite local.
               </span>
             </button>
             <button
@@ -166,11 +166,11 @@ export default function DatabaseSetup({ initialStatus }: DatabaseSetupProps) {
                 Base de datos local: {initialStatus.legacySqlitePath}
                 {initialStatus.legacySqliteExists ? (
                   <span className="mt-2 block text-emerald-700 dark:text-emerald-300">
-                    Se conservara la base SQLite existente.
+                    Se conservará la base SQLite existente.
                   </span>
                 ) : (
                   <span className="mt-2 block">
-                    Se creara automaticamente al arrancar Lucy3000.
+                    Se creará automáticamente al arrancar Lucy3000.
                   </span>
                 )}
               </div>
@@ -183,7 +183,7 @@ export default function DatabaseSetup({ initialStatus }: DatabaseSetupProps) {
             ) : null}
 
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs leading-5 text-gray-600 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-300">
-              Archivo de configuracion: {initialStatus.writableEnvPath}
+              Archivo de configuración: {initialStatus.writableEnvPath}
             </div>
 
             <button
@@ -192,7 +192,7 @@ export default function DatabaseSetup({ initialStatus }: DatabaseSetupProps) {
               className="btn btn-primary inline-flex w-full items-center justify-center gap-2 py-3"
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-              {saving ? 'Guardando...' : 'Guardar configuracion'}
+              {saving ? 'Guardando...' : 'Guardar configuración'}
             </button>
           </form>
         </section>

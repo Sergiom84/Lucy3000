@@ -38,7 +38,7 @@ type StoredGoogleCalendarConfig = {
 }
 
 export const GOOGLE_CALENDAR_RECONNECT_MESSAGE =
-  'La conexion con Google Calendar ha caducado o fue revocada. Ve a Configuracion > Google Calendar y vuelve a conectar la cuenta. Si ocurre cada pocos dias, revisa si el proyecto OAuth de Google Cloud sigue en modo Testing.'
+  'La conexión con Google Calendar ha caducado o fue revocada. Ve a Configuración > Google Calendar y vuelve a conectar la cuenta. Si ocurre cada pocos días, revisa si el proyecto OAuth de Google Cloud sigue en modo Testing.'
 
 export type CalendarSyncStatus = 'DISABLED' | 'SYNCED' | 'ERROR'
 

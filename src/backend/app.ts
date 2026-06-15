@@ -75,7 +75,7 @@ const trialRequestRateLimiter = rateLimit({
   limit: 12,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
-  message: { error: 'Demasiadas solicitudes. Intentalo de nuevo mas tarde.' }
+  message: { error: 'Demasiadas solicitudes. Inténtalo de nuevo más tarde.' }
 })
 
 app.use(express.json())
