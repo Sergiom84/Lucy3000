@@ -190,7 +190,7 @@ function App() {
 
       <Suspense fallback={<RouteLoader />}>
         <Routes>
-          <Route path="/" element={<PublicAccess />} />
+          <Route path="/" element={!isAuthenticated ? <PublicAccess /> : <Navigate to="/app/dashboard" />} />
           <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to="/app/dashboard" />} />
           <Route path="/forgot-password" element={!isAuthenticated ? <ForgotPassword /> : <Navigate to="/" />} />
           <Route path="/reset-password" element={!isAuthenticated ? <ResetPassword /> : <Navigate to="/" />} />
