@@ -105,19 +105,16 @@ const PROCESS_STATUS_FULL_LABELS: Record<string, string> = {
   PENDING_TRIAL: 'Pendiente de prueba',
   TRIAL_STARTED: 'En prueba',
   TRIAL_EXPIRED: 'Prueba finalizada',
-  PAID: 'Ya ha pagado',
-  NOT_CONTINUED: 'No siguió',
+  PAID: 'Pagado',
+  NOT_CONTINUED: 'No continúa',
   BLOCKED: 'Bloqueado'
 }
 
 const PROCESS_STATUS_OPTIONS = [
-  { value: 'REQUEST_RECEIVED', label: 'Solicitud recibida' },
-  { value: 'REGISTERED', label: 'Alta creada' },
   { value: 'TRIAL_STARTED', label: 'En prueba' },
   { value: 'TRIAL_EXPIRED', label: 'Prueba finalizada' },
-  { value: 'PAID', label: 'Ya ha pagado' },
-  { value: 'NOT_CONTINUED', label: 'No siguió' },
-  { value: 'BLOCKED', label: 'Bloqueado' }
+  { value: 'PAID', label: 'Pagado' },
+  { value: 'NOT_CONTINUED', label: 'No continúa' }
 ]
 
 const getReplySelectOptions = (currentValue: string) => {
