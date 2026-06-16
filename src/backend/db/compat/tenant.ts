@@ -43,6 +43,7 @@ export const ensureLocalTenantSupport = async ({
       "id" TEXT NOT NULL PRIMARY KEY,
       "name" TEXT NOT NULL,
       "slug" TEXT NOT NULL,
+      "tenantCode" INTEGER NOT NULL DEFAULT 1,
       "status" TEXT NOT NULL DEFAULT 'ACTIVE',
       "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -67,6 +68,14 @@ export const ensureLocalTenantSupport = async ({
 
   await prisma.$executeRawUnsafe(
     'CREATE UNIQUE INDEX IF NOT EXISTS "tenants_slug_key" ON "tenants"("slug")'
+  )
+  await addColumnIfMissing(
+    'tenants',
+    'tenantCode',
+    'ALTER TABLE "tenants" ADD COLUMN "tenantCode" INTEGER NOT NULL DEFAULT 1'
+  )
+  await prisma.$executeRawUnsafe(
+    'CREATE UNIQUE INDEX IF NOT EXISTS "tenants_tenantCode_key" ON "tenants"("tenantCode")'
   )
   await prisma.$executeRawUnsafe(
     'CREATE UNIQUE INDEX IF NOT EXISTS "tenant_licenses_tenantId_key" ON "tenant_licenses"("tenantId")'
@@ -117,6 +126,10 @@ export const ensureLocalTenantSupport = async ({
 
     await addColumnIfMissing('users', 'phone', 'ALTER TABLE "users" ADD COLUMN "phone" TEXT')
 
+    await prisma.$executeRawUnsafe(
+      'CREATE UNIQUE INDEX IF NOT EXISTS "users_id_tenantId_key" ON "users"("id", "tenantId")'
+    )
+
     await prisma.$executeRawUnsafe(`
       UPDATE "users"
       SET "tenantId" = '${LOCAL_TENANT_ID}'
@@ -151,5 +164,34 @@ export const ensureLocalTenantSupport = async ({
   )
   await prisma.$executeRawUnsafe(
     'CREATE INDEX IF NOT EXISTS "password_reset_tokens_expiresAt_idx" ON "password_reset_tokens"("expiresAt")'
+  )
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "trial_requests" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "name" TEXT NOT NULL,
+      "email" TEXT NOT NULL,
+      "normalizedEmail" TEXT NOT NULL,
+      "phone" TEXT,
+      "normalizedPhone" TEXT,
+      "status" TEXT NOT NULL DEFAULT 'PENDING_REPLY',
+      "ownerEmailDeliveredAt" DATETIME,
+      "requesterEmailDeliveredAt" DATETIME,
+      "ownerEmailId" TEXT,
+      "requesterEmailId" TEXT,
+      "lastDeliveryError" TEXT,
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+
+  await prisma.$executeRawUnsafe(
+    'CREATE UNIQUE INDEX IF NOT EXISTS "trial_requests_normalizedEmail_key" ON "trial_requests"("normalizedEmail")'
+  )
+  await prisma.$executeRawUnsafe(
+    'CREATE UNIQUE INDEX IF NOT EXISTS "trial_requests_normalizedPhone_key" ON "trial_requests"("normalizedPhone")'
+  )
+  await prisma.$executeRawUnsafe(
+    'CREATE INDEX IF NOT EXISTS "trial_requests_status_createdAt_idx" ON "trial_requests"("status", "createdAt")'
   )
 }

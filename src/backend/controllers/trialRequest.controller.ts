@@ -48,7 +48,7 @@ export const createTrialRequest = async (req: Request, res: Response) => {
       copiedToRequester: result.copiedToRequester
     })
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+    if (isPrismaUniqueConstraintError(error)) {
       const target = Array.isArray(error.meta?.target) ? error.meta.target.join(', ') : String(error.meta?.target || '')
       const field = target.includes('normalizedPhone') ? 'teléfono' : 'correo'
 
@@ -71,3 +71,8 @@ export const createTrialRequest = async (req: Request, res: Response) => {
     res.status(502).json({ error: 'No se pudo enviar la solicitud' })
   }
 }
+
+const isPrismaUniqueConstraintError = (
+  error: unknown
+): error is Prisma.PrismaClientKnownRequestError =>
+  Boolean(error && typeof error === 'object' && 'code' in error && (error as { code?: string }).code === 'P2002')
