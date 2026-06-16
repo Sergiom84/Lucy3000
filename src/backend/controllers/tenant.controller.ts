@@ -54,6 +54,7 @@ const serializeTenant = (tenant: any) => {
           status: licenseAccess?.status ?? tenant.license.status,
           reason: licenseAccess?.reason ?? 'inactive',
           plan: tenant.license.plan,
+          trialStartedAt: tenant.license.trialStartedAt,
           trialEndsAt: tenant.license.trialEndsAt,
           activatedAt: tenant.license.activatedAt,
           blockedAt: tenant.license.blockedAt,
@@ -90,6 +91,7 @@ export const getCurrentTenantLicense = async (req: AuthRequest, res: Response) =
         status: license.status,
         reason: license.reason,
         plan: tenant.license.plan,
+        trialStartedAt: tenant.license.trialStartedAt,
         trialEndsAt: license.trialEndsAt,
         activatedAt: tenant.license.activatedAt,
         blockedAt: tenant.license.blockedAt,
@@ -133,6 +135,7 @@ export const startCurrentTenantTrial = async (req: AuthRequest, res: Response) =
       data: {
         status: 'TRIAL',
         plan: 'trial',
+        trialStartedAt: now,
         trialEndsAt,
         blockedAt: null,
         cancelledAt: null
@@ -143,7 +146,8 @@ export const startCurrentTenantTrial = async (req: AuthRequest, res: Response) =
     res.json({
       status: updatedAccess.status,
       reason: updatedAccess.reason,
-      trialEndsAt: updated.trialEndsAt
+      trialEndsAt: updated.trialEndsAt,
+      trialStartedAt: updated.trialStartedAt
     })
   } catch (error) {
     console.error('Start tenant trial error:', error)
@@ -242,6 +246,7 @@ export const updateTenantLicense = async (req: AuthRequest, res: Response) => {
         status: status || 'TRIAL',
         plan: plan || 'trial',
         trialEndsAt: trialEndsAt ? new Date(trialEndsAt) : getTrialEndDate(),
+        trialStartedAt: status === 'TRIAL' ? new Date() : null,
         blockedAt: blockedAt === undefined || blockedAt === null ? null : new Date(blockedAt),
         cancelledAt: cancelledAt === undefined || cancelledAt === null ? null : new Date(cancelledAt),
         activatedAt: status === 'ACTIVE' ? new Date() : null,
@@ -258,6 +263,7 @@ export const updateTenantLicense = async (req: AuthRequest, res: Response) => {
         ...(status === 'TRIAL'
           ? {
               trialEndsAt: trialEndsAt ? new Date(trialEndsAt) : getTrialEndDate(),
+              trialStartedAt: new Date(),
               blockedAt: null,
               cancelledAt: null
             }

@@ -21,6 +21,8 @@ model Tenant {
   slug       String   @unique
   tenantCode Int      @unique @default(dbgenerated("nextval('tenant_code_seq'::regclass)"))
   status     String   @default("ACTIVE")
+  commercialReplyStatus   String @default("EMAIL_RECEIVED")
+  commercialProcessStatus String @default("PENDING_TRIAL")
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
@@ -61,6 +63,7 @@ model TenantLicense {
   tenantId    String   @unique
   status      String   @default("TRIAL")
   plan        String   @default("trial")
+  trialStartedAt DateTime?
   trialEndsAt DateTime
   activatedAt DateTime?
   blockedAt   DateTime?
@@ -133,6 +136,8 @@ model TrialRequest {
   phone                      String?
   normalizedPhone            String?   @unique
   status                     String    @default("PENDING_REPLY")
+  replyStatus                String    @default("PENDING_REPLY")
+  commercialProcessStatus    String    @default("REQUEST_RECEIVED")
   ownerEmailDeliveredAt      DateTime?
   requesterEmailDeliveredAt  DateTime?
   ownerEmailId               String?

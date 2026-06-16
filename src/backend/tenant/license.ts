@@ -3,6 +3,7 @@ const ACTIVE_LICENSE_STATUSES = new Set(['ACTIVE', 'TRIAL'])
 export type TenantLicenseSnapshot = {
   status: string
   plan: string
+  trialStartedAt?: Date | null
   trialEndsAt: Date
   blockedAt?: Date | null
   cancelledAt?: Date | null

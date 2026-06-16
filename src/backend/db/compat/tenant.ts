@@ -45,6 +45,8 @@ export const ensureLocalTenantSupport = async ({
       "slug" TEXT NOT NULL,
       "tenantCode" INTEGER NOT NULL DEFAULT 1,
       "status" TEXT NOT NULL DEFAULT 'ACTIVE',
+      "commercialReplyStatus" TEXT NOT NULL DEFAULT 'EMAIL_RECEIVED',
+      "commercialProcessStatus" TEXT NOT NULL DEFAULT 'PENDING_TRIAL',
       "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
@@ -56,6 +58,7 @@ export const ensureLocalTenantSupport = async ({
       "tenantId" TEXT NOT NULL,
       "status" TEXT NOT NULL DEFAULT 'ACTIVE',
       "plan" TEXT NOT NULL DEFAULT 'local',
+      "trialStartedAt" DATETIME,
       "trialEndsAt" DATETIME NOT NULL,
       "activatedAt" DATETIME,
       "blockedAt" DATETIME,
@@ -73,6 +76,21 @@ export const ensureLocalTenantSupport = async ({
     'tenants',
     'tenantCode',
     'ALTER TABLE "tenants" ADD COLUMN "tenantCode" INTEGER NOT NULL DEFAULT 1'
+  )
+  await addColumnIfMissing(
+    'tenants',
+    'commercialReplyStatus',
+    'ALTER TABLE "tenants" ADD COLUMN "commercialReplyStatus" TEXT NOT NULL DEFAULT \'EMAIL_RECEIVED\''
+  )
+  await addColumnIfMissing(
+    'tenants',
+    'commercialProcessStatus',
+    'ALTER TABLE "tenants" ADD COLUMN "commercialProcessStatus" TEXT NOT NULL DEFAULT \'PENDING_TRIAL\''
+  )
+  await addColumnIfMissing(
+    'tenant_licenses',
+    'trialStartedAt',
+    'ALTER TABLE "tenant_licenses" ADD COLUMN "trialStartedAt" DATETIME'
   )
   await prisma.$executeRawUnsafe(
     'CREATE UNIQUE INDEX IF NOT EXISTS "tenants_tenantCode_key" ON "tenants"("tenantCode")'
@@ -175,6 +193,8 @@ export const ensureLocalTenantSupport = async ({
       "phone" TEXT,
       "normalizedPhone" TEXT,
       "status" TEXT NOT NULL DEFAULT 'PENDING_REPLY',
+      "replyStatus" TEXT NOT NULL DEFAULT 'PENDING_REPLY',
+      "commercialProcessStatus" TEXT NOT NULL DEFAULT 'REQUEST_RECEIVED',
       "ownerEmailDeliveredAt" DATETIME,
       "requesterEmailDeliveredAt" DATETIME,
       "ownerEmailId" TEXT,
@@ -193,5 +213,15 @@ export const ensureLocalTenantSupport = async ({
   )
   await prisma.$executeRawUnsafe(
     'CREATE INDEX IF NOT EXISTS "trial_requests_status_createdAt_idx" ON "trial_requests"("status", "createdAt")'
+  )
+  await addColumnIfMissing(
+    'trial_requests',
+    'replyStatus',
+    'ALTER TABLE "trial_requests" ADD COLUMN "replyStatus" TEXT NOT NULL DEFAULT \'PENDING_REPLY\''
+  )
+  await addColumnIfMissing(
+    'trial_requests',
+    'commercialProcessStatus',
+    'ALTER TABLE "trial_requests" ADD COLUMN "commercialProcessStatus" TEXT NOT NULL DEFAULT \'REQUEST_RECEIVED\''
   )
 }
