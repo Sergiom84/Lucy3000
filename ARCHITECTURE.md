@@ -1,6 +1,6 @@
 # Arquitectura de Lucy3000
 
-Estado actualizado: 2026-05-31
+Estado actualizado: 2026-06-16
 
 ## Topologia oficial
 
@@ -101,6 +101,7 @@ Estructura actual:
 Rutas activas:
 - `/`
 - `/login`
+- `/dashboard` dashboard comercial de plataforma protegido por PIN
 - `/clients`
 - `/clients/:id`
 - `/appointments`
@@ -141,6 +142,8 @@ Estructura actual:
 
 Rutas montadas en `src/backend/app.ts`:
 - `/api/auth`
+- `/api/trial-requests`
+- `/api/platform-dashboard`
 - `/api/tenants`
 - `/api/users`
 - `/api/clients`
@@ -240,6 +243,8 @@ Estado actual de permisos:
 - `Tenant`
 - `TenantLicense`
 - `User`
+- `PasswordResetToken`
+- `TrialRequest`
 - `Client`
 - `ClientHistory`
 - `Service`
@@ -269,6 +274,47 @@ Estado actual de permisos:
 
 Los datos de negocio llevan `tenantId` obligatorio. Las unicidades que antes eran globales se han movido a unicidades compuestas por tenant cuando aplica.
 
+### Solicitudes de prueba y dashboard comercial
+
+El portal publico usa `POST /api/trial-requests` para registrar solicitudes de
+prueba. El modelo `TrialRequest` no pertenece a un tenant concreto todavia:
+representa leads previos al alta.
+
+Campos relevantes:
+- `name`, `email`, `phone`;
+- `normalizedEmail` unico;
+- `normalizedPhone` unico cuando existe;
+- `status`, por defecto `PENDING_REPLY`;
+- ids y timestamps de entrega de Resend para correo interno y confirmacion al solicitante.
+
+El dashboard comercial usa `POST /api/platform-dashboard` con
+`PLATFORM_DASHBOARD_PIN`. Devuelve una lista unificada de:
+- solicitudes web (`trial_requests`);
+- tenants reales y su licencia;
+- estados comerciales como `Correo recibido`, `Pendiente de mi contestacion`,
+  `Alta creada`, `En prueba` o `Ya ha pagado`.
+
+Este dashboard es una herramienta ligera de control comercial, no una barrera de
+seguridad fuerte. Para evolucionarlo conviene sustituir el PIN por
+autenticacion `platformAdmin`.
+
+### Correo transaccional
+
+Resend se usa desde backend para:
+- confirmacion de solicitud de prueba;
+- aviso interno de nueva solicitud;
+- recuperacion de contrasena.
+
+Variables de entorno:
+- `RESEND_API_KEY`;
+- `TRIAL_REQUEST_TO`;
+- `TRIAL_REQUEST_FROM`;
+- `PASSWORD_RESET_FROM`;
+- `PASSWORD_RESET_BASE_URL`.
+
+El remitente actual en produccion es `Lucy3000 <Info@sohl.dev>`. El dominio
+`sohl.dev` esta verificado en Resend mediante DNS autoritativo en Cloudflare.
+
 ### Migraciones Prisma
 
 Las migraciones PostgreSQL versionadas viven en `prisma/migrations/*`.
@@ -286,6 +332,11 @@ Las migraciones SQLite anteriores se han movido a `prisma/migrations_sqlite_lega
 
 La compatibilidad SQLite queda como soporte legacy y no debe seguir creciendo salvo decision explicita.
 
+Excepcion vigente: el modo local SQLite conserva compatibilidad para probar
+`tenantCode`, `password_reset_tokens` y `trial_requests` en desarrollo. Estos
+guards viven en `src/backend/db/compat/tenant.ts` y no cambian el modelo
+productivo PostgreSQL.
+
 ## Modulos de negocio actuales
 
 Los modulos reales que la documentacion debe reflejar son:
@@ -300,6 +351,7 @@ Los modulos reales que la documentacion debe reflejar son:
 - caja y arqueos;
 - bonos, packs, sesiones y saldo a cuenta;
 - dashboard y recordatorios;
+- portal publico, solicitudes de prueba y dashboard comercial de plataforma;
 - ranking y reportes;
 - presupuestos;
 - Google Calendar;

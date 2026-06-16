@@ -13,13 +13,16 @@ La guia detallada vive en `AGENTS.md`.
 4. `ARCHITECTURE.md`
 5. `AGENTS.md`
 
-## Distribucion vigente (2026-05-31)
+## Distribucion vigente (2026-06-16)
 
 - Modelo elegido: API central + PostgreSQL/Supabase compartido multi-tenant. No se usara un proyecto Supabase por cliente.
 - Cliente: web/PWA como canal recomendado; Electron queda como wrapper opcional, pero no debe guardar `DATABASE_URL` compartida en el PC del cliente.
 - Trial controlado en `tenant_licenses` con hora de servidor; bootstrap nace `PENDING`, el cliente arranca con `start-trial`, gracia de 9 dias.
-- Render ya no debe tratarse como canal dormido: es el camino natural para API central + front estatico cuando se configuren secretos y dominio.
+- Render esta operativo para API central + front estatico:
+  `https://lucy3000-2hnv.onrender.com` y `https://lucy3000-web.onrender.com`.
 - El `ID cliente` visible en login/dashboard ya existe como alias publico del tenant (`tenantCode`). No sustituye a `tenantId`.
+- El portal publico `/` permite solicitar prueba y el dashboard comercial vive en `/dashboard`.
+- Las solicitudes se guardan en `trial_requests`, evitan duplicados por email/telefono normalizados y envian correos por Resend desde `Lucy3000 <Info@sohl.dev>`.
 
 ## Resumen operativo
 
@@ -31,6 +34,9 @@ La guia detallada vive en `AGENTS.md`.
 - Bootstrap inicial:
   - `GET /api/auth/bootstrap-status`
   - `POST /api/auth/bootstrap-admin`
+- Solicitudes y dashboard comercial:
+  - `POST /api/trial-requests`
+  - `POST /api/platform-dashboard`
 - Licencia tenant:
   - `GET /api/tenants/current/license`
 - Estructura vigente:
@@ -55,5 +61,5 @@ La guia detallada vive en `AGENTS.md`.
 - Todo dato de negocio nuevo debe tener `tenantId`.
 - Toda licencia/trial se decide en servidor.
 - No entregar `DATABASE_URL` ni secretos de Supabase dentro de Electron/ASAR/instalador.
-- Antes de meter un segundo cliente real en la base compartida: desplegar API central, aplicar migraciones, probar modo API remota para Electron y revisar RLS/aislamiento.
+- Antes de meter un segundo cliente real en la base compartida: revisar aislamiento real por tenant, backups/monitorizacion, modo API remota para Electron y RLS/defensa en profundidad.
 - Usa `AGENTS.md` para convenciones de backend, frontend, migraciones, testing y riesgos activos.

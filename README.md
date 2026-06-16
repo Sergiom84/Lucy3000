@@ -12,6 +12,9 @@ Lucy3000 es una app de gestion de estetica orientada a SaaS multi-equipo: una AP
 - Decision vigente: una base Supabase/PostgreSQL compartida, no un proyecto Supabase por cliente.
 - El cliente final no debe recibir la `DATABASE_URL` compartida. Web/PWA o Electron deben hablar con la API central.
 - El login usa `ID cliente` visible como alias publico del tenant (`tenantCode`). Internamente se mantiene `tenantId`.
+- El canal publico de pruebas esta operativo en `https://lucy3000-web.onrender.com/`.
+- El dashboard comercial publico esta operativo en `https://lucy3000-web.onrender.com/dashboard` con PIN de plataforma.
+- Las solicitudes de prueba se guardan en PostgreSQL/Supabase en `trial_requests` y se notifican por Resend desde dominio verificado.
 - La antigua ruta SQLite queda como legado de importacion, restore o soporte puntual.
 
 ## Estado de la refactorizacion
@@ -33,6 +36,8 @@ Lucy3000 es una app de gestion de estetica orientada a SaaS multi-equipo: una AP
 - Bonos, packs, sesiones y saldo a cuenta.
 - Usuarios, cuentas internas, roles y tenant asociado.
 - Licencia por centro con prueba de 10 dias, bloqueo y estados de suscripcion.
+- Portal publico para solicitar prueba, con correo de confirmacion al solicitante y aviso interno a Sergio.
+- Dashboard comercial de plataforma para revisar solicitudes, correos recibidos, pendientes de contestacion, altas, pruebas y pagos.
 - Reportes y presupuestos.
 - Integracion opcional con Google Calendar aislada por tenant.
 - Asistente admin para analizar e importar un `01dat.sql` o `01dat.sqlx` legacy, siempre que el contenido sea SQL plano.
@@ -52,6 +57,36 @@ Lucy3000 es una app de gestion de estetica orientada a SaaS multi-equipo: una AP
 - Consola local de Sergio para control comercial y supervision:
   - `npm run admin:dashboard`
   - `tools/lucy-admin-dashboard/`
+- Dashboard web de plataforma:
+  - `GET /dashboard` en el front web.
+  - `POST /api/platform-dashboard` en la API.
+  - Protegido por `PLATFORM_DASHBOARD_PIN` (`0852` solo como fallback/desarrollo).
+
+### Portal publico y solicitudes de prueba
+
+El front publico (`/`) permite abrir el formulario **Solicitar informacion**.
+El formulario envia `nombre`, `email` y `telefono` a:
+
+- `POST /api/trial-requests`
+
+La API:
+- valida el payload con Zod;
+- normaliza correo y telefono;
+- bloquea duplicados con `409` por `normalizedEmail` o `normalizedPhone`;
+- guarda la solicitud en `trial_requests`;
+- envia dos correos mediante Resend:
+  - aviso interno a `TRIAL_REQUEST_TO`;
+  - confirmacion al correo del solicitante;
+- guarda ids de Resend y marcas `ownerEmailDeliveredAt` / `requesterEmailDeliveredAt`.
+
+El dominio de envio actual esta verificado en Resend y usa:
+
+- `TRIAL_REQUEST_FROM=Lucy3000 <Info@sohl.dev>`
+- `PASSWORD_RESET_FROM=Lucy3000 <Info@sohl.dev>`
+
+DNS importante: `sohl.dev` usa Cloudflare como zona autoritativa. Los registros
+Resend (DKIM `resend._domainkey`, SPF/MX en `send`) viven en Cloudflare, no en
+Render. Render solo aloja API/front y guarda variables de entorno.
 
 Roles observados en codigo:
 - `ADMIN`
@@ -164,6 +199,12 @@ Se ejecutan directamente desde `scripts/`:
 ### Opcionales
 
 - `VITE_API_URL`
+- `RESEND_API_KEY`
+- `TRIAL_REQUEST_TO`
+- `TRIAL_REQUEST_FROM`
+- `PASSWORD_RESET_FROM`
+- `PASSWORD_RESET_BASE_URL`
+- `PLATFORM_DASHBOARD_PIN`
 - `GOOGLE_CALENDAR_CLIENT_ID`
 - `GOOGLE_CALENDAR_CLIENT_SECRET`
 - `GOOGLE_CALENDAR_REDIRECT_URI`

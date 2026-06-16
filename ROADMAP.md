@@ -1,6 +1,6 @@
 # Roadmap Lucy3000
 
-Estado actualizado: 2026-05-31
+Estado actualizado: 2026-06-16
 
 ## Objetivo actual
 
@@ -29,6 +29,16 @@ La base tecnica ya refleja el giro multi-tenant:
 - Google Calendar guarda estado OAuth con `tenantId`;
 - el login del renderer acepta centro opcional y muestra el bloqueo de licencia;
 - `build:prepare-db` ya no prepara SQLite empaquetada por defecto.
+- Canal Render operativo:
+  - API: `https://lucy3000-2hnv.onrender.com`;
+  - Web/PWA: `https://lucy3000-web.onrender.com`;
+  - dashboard comercial: `/dashboard`;
+  - portal publico de solicitud de prueba: `/`.
+- Solicitudes de prueba operativas:
+  - tabla `trial_requests`;
+  - bloqueo de duplicados por correo o telefono normalizados;
+  - correos Resend desde `Lucy3000 <Info@sohl.dev>`;
+  - confirmacion al solicitante y aviso interno entregados.
 - El ultimo cambio de seguridad separo admin de tenant y admin de plataforma:
   el bootstrap crea `ADMIN` con `isPlatformAdmin=false`.
 - Se redujo carga pesada en ventas/caja: usan catalogo ligero de clientas bajo demanda
@@ -45,14 +55,16 @@ La refactorizacion incremental previa sigue vigente:
 ## Prioridad alta
 
 - Antes de dar de alta el segundo cliente real en la base compartida:
-  desplegar la API central, aplicar migraciones, probar `ID cliente` en login y
-  comprobar Electron en modo API remota.
+  revisar aislamiento operativo con datos reales, comprobar Electron en modo API
+  remota si se va a distribuir escritorio y cerrar flujo de usuario
+  `platformAdmin`.
 - Definir un flujo seguro para crear/gestionar `platformAdmin` sin que el primer
   admin de cliente sea admin de plataforma.
 - Probar migracion/importacion real desde instalaciones SQLite antiguas hacia PostgreSQL tenant-aware.
 - Endurecer permisos por rol en rutas de negocio, no solo autenticacion.
 - Evolucionar la consola local interna si hace falta ampliacion de trial, auditoria o facturacion.
-- Preparar despliegue central: API, base PostgreSQL, Storage/S3, logs, backups, monitorizacion y dominios.
+- Completar infraestructura SaaS alrededor del despliegue central ya operativo:
+  Storage/S3, logs, backups, monitorizacion, dominio propio y plan comercial.
 - Mover fotos/assets de clienta a Storage/S3 con claves por tenant.
 - Revisar todas las consultas pesadas para paginacion, indices por `tenantId`, fechas y busquedas frecuentes.
 - Validar aislamiento: un usuario de un centro nunca ve ni modifica datos de otro.

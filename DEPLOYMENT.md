@@ -1,6 +1,6 @@
 # Deployment y Distribucion
 
-Estado actualizado: 2026-05-31
+Estado actualizado: 2026-06-16
 
 ## Alcance
 
@@ -77,6 +77,12 @@ VITE_API_URL="https://api.tu-dominio.com"
 GOOGLE_CALENDAR_CLIENT_ID="..."
 GOOGLE_CALENDAR_CLIENT_SECRET="..."
 GOOGLE_CALENDAR_REDIRECT_URI="https://api.tu-dominio.com/api/calendar/callback"
+RESEND_API_KEY="..."
+TRIAL_REQUEST_TO="sergio@example.com"
+TRIAL_REQUEST_FROM="Lucy3000 <Info@sohl.dev>"
+PASSWORD_RESET_FROM="Lucy3000 <Info@sohl.dev>"
+PASSWORD_RESET_BASE_URL="https://lucy3000-web.onrender.com"
+PLATFORM_DASHBOARD_PIN="pin-operativo"
 ```
 
 El cliente nunca debe llevar secretos. `VITE_*` es publico por definicion.
@@ -127,6 +133,17 @@ proveedor aparte (Render/Railway/Fly/VPS) para la API.
 Todo va a Render: la API como Web Service Node y el front como Static Site. El
 repo incluye `render.yaml` (Blueprint) que define ambos.
 
+Estado operativo actual:
+- API: `lucy3000-api`, servicio `srv-d8dlmoojs32c73fmfee0`,
+  `https://lucy3000-2hnv.onrender.com`.
+- Front/PWA: `lucy3000-web`, servicio `srv-d8dlqkvavr4c73ft9kl0`,
+  `https://lucy3000-web.onrender.com`.
+- Portal publico de prueba: `https://lucy3000-web.onrender.com/`.
+- Dashboard comercial: `https://lucy3000-web.onrender.com/dashboard`.
+- La API aplica migraciones con `npx prisma migrate deploy` en
+  `preDeployCommand`; la migracion `20260615203000_add_trial_requests` ya esta
+  aplicada en Supabase/PostgreSQL.
+
 Pasos:
 1. En el dashboard de Render, crear/elegir el **workspace** (la API de Render no
    crea workspaces; es solo dashboard) y conectar el repo `Sergiom84/Lucy3000`.
@@ -146,6 +163,34 @@ Pasos:
 
 Region `frankfurt` (cercana a Espana). Plan `starter` para la API (always-on);
 el static site no tiene coste de computo.
+
+### Portal publico, dashboard y correo
+
+El front publico permite solicitar la prueba desde `/`. La peticion entra por
+`POST /api/trial-requests`, se valida con Zod, se normaliza email/telefono y se
+guarda en `trial_requests`. La API evita duplicados por `normalizedEmail` y
+`normalizedPhone`; si ya existe, responde `409` con un mensaje claro.
+
+El dashboard comercial carga con `POST /api/platform-dashboard` y `PIN`
+operativo (`PLATFORM_DASHBOARD_PIN`; fallback local/desarrollo `0852`). Muestra
+solicitudes de prueba, correo recibido/enviado, pendiente de contestacion,
+tenants, estado de licencia, prueba y pago.
+
+El correo transaccional usa Resend desde la API:
+- `TRIAL_REQUEST_FROM`: remitente visible, actualmente
+  `Lucy3000 <Info@sohl.dev>`.
+- `TRIAL_REQUEST_TO`: buzon interno que recibe las solicitudes.
+- `PASSWORD_RESET_FROM`: remitente de recuperacion de contrasena.
+- `PASSWORD_RESET_BASE_URL`: URL publica para el enlace de recuperacion.
+
+La verificacion de dominio de Resend se hace en DNS, no en Render. El dominio
+`sohl.dev` esta verificado con registros en Cloudflare; Render solo guarda las
+variables de entorno de la API. Si `RESEND_API_KEY` no existe, la solicitud se
+puede guardar, pero no saldra el correo.
+
+En local, si `.env.development` apunta a SQLite, las solicitudes se guardan en
+la base local y los duplicados son locales. Para probar contra produccion desde
+el front local, `VITE_API_URL` debe apuntar a la API de Render.
 
 ### Desplegar el front en Cloudflare Pages (alternativa)
 
@@ -243,6 +288,9 @@ Recomendaciones:
 ### SaaS
 
 - migraciones aplicadas en PostgreSQL;
+- `POST /api/trial-requests` probado con alta nueva y duplicado `409`;
+- `/dashboard` probado con PIN operativo;
+- envio Resend probado al buzon interno y al buzon del cliente;
 - backup y restore probados;
 - Storage configurado con rutas por tenant;
 - HTTPS y CORS correctos;

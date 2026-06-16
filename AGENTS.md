@@ -7,7 +7,7 @@ La topologia real actual es React/Vite + Express + Prisma + PostgreSQL multi-ten
 Supabase es una opcion de infraestructura para Postgres/Storage, no una autorizacion directa desde el frontend.
 SQLite queda como legado de migracion, importacion o soporte puntual.
 
-## Modelo de distribucion vigente (2026-05-31)
+## Modelo de distribucion vigente (2026-06-16)
 
 Decision actual de Sergio: **no habra un proyecto/cuenta Supabase por cliente**.
 El modelo pasa a ser una **API central** con **PostgreSQL/Supabase compartido**
@@ -23,11 +23,19 @@ seguridad. La barrera real sigue siendo: API central, JWT con `tenantId`,
 middleware tenant-aware, validaciones por tenant y, como segunda capa pendiente,
 RLS/policies en Supabase.
 
-Estado importante del codigo a 2026-05-31:
+Estado importante del codigo a 2026-06-16:
 - `Tenant.id` ya es el identificador interno real.
 - `Tenant.slug` ya existe y el login acepta `tenantSlug` opcional.
 - El `ID cliente` numerico ya existe como `Tenant.tenantCode`, se genera en
   Prisma/PostgreSQL, se acepta en login y se muestra en dashboard/consola.
+- El canal Render esta operativo: API `https://lucy3000-2hnv.onrender.com` y
+  front/PWA `https://lucy3000-web.onrender.com`.
+- El portal publico `/` permite solicitar prueba y el dashboard comercial vive
+  en `/dashboard`.
+- Las solicitudes se guardan en `trial_requests`, evitan duplicados por email y
+  telefono normalizados, y notifican por Resend al buzon interno y al cliente.
+- El remitente transaccional vigente es `Lucy3000 <Info@sohl.dev>`; el dominio
+  `sohl.dev` esta verificado en DNS/Cloudflare para Resend.
 - Electron compartido debe operar en modo API remota (`LUCY3000_API_URL` /
   `VITE_API_URL`), sin guardar `DATABASE_URL` de Supabase en el PC del cliente.
 
@@ -48,7 +56,10 @@ servidor (`getServerNow()` -> `SELECT NOW()`), no el reloj del PC.
     - El front PWA (public/manifest.webmanifest, public/sw.js, public/_redirects)
       y los scripts build:web / deploy:web siguen en el repo.
   Para usarlo: poner DATABASE_URL/JWT_SECRET/BOOTSTRAP_TOKEN en la API y
-  VITE_API_URL en el front. No poner DATABASE_URL en el cliente final.
+  VITE_API_URL en el front. Para correo y dashboard: RESEND_API_KEY,
+  TRIAL_REQUEST_FROM, TRIAL_REQUEST_TO, PASSWORD_RESET_FROM,
+  PASSWORD_RESET_BASE_URL y PLATFORM_DASHBOARD_PIN en lucy3000-api.
+  No poner DATABASE_URL en el cliente final.
 -->
 
 
@@ -156,6 +167,12 @@ Se ejecutan directamente desde PowerShell:
   - `GOOGLE_CALENDAR_CLIENT_ID`
   - `GOOGLE_CALENDAR_CLIENT_SECRET`
   - `GOOGLE_CALENDAR_REDIRECT_URI`
+  - `RESEND_API_KEY`
+  - `TRIAL_REQUEST_TO`
+  - `TRIAL_REQUEST_FROM`
+  - `PASSWORD_RESET_FROM`
+  - `PASSWORD_RESET_BASE_URL`
+  - `PLATFORM_DASHBOARD_PIN`
   - `WHATSAPP_*`
   - `SUPABASE_*` para infra, soporte historico o recuperacion
 
@@ -173,6 +190,10 @@ vive solo en la API central.
   - acepta `tenantSlug` opcional; el `ID cliente` numerico es el siguiente cambio decidido.
 - Licencia del tenant actual:
   - `GET /api/tenants/current/license`
+- Solicitudes publicas de prueba:
+  - `POST /api/trial-requests`
+- Dashboard comercial interno:
+  - `POST /api/platform-dashboard`
 - Administracion interna de tenants (solo plataforma o herramienta interna):
   - `GET /api/tenants`
   - `POST /api/tenants`
@@ -226,6 +247,9 @@ Estado actual de seguridad:
   - `GET /api/auth/bootstrap-status`
   - `POST /api/auth/bootstrap-admin`
   - `GET /api/calendar/callback`
+  - `POST /api/trial-requests`
+- Operativo interno con PIN:
+  - `POST /api/platform-dashboard`
 - Solo plataforma/admin segun ruta:
   - `POST /api/auth/register`
   - `/api/users/*`
@@ -281,6 +305,9 @@ Estado actual de seguridad:
   3. `npm run prisma:migrate`;
   4. comprobar carpeta nueva en `prisma/migrations`.
 - SQLite legacy vive en `prisma/migrations_sqlite_legacy/*` y `src/backend/db/compat/*`.
+- La compatibilidad local actual crea bajo demanda `tenantCode`,
+  `password_reset_tokens` y `trial_requests` para que el portal y dashboard
+  puedan probarse en desarrollo con SQLite sin romper el arranque.
 - No seguir creciendo compatibility migrations SQLite salvo decision explicita.
 
 ## Backup, restore y recuperacion
@@ -303,8 +330,9 @@ Estado actual de seguridad:
 ## Riesgos y deuda activa
 
 - Endurecimiento de permisos por rol todavia incompleto.
-- Antes de aniadir el segundo cliente real: desplegar la API central, aplicar
-  migraciones, configurar Render/Supabase y probar login con `ID cliente`.
+- Antes de aniadir el segundo cliente real: revisar aislamiento real por tenant,
+  preparar usuario `platformAdmin`, probar login con `ID cliente` y asegurar
+  backups/monitorizacion del canal Render/Supabase.
 - Hace falta un flujo claro para usuario `platformAdmin`; el bootstrap crea admin
   de tenant (`isPlatformAdmin=false`) y no debe convertir al cliente en admin de
   plataforma.
