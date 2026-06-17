@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs'
 import { prisma } from '../db'
 import type { AuthRequest } from '../middleware/auth.middleware'
 import { getProfessionalCatalog, saveProfessionalCatalog } from '../utils/professional-catalog'
+import { normalizeUser, normalizeUsers } from '../utils/user-normalizer'
 
 const normalizeEmail = (value: unknown) => String(value || '').trim().toLowerCase()
 const normalizeUsername = (value: unknown) => {
@@ -29,7 +30,7 @@ export const getUsers = async (_req: Request, res: Response) => {
       orderBy: [{ role: 'asc' }, { createdAt: 'desc' }]
     })
 
-    res.json(users)
+    res.json(normalizeUsers(users))
   } catch (error) {
     console.error('Get users error:', error)
     res.status(500).json({ error: 'Internal server error' })
@@ -50,9 +51,10 @@ export const getAccountSettings = async (req: AuthRequest, res: Response) => {
     }
 
     const professionalNames = await getProfessionalCatalog()
+    const normalizedUserData = normalizeUser(user)
 
     res.json({
-      ...user,
+      ...normalizedUserData,
       professionalNames
     })
   } catch (error) {
@@ -92,12 +94,12 @@ export const createUser = async (req: AuthRequest, res: Response) => {
         password: await bcrypt.hash(password, 10),
         name: String(name).trim(),
         role,
-        permissions: permissions ?? {}
+        permissions: JSON.stringify(permissions ?? {})
       },
       select: userSelect
     })
 
-    res.status(201).json(user)
+    res.status(201).json(normalizeUser(user))
   } catch (error) {
     console.error('Create user error:', error)
     res.status(500).json({ error: 'Internal server error' })
@@ -180,9 +182,10 @@ export const updateAccountSettings = async (req: AuthRequest, res: Response) => 
 
     const nextProfessionalNames =
       professionalNames !== undefined ? await saveProfessionalCatalog(professionalNames) : await getProfessionalCatalog()
+    const normalizedUserData = normalizeUser(user)
 
     res.json({
-      ...user,
+      ...normalizedUserData,
       professionalNames: nextProfessionalNames
     })
   } catch (error) {
@@ -213,12 +216,12 @@ export const updateUserPermissions = async (req: AuthRequest, res: Response) => 
       where: { id },
       data: {
         role,
-        permissions: permissions ?? {}
+        permissions: JSON.stringify(permissions ?? {})
       },
       select: userSelect
     })
 
-    res.json(user)
+    res.json(normalizeUser(user))
   } catch (error) {
     console.error('Update user permissions error:', error)
     res.status(500).json({ error: 'Internal server error' })
@@ -249,7 +252,7 @@ export const updateUserStatus = async (req: AuthRequest, res: Response) => {
       select: userSelect
     })
 
-    res.json(user)
+    res.json(normalizeUser(user))
   } catch (error) {
     console.error('Update user status error:', error)
     res.status(500).json({ error: 'Internal server error' })

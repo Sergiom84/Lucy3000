@@ -77,8 +77,8 @@ export default function Sidebar({ className, onNavigate }: SidebarProps = {}) {
     if (item.adminOnly) return isAdmin
     if (isAdmin) return true
     const allowed = permissions?.sections
-    if (!allowed) return true
-    if (!item.sectionKey) return true
+    if (!allowed || allowed.length === 0) return false
+    if (!item.sectionKey) return false
     return allowed.includes(item.sectionKey)
   })
 

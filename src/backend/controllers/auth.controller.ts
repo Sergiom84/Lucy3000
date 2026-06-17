@@ -7,6 +7,7 @@ import { AuthRequest } from '../middleware/auth.middleware'
 import { getPasswordResetBaseUrl, sendPasswordResetEmail } from '../services/passwordResetEmail.service'
 import { evaluateTenantLicense, getTrialEndDate } from '../tenant/license'
 import { getJwtSecret } from '../utils/jwt'
+import { parseUserPermissions } from '../utils/user-normalizer'
 
 const USER_ROLES: string[] = ['ADMIN', 'EMPLOYEE']
 
@@ -106,7 +107,7 @@ const buildAuthResponse = (user: {
           }
         : null,
       isPlatformAdmin: Boolean(user.isPlatformAdmin),
-      permissions: user.permissions ?? null
+      permissions: parseUserPermissions(user.permissions)
     }
   }
 }
