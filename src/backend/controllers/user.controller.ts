@@ -17,6 +17,7 @@ const userSelect = {
   name: true,
   role: true,
   isActive: true,
+  permissions: true,
   createdAt: true,
   updatedAt: true
 } as const
@@ -62,7 +63,7 @@ export const getAccountSettings = async (req: AuthRequest, res: Response) => {
 
 export const createUser = async (req: AuthRequest, res: Response) => {
   try {
-    const { email, username, password, name, role } = req.body
+    const { email, username, password, name, role, permissions } = req.body
     const normalizedEmail = normalizeEmail(email)
     const normalizedUsername = normalizeUsername(username)
 
@@ -90,7 +91,8 @@ export const createUser = async (req: AuthRequest, res: Response) => {
         username: normalizedUsername,
         password: await bcrypt.hash(password, 10),
         name: String(name).trim(),
-        role
+        role,
+        permissions: permissions ?? {}
       },
       select: userSelect
     })
@@ -185,6 +187,40 @@ export const updateAccountSettings = async (req: AuthRequest, res: Response) => 
     })
   } catch (error) {
     console.error('Update account settings error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const updateUserPermissions = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params
+    const { role, permissions } = req.body
+
+    if (req.user?.id === id) {
+      return res.status(400).json({ error: 'You cannot modify your own permissions' })
+    }
+
+    const existingUser = await prisma.user.findUnique({
+      where: { id },
+      select: { id: true }
+    })
+
+    if (!existingUser) {
+      return res.status(404).json({ error: 'User not found' })
+    }
+
+    const user = await prisma.user.update({
+      where: { id },
+      data: {
+        role,
+        permissions: permissions ?? {}
+      },
+      select: userSelect
+    })
+
+    res.json(user)
+  } catch (error) {
+    console.error('Update user permissions error:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 }

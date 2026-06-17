@@ -1,6 +1,16 @@
 import { z } from 'zod'
 
-const userRoleSchema = z.enum(['ADMIN', 'MANAGER', 'EMPLOYEE'])
+const userRoleSchema = z.enum(['ADMIN', 'EMPLOYEE'])
+
+const userPermissionsSchema = z.object({
+  sections: z.array(z.string().max(50)).max(20).optional(),
+  cash: z
+    .object({
+      showPaymentsByMethod: z.boolean().optional(),
+      showCurrentBalance: z.boolean().optional()
+    })
+    .optional()
+})
 
 export const userIdParamSchema = z.object({
   id: z.string().trim().min(1, 'Id is required').max(191, 'Invalid id format')
@@ -17,13 +27,21 @@ export const createUserBodySchema = z
       .optional(),
     password: z.string().min(8, 'Password must be at least 8 characters'),
     name: z.string().trim().min(2, 'Name is required').max(120, 'Name is too long'),
-    role: userRoleSchema
+    role: userRoleSchema,
+    permissions: userPermissionsSchema.optional()
   })
   .strict()
 
 export const updateUserStatusBodySchema = z
   .object({
     isActive: z.boolean()
+  })
+  .strict()
+
+export const updateUserPermissionsBodySchema = z
+  .object({
+    role: userRoleSchema,
+    permissions: userPermissionsSchema.optional()
   })
   .strict()
 

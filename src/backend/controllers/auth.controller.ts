@@ -8,7 +8,7 @@ import { getPasswordResetBaseUrl, sendPasswordResetEmail } from '../services/pas
 import { evaluateTenantLicense, getTrialEndDate } from '../tenant/license'
 import { getJwtSecret } from '../utils/jwt'
 
-const USER_ROLES: string[] = ['ADMIN', 'MANAGER', 'EMPLOYEE']
+const USER_ROLES: string[] = ['ADMIN', 'EMPLOYEE']
 
 const normalizeEmail = (value: unknown) => String(value || '').trim().toLowerCase()
 const normalizeUsername = (value: unknown) => {
@@ -51,6 +51,7 @@ const buildAuthResponse = (user: {
   role: string
   tenantId: string
   isPlatformAdmin?: boolean
+  permissions?: unknown
   tenant?: {
     id: string
     name: string
@@ -104,7 +105,8 @@ const buildAuthResponse = (user: {
             trialEndsAt: license.trialEndsAt
           }
         : null,
-      isPlatformAdmin: Boolean(user.isPlatformAdmin)
+      isPlatformAdmin: Boolean(user.isPlatformAdmin),
+      permissions: user.permissions ?? null
     }
   }
 }
@@ -462,6 +464,7 @@ export const getCurrentUser = async (req: AuthRequest, res: Response) => {
         tenantId: true,
         isPlatformAdmin: true,
         isActive: true,
+        permissions: true,
         createdAt: true,
         tenant: {
           select: {

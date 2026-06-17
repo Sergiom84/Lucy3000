@@ -33,6 +33,8 @@ import CashRankingFiltersSection from './components/CashRankingFiltersSection'
 import CashSummarySection from './components/CashSummarySection'
 import PrivateCashModal from './components/PrivateCashModal'
 import { useCashPageData } from './useCashPageData'
+import { useAuthStore } from '../../stores/authStore'
+import type { UserPermissions } from '../../stores/authStore'
 import type {
   CashClientOption,
   CashFilters,
@@ -141,6 +143,11 @@ const findOptionLabel = <T,>(
 }
 
 export default function Cash() {
+  const { user } = useAuthStore()
+  const cashPerms = (user?.permissions as UserPermissions | null | undefined)?.cash
+  const showPaymentsByMethod = cashPerms?.showPaymentsByMethod !== false
+  const showCurrentBalance = cashPerms?.showCurrentBalance !== false
+
   const [period, setPeriod] = useState<Period>('DAY')
   const [cashOverviewDateRange, setCashOverviewDateRange] = useState<CashOverviewDateRange>(() =>
     buildCashDateRange('DAY', new Date())
@@ -965,6 +972,8 @@ export default function Cash() {
         paymentMethods={commercialPaymentMethods}
         paymentsByMethod={paymentsByMethod}
         workPerformedAmount={workPerformedAmount}
+        showPaymentsByMethod={showPaymentsByMethod}
+        showCurrentBalance={showCurrentBalance}
       />
 
       <CashMovementsSection

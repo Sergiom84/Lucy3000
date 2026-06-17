@@ -19,6 +19,8 @@ type CashSummarySectionProps = {
   paymentMethods: readonly CommercialPaymentMethod[]
   paymentsByMethod: Record<string, number>
   workPerformedAmount: number
+  showPaymentsByMethod?: boolean
+  showCurrentBalance?: boolean
 }
 
 type CashMetricCardProps = {
@@ -51,7 +53,9 @@ export default function CashSummarySection({
   openingWithInheritedSaving,
   paymentMethods,
   paymentsByMethod,
-  workPerformedAmount
+  workPerformedAmount,
+  showPaymentsByMethod = true,
+  showCurrentBalance = true
 }: CashSummarySectionProps) {
   return (
     <>
@@ -110,7 +114,7 @@ export default function CashSummarySection({
         </div>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-6">
         <div className="card">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm text-gray-600 dark:text-gray-400">Saldo inicial</span>
@@ -131,29 +135,33 @@ export default function CashSummarySection({
           </p>
         </div>
 
-        <div className="card">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-gray-600 dark:text-gray-400">Pagos por método</span>
+        {showPaymentsByMethod && (
+          <div className="card">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-gray-600 dark:text-gray-400">Pagos por método</span>
+            </div>
+            <div className="space-y-1 text-sm">
+              {paymentMethods.map((method) => (
+                <div key={method} className="flex items-center justify-between">
+                  <span className="text-gray-600 dark:text-gray-400">{paymentMethodLabel(method)}</span>
+                  <strong>{formatCurrency(Number(paymentsByMethod[method] || 0))}</strong>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="space-y-1 text-sm">
-            {paymentMethods.map((method) => (
-              <div key={method} className="flex items-center justify-between">
-                <span className="text-gray-600 dark:text-gray-400">{paymentMethodLabel(method)}</span>
-                <strong>{formatCurrency(Number(paymentsByMethod[method] || 0))}</strong>
-              </div>
-            ))}
-          </div>
-        </div>
+        )}
 
         <CashMetricCard amount={incomeAmount} title="Cobrado real" />
         <CashMetricCard amount={workPerformedAmount} title="Trabajo realizado" />
 
-        <div className="card bg-gradient-to-br from-blue-600 to-blue-700 text-white">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm opacity-90">Saldo actual</span>
+        {showCurrentBalance && (
+          <div className="card bg-gradient-to-br from-blue-600 to-blue-700 text-white">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm opacity-90">Saldo actual</span>
+            </div>
+            <p className="text-2xl font-bold">{formatCurrency(Number(currentCashBalance || 0))}</p>
           </div>
-          <p className="text-2xl font-bold">{formatCurrency(Number(currentCashBalance || 0))}</p>
-        </div>
+        )}
       </div>
     </>
   )
