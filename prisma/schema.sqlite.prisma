@@ -94,6 +94,7 @@ model User {
   role          String   @default("EMPLOYEE")
   isPlatformAdmin Boolean @default(false)
   isActive      Boolean  @default(true)
+  permissions   String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
