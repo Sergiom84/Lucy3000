@@ -4,6 +4,7 @@ import {
   getAccountSettings,
   getUsers,
   updateAccountSettings,
+  updateUserPermissions,
   updateUserStatus
 } from '../controllers/user.controller'
 import { adminMiddleware, authMiddleware } from '../middleware/auth.middleware'
@@ -11,6 +12,7 @@ import { validateRequest } from '../middleware/validation.middleware'
 import {
   createUserBodySchema,
   updateAccountSettingsBodySchema,
+  updateUserPermissionsBodySchema,
   updateUserStatusBodySchema,
   userIdParamSchema
 } from '../validators/user.schemas'
@@ -27,6 +29,11 @@ router.patch(
   '/:id/account-settings',
   validateRequest({ params: userIdParamSchema, body: updateAccountSettingsBodySchema }),
   updateAccountSettings
+)
+router.patch(
+  '/:id/permissions',
+  validateRequest({ params: userIdParamSchema, body: updateUserPermissionsBodySchema }),
+  updateUserPermissions
 )
 router.patch(
   '/:id/status',

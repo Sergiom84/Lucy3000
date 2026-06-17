@@ -1,6 +1,14 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+export interface UserPermissions {
+  sections?: string[]
+  cash?: {
+    showPaymentsByMethod?: boolean
+    showCurrentBalance?: boolean
+  }
+}
+
 interface User {
   id: string
   email: string
@@ -8,6 +16,7 @@ interface User {
   name: string
   role: string
   tenantId?: string
+  permissions?: UserPermissions | null
   tenant?: {
     id: string
     name: string
@@ -81,4 +90,3 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 )
-

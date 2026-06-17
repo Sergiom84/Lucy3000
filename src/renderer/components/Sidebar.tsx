@@ -18,26 +18,28 @@ import {
 import { cn } from '../utils/cn'
 import { getAppVersion } from '../utils/desktop'
 import { useAuthStore } from '../stores/authStore'
+import type { UserPermissions } from '../stores/authStore'
 
 type NavItem = {
   name: string
   href: string
   icon: typeof LayoutDashboard
   adminOnly?: boolean
+  sectionKey?: string
 }
 
 export const navigation: NavItem[] = [
-  { name: 'Dashboard', href: '/app/dashboard', icon: LayoutDashboard },
-  { name: 'Clientes', href: '/clients', icon: Users },
-  { name: 'Ranking', href: '/ranking', icon: Trophy },
-  { name: 'Citas', href: '/appointments', icon: Calendar },
-  { name: 'Servicios', href: '/services', icon: Scissors },
-  { name: 'Productos', href: '/products', icon: Package },
-  { name: 'Ventas', href: '/sales', icon: ShoppingCart },
-  { name: 'Caja', href: '/cash', icon: Wallet },
+  { name: 'Dashboard', href: '/app/dashboard', icon: LayoutDashboard, sectionKey: 'dashboard' },
+  { name: 'Clientes', href: '/clients', icon: Users, sectionKey: 'clients' },
+  { name: 'Ranking', href: '/ranking', icon: Trophy, sectionKey: 'ranking' },
+  { name: 'Citas', href: '/appointments', icon: Calendar, sectionKey: 'appointments' },
+  { name: 'Servicios', href: '/services', icon: Scissors, sectionKey: 'services' },
+  { name: 'Productos', href: '/products', icon: Package, sectionKey: 'products' },
+  { name: 'Ventas', href: '/sales', icon: ShoppingCart, sectionKey: 'sales' },
+  { name: 'Caja', href: '/cash', icon: Wallet, sectionKey: 'cash' },
   { name: 'Cuentas', href: '/accounts', icon: ShieldCheck, adminOnly: true },
   { name: 'Reportes', href: '/reports', icon: FileText, adminOnly: true },
-  { name: 'Configuración', href: '/settings', icon: Settings },
+  { name: 'Configuración', href: '/settings', icon: Settings, sectionKey: 'settings' },
   { name: 'SQL', href: '/sql', icon: Database, adminOnly: true },
 ]
 
@@ -68,9 +70,16 @@ export default function Sidebar({ className, onNavigate }: SidebarProps = {}) {
     }
   }, [])
 
+  const isAdmin = user?.role === 'ADMIN'
+  const permissions = user?.permissions as UserPermissions | null | undefined
+
   const visibleNavigation = navigation.filter((item) => {
-    if (item.adminOnly) return user?.role === 'ADMIN'
-    return true
+    if (item.adminOnly) return isAdmin
+    if (isAdmin) return true
+    const allowed = permissions?.sections
+    if (!allowed) return true
+    if (!item.sectionKey) return true
+    return allowed.includes(item.sectionKey)
   })
 
   return (
@@ -120,4 +129,3 @@ export default function Sidebar({ className, onNavigate }: SidebarProps = {}) {
     </div>
   )
 }
-
