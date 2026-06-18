@@ -190,11 +190,12 @@ function App() {
 
       <Suspense fallback={<RouteLoader />}>
         <Routes>
-          <Route path="/" element={!isAuthenticated ? <PublicAccess /> : <Navigate to="/app/dashboard" />} />
+          <Route path="/" element={<Navigate to={isAuthenticated ? '/app/dashboard' : '/login'} replace />} />
+          <Route path="/promotion" element={<PublicAccess />} />
           <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to="/app/dashboard" />} />
-          <Route path="/forgot-password" element={!isAuthenticated ? <ForgotPassword /> : <Navigate to="/" />} />
-          <Route path="/reset-password" element={!isAuthenticated ? <ResetPassword /> : <Navigate to="/" />} />
-          <Route path="/dashboard" element={<PlatformDashboard />} />
+          <Route path="/forgot-password" element={!isAuthenticated ? <ForgotPassword /> : <Navigate to="/login" />} />
+          <Route path="/reset-password" element={!isAuthenticated ? <ResetPassword /> : <Navigate to="/login" />} />
+          <Route path="/panel" element={<PlatformDashboard />} />
 
           <Route element={isAuthenticated ? <LicensedArea /> : <Navigate to="/login" />}>
             <Route path="/app/dashboard" element={<Dashboard />} />
