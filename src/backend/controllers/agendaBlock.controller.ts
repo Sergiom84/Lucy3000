@@ -5,7 +5,8 @@ import { AppointmentSyncInput, googleCalendarService } from '../services/googleC
 import { logError, logWarn } from '../utils/logger'
 import { validateAppointmentSlot } from '../utils/appointment-validation'
 import { buildInclusiveDateRange } from '../utils/date-range'
-import { getProfessionalCatalog, normalizeProfessionalName } from '../utils/professional-catalog'
+import { getProfessionalCatalog, normalizeProfessionalName, saveProfessionalCatalog } from '../utils/professional-catalog'
+import { getCabinCatalog, saveCabinCatalog, toCabinKey, CabinEntry } from '../utils/cabin-catalog'
 
 const agendaBlockSelect = {
   id: true,
@@ -115,6 +116,48 @@ export const getAgendaBlockProfessionals = async (_req: Request, res: Response) 
     res.json(professionals)
   } catch (error) {
     logError('Get agenda block professionals error', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const updateAgendaBlockProfessionals = async (req: Request, res: Response) => {
+  try {
+    const names = req.body?.names
+    if (!Array.isArray(names)) {
+      return res.status(400).json({ error: 'names must be an array of strings' })
+    }
+    const saved = await saveProfessionalCatalog(names)
+    res.json(saved)
+  } catch (error) {
+    logError('Update agenda block professionals error', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const getAgendaBlockCabins = async (_req: Request, res: Response) => {
+  try {
+    const cabins = await getCabinCatalog()
+    res.json(cabins)
+  } catch (error) {
+    logError('Get agenda block cabins error', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+export const updateAgendaBlockCabins = async (req: Request, res: Response) => {
+  try {
+    const cabins = req.body?.cabins
+    if (!Array.isArray(cabins)) {
+      return res.status(400).json({ error: 'cabins must be an array of {key, label} objects' })
+    }
+    const entries: CabinEntry[] = cabins.map((item: any) => ({
+      key: item?.key ? String(item.key).trim().toUpperCase().replace(/\s+/g, '_') : toCabinKey(String(item?.label ?? '')),
+      label: String(item?.label ?? '').trim()
+    })).filter((c) => c.key && c.label)
+    const saved = await saveCabinCatalog(entries)
+    res.json(saved)
+  } catch (error) {
+    logError('Update agenda block cabins error', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 }

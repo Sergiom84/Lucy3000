@@ -5,7 +5,9 @@ import {
   loadAppointmentClients,
   loadAppointmentProfessionals,
   loadAppointmentServices,
-  type AppointmentServiceCatalogItem
+  loadAppointmentCabins,
+  type AppointmentServiceCatalogItem,
+  type AppointmentCabinCatalogItem
 } from '../utils/appointmentCatalogs'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '../stores/authStore'
@@ -51,7 +53,7 @@ interface AppointmentFormProps {
   fromBono?: BonoAppointmentContext | null
 }
 
-type CabinValue = 'LUCY' | 'TAMARA' | 'CABINA_1' | 'CABINA_2'
+type CabinValue = string
 
 type AppointmentCopyDraft = {
   date: string
@@ -94,11 +96,14 @@ type ClientBonoSummary = {
 
 const SEARCH_RESULTS_LIMIT = 50
 const ACTIVE_APPOINTMENT_STATUSES = new Set(['SCHEDULED', 'CONFIRMED', 'IN_PROGRESS'])
-const CABIN_LABELS: Record<CabinValue, string> = {
-  LUCY: 'Lucy',
-  TAMARA: 'Tamara',
-  CABINA_1: 'Cabina 1',
-  CABINA_2: 'Cabina 2'
+
+const formatCabinLabelFromCatalog = (cabin: string, catalog: AppointmentCabinCatalogItem[]) => {
+  const entry = catalog.find((c) => c.key === cabin)
+  if (entry) return entry.label
+  return String(cabin || '')
+    .replace(/^CABINA_?(\d+)$/i, 'Cabina $1')
+    .replace(/_/g, ' ')
+    .trim()
 }
 
 const createEmptyAppointmentCopyDraft = (
@@ -490,12 +495,6 @@ function SearchableSelect({
   )
 }
 
-const cabinOptions = (Object.entries(CABIN_LABELS) as Array<[CabinValue, string]>).map(
-  ([value, label]) => ({
-    value,
-    label
-  })
-)
 
 export default function AppointmentForm({
   appointment,
@@ -518,6 +517,7 @@ export default function AppointmentForm({
   const [clients, setClients] = useState<any[]>([])
   const [services, setServices] = useState<any[]>([])
   const [professionals, setProfessionals] = useState<string[]>([])
+  const [cabins, setCabins] = useState<AppointmentCabinCatalogItem[]>([])
   const [clientBonos, setClientBonos] = useState<ClientBonoSummary[]>([])
 
   const fromBonoPackId = fromBono?.bonoPackId || ''
@@ -584,10 +584,11 @@ export default function AppointmentForm({
       setServicesLoading(true)
       setProfessionalsLoading(true)
 
-      const [clientsResult, servicesResult, professionalsResult] = await Promise.allSettled([
+      const [clientsResult, servicesResult, professionalsResult, cabinsResult] = await Promise.allSettled([
         loadAppointmentClients(),
         loadAppointmentServices(),
-        loadAppointmentProfessionals()
+        loadAppointmentProfessionals(),
+        loadAppointmentCabins()
       ])
 
       if (cancelled) {
@@ -610,6 +611,12 @@ export default function AppointmentForm({
         setProfessionals(professionalsResult.value)
       } else {
         console.error('Error fetching professionals:', professionalsResult.reason)
+      }
+
+      if (cabinsResult.status === 'fulfilled') {
+        setCabins(cabinsResult.value)
+      } else {
+        console.error('Error fetching cabins:', cabinsResult.reason)
       }
 
       setClientsLoading(false)
@@ -1091,7 +1098,7 @@ export default function AppointmentForm({
       )
 
       if (plannedCabinConflict) {
-        return `${slot.label}: la cabina ${CABIN_LABELS[slot.cabin]} coincide con ${plannedCabinConflict.label} (${plannedCabinConflict.startTime}-${plannedCabinConflict.endTime}).`
+        return `${slot.label}: la cabina ${formatCabinLabelFromCatalog(slot.cabin, cabins)} coincide con ${plannedCabinConflict.label} (${plannedCabinConflict.startTime}-${plannedCabinConflict.endTime}).`
       }
 
       const matchingAppointment = (appointmentsByDate.get(slot.date) || []).find(
@@ -1126,7 +1133,7 @@ export default function AppointmentForm({
       )
 
       if (matchingCabinAppointment) {
-        return `${slot.label}: la cabina ${CABIN_LABELS[slot.cabin]} ya está ocupada de ${matchingCabinAppointment.startTime} a ${matchingCabinAppointment.endTime}.`
+        return `${slot.label}: la cabina ${formatCabinLabelFromCatalog(slot.cabin, cabins)} ya está ocupada de ${matchingCabinAppointment.startTime} a ${matchingCabinAppointment.endTime}.`
       }
 
       const matchingProfessionalBlock = (agendaBlocksByDate.get(slot.date) || []).find(
@@ -1157,7 +1164,7 @@ export default function AppointmentForm({
       )
 
       if (matchingCabinBlock) {
-        return `${slot.label}: la cabina ${CABIN_LABELS[slot.cabin]} tiene un bloqueo de ${matchingCabinBlock.startTime} a ${matchingCabinBlock.endTime}.`
+        return `${slot.label}: la cabina ${formatCabinLabelFromCatalog(slot.cabin, cabins)} tiene un bloqueo de ${matchingCabinBlock.startTime} a ${matchingCabinBlock.endTime}.`
       }
     }
 
@@ -1815,8 +1822,8 @@ export default function AppointmentForm({
               className="input"
               required
             >
-              {cabinOptions.map((option) => (
-                <option key={option.value} value={option.value}>
+              {cabins.map((option) => (
+                <option key={option.key} value={option.key}>
                   {option.label}
                 </option>
               ))}
@@ -1951,8 +1958,8 @@ export default function AppointmentForm({
                   onChange={handleCopyDraftChange}
                   className="input"
                 >
-                  {cabinOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
+                  {cabins.map((option) => (
+                    <option key={option.key} value={option.key}>
                       {option.label}
                     </option>
                   ))}
@@ -2018,7 +2025,7 @@ export default function AppointmentForm({
                           {copy.startTime}
                           {copyEndTime ? ` - ${copyEndTime}` : ''}
                           {' · '}
-                          {cabinOptions.find((option) => option.value === copy.cabin)?.label || copy.cabin}
+                          {formatCabinLabelFromCatalog(copy.cabin, cabins)}
                           {' · '}
                           {copy.professional}
                         </span>

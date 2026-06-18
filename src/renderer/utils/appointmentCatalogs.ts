@@ -25,6 +25,8 @@ export type AppointmentServiceCatalogItem = {
 
 export type AppointmentProfessionalCatalogItem = string
 
+export type AppointmentCabinCatalogItem = { key: string; label: string }
+
 type AppointmentProductCatalogItem = {
   id: string
   name?: string | null
@@ -68,6 +70,10 @@ let professionalsCache: AppointmentProfessionalCatalogItem[] | null = null
 let professionalsPromise: Promise<AppointmentProfessionalCatalogItem[]> | null = null
 let professionalsCacheVersion = 0
 
+let cabinsCache: AppointmentCabinCatalogItem[] | null = null
+let cabinsPromise: Promise<AppointmentCabinCatalogItem[]> | null = null
+let cabinsCacheVersion = 0
+
 let bonoTemplatesCache: BonoTemplateCatalogItem[] | null = null
 let bonoTemplatesPromise: Promise<BonoTemplateCatalogItem[]> | null = null
 let bonoTemplatesCacheVersion = 0
@@ -106,6 +112,12 @@ export const invalidateAppointmentProfessionalsCache = () => {
   professionalsCacheVersion += 1
   professionalsCache = null
   professionalsPromise = null
+}
+
+export const invalidateAppointmentCabinsCache = () => {
+  cabinsCacheVersion += 1
+  cabinsCache = null
+  cabinsPromise = null
 }
 
 export const invalidateAppointmentLegendsCache = () => {
@@ -380,6 +392,60 @@ export const deleteAppointmentLegendItem = async (id: string) => {
   )
   appointmentLegendsCache = nextLegends
   return nextLegends
+}
+
+export const loadAppointmentCabins = async (options?: { forceRefresh?: boolean }): Promise<AppointmentCabinCatalogItem[]> => {
+  if (options?.forceRefresh) {
+    invalidateAppointmentCabinsCache()
+  }
+
+  if (cabinsCache) {
+    return cabinsCache
+  }
+
+  if (!cabinsPromise) {
+    const requestVersion = cabinsCacheVersion
+    cabinsPromise = api
+      .get('/appointments/cabins')
+      .then((response) => {
+        const nextCabins = Array.isArray(response.data)
+          ? response.data.filter(
+              (item): item is AppointmentCabinCatalogItem =>
+                item !== null &&
+                typeof item === 'object' &&
+                typeof item.key === 'string' &&
+                item.key.trim().length > 0 &&
+                typeof item.label === 'string' &&
+                item.label.trim().length > 0
+            )
+          : []
+        if (requestVersion === cabinsCacheVersion) {
+          cabinsCache = nextCabins
+        }
+        return nextCabins
+      })
+      .finally(() => {
+        if (requestVersion === cabinsCacheVersion) {
+          cabinsPromise = null
+        }
+      })
+  }
+
+  return cabinsPromise
+}
+
+export const saveAppointmentProfessionals = async (names: string[]): Promise<string[]> => {
+  const response = await api.put('/appointments/professionals', { names })
+  const saved = Array.isArray(response.data) ? response.data : names
+  professionalsCache = saved
+  return saved
+}
+
+export const saveAppointmentCabins = async (cabins: AppointmentCabinCatalogItem[]): Promise<AppointmentCabinCatalogItem[]> => {
+  const response = await api.put('/appointments/cabins', { cabins })
+  const saved = Array.isArray(response.data) ? response.data : cabins
+  cabinsCache = saved
+  return saved
 }
 
 export const preloadAppointmentFormCatalogs = async (options?: { includeClients?: boolean }) => {

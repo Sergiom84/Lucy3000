@@ -26,10 +26,14 @@ import {
   deleteAgendaBlock,
   getAgendaBlockById,
   getAgendaBlockProfessionals,
+  updateAgendaBlockProfessionals,
+  getAgendaBlockCabins,
+  updateAgendaBlockCabins,
   getAgendaBlocks,
   updateAgendaBlock
 } from '../controllers/agendaBlock.controller'
 import { adminMiddleware, authMiddleware } from '../middleware/auth.middleware'
+import { requireSectionAccess } from '../middleware/permissions.middleware'
 import { spreadsheetUpload, validateSpreadsheetUpload } from '../middleware/upload.middleware'
 import { validateRequest } from '../middleware/validation.middleware'
 import {
@@ -57,11 +61,25 @@ const router = Router()
 
 router.use(authMiddleware)
 
+router.post(
+  '/import',
+  adminMiddleware,
+  spreadsheetUpload.single('file'),
+  validateSpreadsheetUpload(),
+  validateRequest({ body: appointmentImportBodySchema }),
+  importAppointmentsFromExcel
+)
+
+router.use(requireSectionAccess('appointments'))
+
 router.get('/legend', getAppointmentLegends)
 router.get('/legend/categories', getAppointmentLegendCategories)
 router.post('/legend', validateRequest({ body: createAppointmentLegendBodySchema }), createAppointmentLegend)
 router.delete('/legend/:id', validateRequest({ params: appointmentLegendIdParamSchema }), deleteAppointmentLegend)
 router.get('/professionals', getAgendaBlockProfessionals)
+router.put('/professionals', adminMiddleware, updateAgendaBlockProfessionals)
+router.get('/cabins', getAgendaBlockCabins)
+router.put('/cabins', adminMiddleware, updateAgendaBlockCabins)
 router.get('/blocks', validateRequest({ query: agendaBlocksQuerySchema }), getAgendaBlocks)
 router.get('/blocks/:id', validateRequest({ params: agendaBlockIdParamSchema }), getAgendaBlockById)
 router.post('/blocks', validateRequest({ body: createAgendaBlockBodySchema }), createAgendaBlock)
@@ -87,14 +105,6 @@ router.delete('/day-notes/:id', validateRequest({ params: agendaDayNoteIdParamSc
 router.get('/', validateRequest({ query: appointmentsQuerySchema }), getAppointments)
 router.get('/export', validateRequest({ query: appointmentsQuerySchema }), exportAppointments)
 router.get('/date/:date', validateRequest({ params: appointmentDateParamSchema }), getAppointmentsByDate)
-router.post(
-  '/import',
-  adminMiddleware,
-  spreadsheetUpload.single('file'),
-  validateSpreadsheetUpload(),
-  validateRequest({ body: appointmentImportBodySchema }),
-  importAppointmentsFromExcel
-)
 router.post(
   '/:id/charge-bono',
   validateRequest({ params: appointmentIdParamSchema, body: chargeAppointmentWithBonoBodySchema }),

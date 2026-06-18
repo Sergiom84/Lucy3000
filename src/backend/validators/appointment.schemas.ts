@@ -10,7 +10,7 @@ const appointmentStatusSchema = z.enum([
   'NO_SHOW'
 ])
 
-const cabinSchema = z.enum(['LUCY', 'TAMARA', 'CABINA_1', 'CABINA_2'])
+const cabinSchema = z.string().trim().min(1, 'Cabin is required').max(80, 'Cabin name too long')
 const professionalSchema = z
   .string()
   .trim()

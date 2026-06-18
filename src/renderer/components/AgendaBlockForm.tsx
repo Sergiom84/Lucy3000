@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Clock, Save, Trash2, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../utils/api'
-import { loadAppointmentProfessionals } from '../utils/appointmentCatalogs'
+import { loadAppointmentProfessionals, loadAppointmentCabins, type AppointmentCabinCatalogItem } from '../utils/appointmentCatalogs'
 import {
   buildTimeOptions,
   BUSINESS_BREAK_END_MINUTES,
@@ -23,15 +23,8 @@ interface AgendaBlockFormProps {
   preselectedDate?: Date
   preselectedStartTime?: string
   preselectedEndTime?: string
-  initialCabin?: 'LUCY' | 'TAMARA' | 'CABINA_1' | 'CABINA_2'
+  initialCabin?: string
 }
-
-const cabinOptions = [
-  { value: 'LUCY', label: 'Lucy' },
-  { value: 'TAMARA', label: 'Tamara' },
-  { value: 'CABINA_1', label: 'Cabina 1' },
-  { value: 'CABINA_2', label: 'Cabina 2' }
-]
 
 const getLocalDateInputValue = (value: Date) => {
   const year = value.getFullYear()
@@ -94,6 +87,7 @@ export default function AgendaBlockForm({
   const [professionalsLoading, setProfessionalsLoading] = useState(true)
   const [professionals, setProfessionals] = useState<string[]>([])
   const [professionalTouched, setProfessionalTouched] = useState(false)
+  const [cabins, setCabins] = useState<AppointmentCabinCatalogItem[]>([])
   const [formData, setFormData] = useState({
     professional: '',
     calendarInviteEmail: '',
@@ -119,15 +113,19 @@ export default function AgendaBlockForm({
   useEffect(() => {
     let cancelled = false
 
-    const loadProfessionals = async () => {
+    const loadCatalogs = async () => {
       setProfessionalsLoading(true)
       try {
-        const nextProfessionals = await loadAppointmentProfessionals()
+        const [nextProfessionals, nextCabins] = await Promise.all([
+          loadAppointmentProfessionals(),
+          loadAppointmentCabins()
+        ])
         if (!cancelled) {
           setProfessionals(nextProfessionals)
+          setCabins(nextCabins)
         }
       } catch (error) {
-        console.error('Error fetching agenda block professionals:', error)
+        console.error('Error fetching agenda block catalogs:', error)
       } finally {
         if (!cancelled) {
           setProfessionalsLoading(false)
@@ -135,7 +133,7 @@ export default function AgendaBlockForm({
       }
     }
 
-    void loadProfessionals()
+    void loadCatalogs()
 
     return () => {
       cancelled = true
@@ -401,8 +399,8 @@ export default function AgendaBlockForm({
             className="input"
             required
           >
-            {cabinOptions.map((option) => (
-              <option key={option.value} value={option.value}>
+            {cabins.map((option) => (
+              <option key={option.key} value={option.key}>
                 {option.label}
               </option>
             ))}

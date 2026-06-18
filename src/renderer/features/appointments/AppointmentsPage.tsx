@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Calendar as BigCalendar, View } from 'react-big-calendar'
 import moment from 'moment'
 import 'react-big-calendar/lib/css/react-big-calendar.css'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { getAppointmentColorTheme } from '../../utils/appointmentColors'
 import {
   hasConsumedAppointmentBono,
@@ -42,16 +42,20 @@ import {
   updateAppointmentStatus
 } from './appointmentsApi'
 import { useAppointmentsPageData } from './useAppointmentsPageData'
+import {
+  loadAppointmentProfessionals,
+  loadAppointmentCabins,
+  saveAppointmentProfessionals,
+  saveAppointmentCabins,
+  invalidateAppointmentProfessionalsCache,
+  invalidateAppointmentCabinsCache,
+  type AppointmentCabinCatalogItem
+} from '../../utils/appointmentCatalogs'
 
 const ImportAppointmentsModal = lazy(() => import('../../components/ImportAppointmentsModal'))
 const AgendaBlockForm = lazy(() => import('../../components/AgendaBlockForm'))
 
-const cabinResources = [
-  { resourceId: 'LUCY', resourceTitle: 'Lucy' },
-  { resourceId: 'TAMARA', resourceTitle: 'Tamara' },
-  { resourceId: 'CABINA_1', resourceTitle: 'Cabina 1' },
-  { resourceId: 'CABINA_2', resourceTitle: 'Cabina 2' }
-]
+const DEFAULT_CABIN_KEY = 'LUCY'
 
 const professionalLabels: Record<string, string> = {
   LUCY: 'Lucy',
@@ -60,11 +64,14 @@ const professionalLabels: Record<string, string> = {
   OTROS: 'Otros'
 }
 
-const cabinLabels: Record<string, string> = {
-  LUCY: 'Lucy',
-  TAMARA: 'Tamara',
-  CABINA_1: 'Cabina 1',
-  CABINA_2: 'Cabina 2'
+const formatCabinLabel = (cabin: string | null | undefined, catalog: AppointmentCabinCatalogItem[] = []) => {
+  const key = String(cabin || '')
+  const entry = catalog.find((c) => c.key === key)
+  if (entry) return entry.label
+  return key
+    .replace(/^CABINA_?(\d+)$/i, 'Cabina $1')
+    .replace(/_/g, ' ')
+    .trim()
 }
 
 const saleStatusLabels: Record<string, string> = {
@@ -97,7 +104,7 @@ function CalendarEvent({ event }: { event: any }) {
       'Bloqueo de agenda',
       `Profesional: ${formatProfessionalLabel(agendaBlock.professional)}`,
       timeRange,
-      `Cabina: ${cabinLabels[agendaBlock.cabin] || agendaBlock.cabin}`,
+      `Cabina: ${formatCabinLabel(agendaBlock.cabin)}`,
       agendaBlock.notes ? `Observaciones: ${agendaBlock.notes}` : null
     ]
       .filter(Boolean)
@@ -121,7 +128,7 @@ function CalendarEvent({ event }: { event: any }) {
     clientName,
     serviceName,
     timeRange,
-    `Cabina: ${cabinLabels[appointment.cabin] || appointment.cabin}`,
+    `Cabina: ${formatCabinLabel(appointment.cabin)}`,
     cancellationWarning || null
   ].filter(Boolean).join('\n')
   const cancellationBadge = cancellationWarning ? (
@@ -182,7 +189,7 @@ export default function Appointments() {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>()
   const [preselectedStartTime, setPreselectedStartTime] = useState<string | undefined>()
   const [preselectedEndTime, setPreselectedEndTime] = useState<string | undefined>()
-  const [initialCabin, setInitialCabin] = useState<'LUCY' | 'TAMARA' | 'CABINA_1' | 'CABINA_2'>('LUCY')
+  const [initialCabin, setInitialCabin] = useState<string>(DEFAULT_CABIN_KEY)
   const [appointmentFormInstance, setAppointmentFormInstance] = useState(0)
   const activeAppointmentModalRef = useRef({
     showModal: false,
@@ -195,6 +202,14 @@ export default function Appointments() {
   const [bonoSessionsToConsume, setBonoSessionsToConsume] = useState(1)
   const [chargeBonoSubmitting, setChargeBonoSubmitting] = useState(false)
   const isAdmin = user?.role === 'ADMIN'
+
+  const [cabinCatalog, setCabinCatalog] = useState<AppointmentCabinCatalogItem[]>([])
+  const [professionalsCatalog, setProfessionalsCatalog] = useState<string[]>([])
+  const [showProfessionalsCatalogModal, setShowProfessionalsCatalogModal] = useState(false)
+  const [showCabinsCatalogModal, setShowCabinsCatalogModal] = useState(false)
+  const [catalogDraft, setCatalogDraft] = useState('')
+  const [catalogSaving, setCatalogSaving] = useState(false)
+
   const {
     agendaBlocks,
     appointmentBonoCandidates,
@@ -223,6 +238,13 @@ export default function Appointments() {
     }
   }, [showModal, editingAppointment?.id])
 
+  useEffect(() => {
+    Promise.all([loadAppointmentCabins(), loadAppointmentProfessionals()]).then(([cabins, profs]) => {
+      setCabinCatalog(cabins)
+      setProfessionalsCatalog(profs)
+    }).catch(() => {})
+  }, [])
+
   const handleSelectSlot = ({
     start,
     end,
@@ -236,7 +258,9 @@ export default function Appointments() {
   }) => {
     setAppointmentFormInstance((currentValue) => currentValue + 1)
     setSelectedDate(start)
-    const selectedCabin = String(resourceId || 'LUCY') as typeof initialCabin
+    const requestedCabin = String(resourceId || DEFAULT_CABIN_KEY)
+    const knownKeys = new Set(cabinCatalog.map((c) => c.key))
+    const selectedCabin = knownKeys.has(requestedCabin) ? requestedCabin : DEFAULT_CABIN_KEY
     setInitialCabin(selectedCabin)
     setEditingAppointment(null)
     setEditingAgendaBlock(null)
@@ -506,6 +530,26 @@ export default function Appointments() {
     [agendaBlocks, appointments]
   )
 
+  const visibleCabinResources = useMemo(() => {
+    const resourcesById = new Map(
+      cabinCatalog.map((c) => [c.key, { resourceId: c.key, resourceTitle: c.label }])
+    )
+
+    for (const item of [...appointments, ...agendaBlocks]) {
+      const cabin = String(item?.cabin || '').trim()
+      if (!cabin || resourcesById.has(cabin)) {
+        continue
+      }
+
+      resourcesById.set(cabin, {
+        resourceId: cabin,
+        resourceTitle: formatCabinLabel(cabin, cabinCatalog)
+      })
+    }
+
+    return [...resourcesById.values()]
+  }, [agendaBlocks, appointments, cabinCatalog])
+
   const selectedAppointmentBonoCandidate =
     appointmentBonoCandidates.find((bonoPack) => bonoPack.id === selectedAppointmentBonoId) ||
     (appointmentBonoCandidates.length === 1 ? appointmentBonoCandidates[0] : null)
@@ -609,6 +653,24 @@ export default function Appointments() {
           </button>
           {isAdmin ? (
             <>
+              <button
+                onClick={() => {
+                  setProfessionalsCatalog([...professionalsCatalog])
+                  setShowProfessionalsCatalogModal(true)
+                }}
+                className="btn btn-secondary"
+              >
+                Profesional
+              </button>
+              <button
+                onClick={() => {
+                  setCabinCatalog([...cabinCatalog])
+                  setShowCabinsCatalogModal(true)
+                }}
+                className="btn btn-secondary"
+              >
+                Cabina
+              </button>
               <button onClick={() => setShowImportModal(true)} className="btn btn-secondary">
                 Importar
               </button>
@@ -623,7 +685,7 @@ export default function Appointments() {
               setEditingAppointment(null)
               setEditingAgendaBlock(null)
               setShowBlockModal(false)
-              setInitialCabin('LUCY')
+              setInitialCabin(cabinCatalog[0]?.key ?? DEFAULT_CABIN_KEY)
               setSelectedDate(new Date(currentDate))
               setPreselectedStartTime(undefined)
               setPreselectedEndTime(undefined)
@@ -763,7 +825,7 @@ export default function Appointments() {
           events={events}
           startAccessor="start"
           endAccessor="end"
-          resources={cabinResources}
+          resources={visibleCabinResources}
           resourceIdAccessor="resourceId"
           resourceTitleAccessor="resourceTitle"
           messages={calendarMessages}
@@ -825,7 +887,7 @@ export default function Appointments() {
                 <div>
                   <p className="text-gray-600 dark:text-gray-400">Cabina</p>
                   <p className="font-medium text-gray-900 dark:text-white">
-                    {cabinLabels[editingAppointment.cabin] || editingAppointment.cabin}
+                    {formatCabinLabel(editingAppointment.cabin, cabinCatalog)}
                   </p>
                 </div>
                 <div>
@@ -1120,6 +1182,200 @@ export default function Appointments() {
           ) : null}
         </Modal>
       ) : null}
+
+      {showProfessionalsCatalogModal && (
+        <Modal
+          isOpen={showProfessionalsCatalogModal}
+          onClose={() => { setShowProfessionalsCatalogModal(false); setCatalogDraft('') }}
+          title="Gestionar Profesionales"
+          maxWidth="sm"
+        >
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={catalogDraft}
+                onChange={(e) => setCatalogDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    const name = catalogDraft.trim()
+                    if (name && !professionalsCatalog.includes(name)) {
+                      setProfessionalsCatalog((prev) => [...prev, name])
+                    }
+                    setCatalogDraft('')
+                  }
+                }}
+                className="input flex-1"
+                placeholder="Nombre del profesional"
+              />
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  const name = catalogDraft.trim()
+                  if (name && !professionalsCatalog.includes(name)) {
+                    setProfessionalsCatalog((prev) => [...prev, name])
+                  }
+                  setCatalogDraft('')
+                }}
+              >
+                Añadir
+              </button>
+            </div>
+            {professionalsCatalog.length === 0 ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400">No hay profesionales configurados.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {professionalsCatalog.map((name) => (
+                  <span
+                    key={name}
+                    className="inline-flex items-center rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-sm text-primary-700 dark:border-primary-700/40 dark:bg-primary-900/20 dark:text-primary-200"
+                  >
+                    {name}
+                    <button
+                      type="button"
+                      onClick={() => setProfessionalsCatalog((prev) => prev.filter((p) => p !== name))}
+                      className="ml-2 text-primary-500 hover:text-primary-700"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => { setShowProfessionalsCatalogModal(false); setCatalogDraft('') }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={catalogSaving}
+                onClick={async () => {
+                  setCatalogSaving(true)
+                  try {
+                    const saved = await saveAppointmentProfessionals(professionalsCatalog)
+                    setProfessionalsCatalog(saved)
+                    invalidateAppointmentProfessionalsCache()
+                    setShowProfessionalsCatalogModal(false)
+                    setCatalogDraft('')
+                    toast.success('Profesionales actualizados')
+                  } catch {
+                    toast.error('Error al guardar profesionales')
+                  } finally {
+                    setCatalogSaving(false)
+                  }
+                }}
+              >
+                {catalogSaving ? 'Guardando...' : 'Guardar'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {showCabinsCatalogModal && (
+        <Modal
+          isOpen={showCabinsCatalogModal}
+          onClose={() => { setShowCabinsCatalogModal(false); setCatalogDraft('') }}
+          title="Gestionar Cabinas"
+          maxWidth="sm"
+        >
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={catalogDraft}
+                onChange={(e) => setCatalogDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    const label = catalogDraft.trim()
+                    if (label && !cabinCatalog.some((c) => c.label === label)) {
+                      const key = label.normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toUpperCase().replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '')
+                      setCabinCatalog((prev) => [...prev, { key, label }])
+                    }
+                    setCatalogDraft('')
+                  }
+                }}
+                className="input flex-1"
+                placeholder="Nombre de la cabina"
+              />
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  const label = catalogDraft.trim()
+                  if (label && !cabinCatalog.some((c) => c.label === label)) {
+                    const key = label.normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toUpperCase().replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '')
+                    setCabinCatalog((prev) => [...prev, { key, label }])
+                  }
+                  setCatalogDraft('')
+                }}
+              >
+                Añadir
+              </button>
+            </div>
+            {cabinCatalog.length === 0 ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400">No hay cabinas configuradas.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {cabinCatalog.map((cabin) => (
+                  <span
+                    key={cabin.key}
+                    className="inline-flex items-center rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-sm text-primary-700 dark:border-primary-700/40 dark:bg-primary-900/20 dark:text-primary-200"
+                  >
+                    {cabin.label}
+                    <button
+                      type="button"
+                      onClick={() => setCabinCatalog((prev) => prev.filter((c) => c.key !== cabin.key))}
+                      className="ml-2 text-primary-500 hover:text-primary-700"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => { setShowCabinsCatalogModal(false); setCatalogDraft('') }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={catalogSaving}
+                onClick={async () => {
+                  setCatalogSaving(true)
+                  try {
+                    const saved = await saveAppointmentCabins(cabinCatalog)
+                    setCabinCatalog(saved)
+                    invalidateAppointmentCabinsCache()
+                    setShowCabinsCatalogModal(false)
+                    setCatalogDraft('')
+                    toast.success('Cabinas actualizadas')
+                  } catch {
+                    toast.error('Error al guardar cabinas')
+                  } finally {
+                    setCatalogSaving(false)
+                  }
+                }}
+              >
+                {catalogSaving ? 'Guardando...' : 'Guardar'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
