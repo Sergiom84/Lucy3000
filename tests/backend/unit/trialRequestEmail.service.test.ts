@@ -18,7 +18,7 @@ describe('trial request email service', () => {
     expect(result).toEqual({
       copiedToRequester: false,
       delivered: false,
-      recipient: 'sergiohernandezlara07@gmail.com',
+      recipient: 'info@sohl.dev',
       requesterEmail: 'demo@example.com'
     })
   })
