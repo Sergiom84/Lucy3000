@@ -17,15 +17,15 @@ import {
 } from 'lucide-react'
 import { cn } from '../utils/cn'
 import { getAppVersion } from '../utils/desktop'
+import { hasSectionAccess, type SectionKey } from '../utils/permissions'
 import { useAuthStore } from '../stores/authStore'
-import type { UserPermissions } from '../stores/authStore'
 
 type NavItem = {
   name: string
   href: string
   icon: typeof LayoutDashboard
   adminOnly?: boolean
-  sectionKey?: string
+  sectionKey?: SectionKey
 }
 
 export const navigation: NavItem[] = [
@@ -71,15 +71,11 @@ export default function Sidebar({ className, onNavigate }: SidebarProps = {}) {
   }, [])
 
   const isAdmin = user?.role === 'ADMIN'
-  const permissions = user?.permissions as UserPermissions | null | undefined
 
   const visibleNavigation = navigation.filter((item) => {
     if (item.adminOnly) return isAdmin
-    if (isAdmin) return true
-    const allowed = permissions?.sections
-    if (!allowed || allowed.length === 0) return false
     if (!item.sectionKey) return false
-    return allowed.includes(item.sectionKey)
+    return hasSectionAccess(user, item.sectionKey)
   })
 
   return (

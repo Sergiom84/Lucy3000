@@ -8,6 +8,7 @@ import {
   deleteSale
 } from '../controllers/sale.controller'
 import { authMiddleware } from '../middleware/auth.middleware'
+import { requireSectionAccess } from '../middleware/permissions.middleware'
 import { validateRequest } from '../middleware/validation.middleware'
 import {
   createSaleBodySchema,
@@ -20,6 +21,7 @@ import {
 const router = Router()
 
 router.use(authMiddleware)
+router.use(requireSectionAccess('sales'))
 
 router.get('/', validateRequest({ query: salesQuerySchema }), getSales)
 router.get('/:id', validateRequest({ params: saleIdParamSchema }), getSaleById)

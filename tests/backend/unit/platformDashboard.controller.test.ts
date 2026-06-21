@@ -190,6 +190,50 @@ describe('platformDashboard.controller', () => {
     })
   })
 
+  it('updates the tenant admin email and alias from the dashboard', async () => {
+    prismaMock.tenant.findUnique.mockResolvedValue({
+      id: TENANT_ID,
+      name: 'Lucy3000 Local',
+      tenantCode: 1,
+      createdAt: new Date('2026-05-01T00:00:00.000Z'),
+      license: null,
+      users: [
+        {
+          id: 'admin-1',
+          email: 'old@example.com',
+          username: 'oldalias',
+          name: 'Lucy Lara',
+          phone: null,
+          role: 'ADMIN',
+          createdAt: new Date('2026-03-25T00:00:00.000Z')
+        }
+      ]
+    })
+    prismaMock.user.update.mockResolvedValue({
+      id: 'admin-1'
+    })
+
+    const req = createMockRequest({
+      params: { rowId: `tenant-${TENANT_ID}` },
+      body: {
+        pin: DASHBOARD_PIN,
+        email: ' Nueva@Example.com ',
+        username: 'aliasnuevo'
+      }
+    })
+    const res = createMockResponse()
+
+    await updatePlatformDashboardRow(req as any, res)
+
+    expect(prismaMock.user.update).toHaveBeenCalledWith({
+      where: { id: 'admin-1' },
+      data: {
+        email: 'nueva@example.com',
+        username: 'aliasnuevo'
+      }
+    })
+  })
+
   it('persists tenant process status and syncs paid state with the license', async () => {
     prismaMock.tenant.findUnique.mockResolvedValue({
       id: TENANT_ID,
@@ -265,6 +309,7 @@ describe('platformDashboard.controller', () => {
           {
             id: 'user-1',
             email: 'lucy@lucy.com',
+            username: 'lucy',
             name: 'Lucy Lara',
             phone: null,
             role: 'ADMIN',
@@ -286,6 +331,7 @@ describe('platformDashboard.controller', () => {
         rows: expect.arrayContaining([
           expect.objectContaining({
             id: `tenant-${TENANT_ID}`,
+            username: 'lucy',
             commercialStatusCode: 'PAID',
             commercialStatus: 'Ya ha pagado'
           })

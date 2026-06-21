@@ -22,6 +22,7 @@ import {
   consumeAccountBalance
 } from '../controllers/bono.controller'
 import { adminMiddleware, authMiddleware } from '../middleware/auth.middleware'
+import { requireSectionAccess } from '../middleware/permissions.middleware'
 import {
   spreadsheetUpload,
   validateLegacySpreadsheetUpload,
@@ -48,30 +49,6 @@ const router = Router()
 
 router.use(authMiddleware)
 
-router.get('/templates', getBonoTemplates)
-router.post('/templates', validateRequest({ body: createBonoTemplateBodySchema }), createBonoTemplate)
-router.patch(
-  '/templates/categories',
-  validateRequest({ body: renameBonoTemplateCategoryBodySchema }),
-  renameBonoTemplateCategory
-)
-router.delete(
-  '/templates/categories',
-  validateRequest({ body: deleteBonoTemplateCategoryBodySchema }),
-  deleteBonoTemplateCategory
-)
-router.delete(
-  '/templates/categories/with-templates',
-  validateRequest({ body: deleteBonoTemplateCategoryWithTemplatesBodySchema }),
-  deleteBonoTemplateCategoryWithTemplates
-)
-router.get('/account-balance/history', getGlobalAccountBalanceHistory)
-router.post(
-  '/import-templates',
-  spreadsheetUpload.single('file'),
-  validateSpreadsheetUpload(),
-  importBonoTemplatesFromExcel
-)
 router.post(
   '/import-client-packs',
   adminMiddleware,
@@ -79,26 +56,6 @@ router.post(
   validateLegacySpreadsheetUpload(),
   validateRequest({ body: spreadsheetImportModeBodySchema }),
   importClientBonosFromSpreadsheet
-)
-router.get('/client/:clientId', validateRequest({ params: clientIdParamSchema }), getClientBonos)
-router.post('/', validateRequest({ body: createBonoPackBodySchema }), createBonoPack)
-router.put(
-  '/:bonoPackId',
-  validateRequest({ params: bonoPackIdParamSchema, body: updateBonoPackBodySchema }),
-  updateBonoPack
-)
-router.post(
-  '/:bonoPackId/appointments',
-  validateRequest({ params: bonoPackIdParamSchema, body: createBonoAppointmentBodySchema }),
-  createBonoAppointment
-)
-router.post('/:bonoPackId/sessions', validateRequest({ params: bonoPackIdParamSchema }), addSessionToBonoPack)
-router.put('/:bonoPackId/consume', validateRequest({ params: bonoPackIdParamSchema }), consumeSession)
-router.delete('/:bonoPackId', validateRequest({ params: bonoPackIdParamSchema }), deleteBonoPack)
-router.get(
-  '/account-balance/:clientId/history',
-  validateRequest({ params: clientIdParamSchema, query: accountBalanceHistoryQuerySchema }),
-  getAccountBalanceHistory
 )
 router.post(
   '/account-balance/import',
@@ -108,16 +65,108 @@ router.post(
   validateRequest({ body: spreadsheetImportModeBodySchema }),
   importAccountBalanceFromSpreadsheet
 )
+router.get('/templates', requireSectionAccess('services', 'appointments', 'sales'), getBonoTemplates)
+router.post(
+  '/templates',
+  requireSectionAccess('services'),
+  validateRequest({ body: createBonoTemplateBodySchema }),
+  createBonoTemplate
+)
+router.patch(
+  '/templates/categories',
+  requireSectionAccess('services'),
+  validateRequest({ body: renameBonoTemplateCategoryBodySchema }),
+  renameBonoTemplateCategory
+)
+router.delete(
+  '/templates/categories',
+  requireSectionAccess('services'),
+  validateRequest({ body: deleteBonoTemplateCategoryBodySchema }),
+  deleteBonoTemplateCategory
+)
+router.delete(
+  '/templates/categories/with-templates',
+  requireSectionAccess('services'),
+  validateRequest({ body: deleteBonoTemplateCategoryWithTemplatesBodySchema }),
+  deleteBonoTemplateCategoryWithTemplates
+)
+router.get(
+  '/account-balance/history',
+  requireSectionAccess('clients', 'sales', 'cash'),
+  getGlobalAccountBalanceHistory
+)
+router.post(
+  '/import-templates',
+  requireSectionAccess('services'),
+  spreadsheetUpload.single('file'),
+  validateSpreadsheetUpload(),
+  importBonoTemplatesFromExcel
+)
+router.get(
+  '/client/:clientId',
+  requireSectionAccess('clients', 'appointments', 'sales'),
+  validateRequest({ params: clientIdParamSchema }),
+  getClientBonos
+)
+router.post(
+  '/',
+  requireSectionAccess('clients', 'appointments', 'sales'),
+  validateRequest({ body: createBonoPackBodySchema }),
+  createBonoPack
+)
+router.put(
+  '/:bonoPackId',
+  requireSectionAccess('clients', 'appointments', 'sales'),
+  validateRequest({ params: bonoPackIdParamSchema, body: updateBonoPackBodySchema }),
+  updateBonoPack
+)
+router.post(
+  '/:bonoPackId/appointments',
+  requireSectionAccess('appointments'),
+  validateRequest({ params: bonoPackIdParamSchema, body: createBonoAppointmentBodySchema }),
+  createBonoAppointment
+)
+router.post(
+  '/:bonoPackId/sessions',
+  requireSectionAccess('clients', 'appointments', 'sales'),
+  validateRequest({ params: bonoPackIdParamSchema }),
+  addSessionToBonoPack
+)
+router.put(
+  '/:bonoPackId/consume',
+  requireSectionAccess('clients', 'appointments', 'sales'),
+  validateRequest({ params: bonoPackIdParamSchema }),
+  consumeSession
+)
+router.delete(
+  '/:bonoPackId',
+  requireSectionAccess('clients', 'appointments', 'sales'),
+  validateRequest({ params: bonoPackIdParamSchema }),
+  deleteBonoPack
+)
+router.get(
+  '/account-balance/:clientId/history',
+  requireSectionAccess('clients', 'sales', 'cash'),
+  validateRequest({ params: clientIdParamSchema, query: accountBalanceHistoryQuerySchema }),
+  getAccountBalanceHistory
+)
 router.post(
   '/account-balance/:clientId/top-up',
+  requireSectionAccess('clients', 'sales', 'cash'),
   validateRequest({ params: clientIdParamSchema, body: accountBalanceTopUpBodySchema }),
   createAccountBalanceTopUp
 )
 router.post(
   '/account-balance/:clientId/consume',
+  requireSectionAccess('clients', 'sales', 'cash'),
   validateRequest({ params: clientIdParamSchema, body: accountBalanceConsumeBodySchema }),
   consumeAccountBalance
 )
-router.put('/account-balance/:clientId', validateRequest({ params: clientIdParamSchema }), updateAccountBalance)
+router.put(
+  '/account-balance/:clientId',
+  requireSectionAccess('clients', 'sales', 'cash'),
+  validateRequest({ params: clientIdParamSchema }),
+  updateAccountBalance
+)
 
 export default router

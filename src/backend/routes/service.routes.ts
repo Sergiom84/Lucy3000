@@ -11,6 +11,7 @@ import {
   importServicesFromExcel
 } from '../controllers/service.controller'
 import { adminMiddleware, authMiddleware } from '../middleware/auth.middleware'
+import { requireSectionAccess } from '../middleware/permissions.middleware'
 import { spreadsheetUpload, validateSpreadsheetUpload } from '../middleware/upload.middleware'
 import { validateRequest } from '../middleware/validation.middleware'
 import {
@@ -27,7 +28,22 @@ const router = Router()
 
 router.use(authMiddleware)
 
-router.get('/', validateRequest({ query: servicesQuerySchema }), getServices)
+router.post(
+  '/import',
+  adminMiddleware,
+  spreadsheetUpload.single('file'),
+  validateSpreadsheetUpload(),
+  importServicesFromExcel
+)
+router.get(
+  '/',
+  requireSectionAccess('services', 'appointments', 'sales', 'cash'),
+  validateRequest({ query: servicesQuerySchema }),
+  getServices
+)
+
+router.use(requireSectionAccess('services'))
+
 router.patch('/categories', validateRequest({ body: renameServiceCategoryBodySchema }), renameServiceCategory)
 router.delete('/categories', validateRequest({ body: deleteServiceCategoryBodySchema }), deleteServiceCategory)
 router.delete(
@@ -37,13 +53,6 @@ router.delete(
 )
 router.get('/:id', validateRequest({ params: serviceIdParamSchema }), getServiceById)
 router.post('/', validateRequest({ body: createServiceBodySchema }), createService)
-router.post(
-  '/import',
-  adminMiddleware,
-  spreadsheetUpload.single('file'),
-  validateSpreadsheetUpload(),
-  importServicesFromExcel
-)
 router.put('/:id', validateRequest({ params: serviceIdParamSchema, body: updateServiceBodySchema }), updateService)
 router.delete('/:id', validateRequest({ params: serviceIdParamSchema }), deleteService)
 

@@ -16,6 +16,7 @@ import {
   listCashCounts
 } from '../controllers/cash.controller'
 import { authMiddleware } from '../middleware/auth.middleware'
+import { requireSectionAccess } from '../middleware/permissions.middleware'
 import { validateRequest } from '../middleware/validation.middleware'
 import {
   addCashMovementBodySchema,
@@ -34,6 +35,7 @@ import {
 const router = Router()
 
 router.use(authMiddleware)
+router.use(requireSectionAccess('cash'))
 
 router.get('/', validateRequest({ query: cashListQuerySchema }), getCashRegisters)
 router.get('/summary', validateRequest({ query: cashSummaryQuerySchema }), getCashSummary)

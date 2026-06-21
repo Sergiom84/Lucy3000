@@ -49,6 +49,8 @@ const cabinResources = [
   { resourceId: 'CABINA_2', resourceTitle: 'Cabina 2' }
 ]
 
+const editableCabins = new Set(cabinResources.map((resource) => resource.resourceId))
+
 const professionalLabels: Record<string, string> = {
   LUCY: 'Lucy',
   TAMARA: 'Tamara',
@@ -64,6 +66,13 @@ const cabinLabels: Record<string, string> = {
 
 const formatProfessionalLabel = (professional: string | null | undefined) =>
   professionalLabels[String(professional || '')] || String(professional || '')
+
+const formatCabinLabel = (cabin: string | null | undefined) =>
+  cabinLabels[String(cabin || '')] ||
+  String(cabin || '')
+    .replace(/^CABINA_?(\d+)$/i, 'Cabina $1')
+    .replace(/_/g, ' ')
+    .trim()
 
 type PendingAppointmentDelete = {
   id: string
@@ -87,7 +96,7 @@ function AppointmentEvent({ event }: { event: any }) {
           'Bloqueo de agenda',
           `Profesional: ${formatProfessionalLabel(agendaBlock.professional)}`,
           timeRange,
-          `Cabina: ${cabinLabels[agendaBlock.cabin] || agendaBlock.cabin}`,
+          `Cabina: ${formatCabinLabel(agendaBlock.cabin)}`,
           agendaBlock.notes ? `Observaciones: ${agendaBlock.notes}` : null
         ]
           .filter(Boolean)
@@ -288,6 +297,24 @@ export default function ClientCalendarDock({
     [agendaBlocks, appointments, selectedClientId]
   )
 
+  const visibleCabinResources = useMemo(() => {
+    const resourcesById = new Map(cabinResources.map((resource) => [resource.resourceId, resource]))
+
+    for (const item of [...appointments, ...agendaBlocks]) {
+      const cabin = String(item?.cabin || '').trim()
+      if (!cabin || resourcesById.has(cabin)) {
+        continue
+      }
+
+      resourcesById.set(cabin, {
+        resourceId: cabin,
+        resourceTitle: formatCabinLabel(cabin)
+      })
+    }
+
+    return [...resourcesById.values()]
+  }, [agendaBlocks, appointments])
+
   const pendingPayment = useMemo(
     () =>
       appointments.filter((appointment) => requiresAppointmentCharge(appointment)).length,
@@ -384,7 +411,8 @@ export default function ClientCalendarDock({
         : undefined
     setPreselectedStartTime(nextStartTime)
     setPreselectedEndTime(nextStartTime ? getTimeInputValueFromDate(end) : undefined)
-    const selectedCabin = String(resourceId || 'LUCY') as typeof initialCabin
+    const requestedCabin = String(resourceId || 'LUCY')
+    const selectedCabin = (editableCabins.has(requestedCabin) ? requestedCabin : 'LUCY') as typeof initialCabin
     setInitialCabin(selectedCabin)
     setEditingAppointment(null)
     setEditingAgendaBlock(null)
@@ -699,7 +727,7 @@ export default function ClientCalendarDock({
                   events={events}
                   startAccessor="start"
                   endAccessor="end"
-                  resources={view === 'day' ? cabinResources : undefined}
+                  resources={view === 'day' ? visibleCabinResources : undefined}
                   resourceIdAccessor="resourceId"
                   resourceTitleAccessor="resourceTitle"
                   messages={calendarMessages}

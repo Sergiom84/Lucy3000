@@ -4,6 +4,7 @@ import Sidebar from './Sidebar'
 import { navigation } from './Sidebar'
 import Navbar from './Navbar'
 import { cn } from '../utils/cn'
+import { hasSectionAccess } from '../utils/permissions'
 import { useAuthStore } from '../stores/authStore'
 
 const mobilePrimaryRoutes = new Set(['/app/dashboard', '/clients', '/appointments', '/sales', '/cash'])
@@ -14,7 +15,7 @@ export default function Layout() {
   const mobileNavigation = navigation.filter((item) => {
     if (!mobilePrimaryRoutes.has(item.href)) return false
     if (item.adminOnly) return user?.role === 'ADMIN'
-    return true
+    return item.sectionKey ? hasSectionAccess(user, item.sectionKey) : false
   })
 
   return (

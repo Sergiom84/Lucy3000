@@ -2,6 +2,7 @@ import { Request, Response } from 'express'
 import bcrypt from 'bcryptjs'
 import { prisma } from '../db'
 import type { AuthRequest } from '../middleware/auth.middleware'
+import { getCabinCatalog, saveCabinCatalog } from '../utils/cabin-catalog'
 import { getProfessionalCatalog, saveProfessionalCatalog } from '../utils/professional-catalog'
 import { normalizeUser, normalizeUsers } from '../utils/user-normalizer'
 
@@ -50,12 +51,16 @@ export const getAccountSettings = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: 'User not found' })
     }
 
-    const professionalNames = await getProfessionalCatalog()
+    const [professionalNames, cabins] = await Promise.all([
+      getProfessionalCatalog(),
+      getCabinCatalog()
+    ])
     const normalizedUserData = normalizeUser(user)
 
     res.json({
       ...normalizedUserData,
-      professionalNames
+      professionalNames,
+      cabins
     })
   } catch (error) {
     console.error('Get account settings error:', error)
@@ -66,8 +71,13 @@ export const getAccountSettings = async (req: AuthRequest, res: Response) => {
 export const createUser = async (req: AuthRequest, res: Response) => {
   try {
     const { email, username, password, name, role, permissions } = req.body
+    const tenantId = req.user?.tenantId
     const normalizedEmail = normalizeEmail(email)
     const normalizedUsername = normalizeUsername(username)
+
+    if (!tenantId) {
+      return res.status(401).json({ error: 'Tenant context is required' })
+    }
 
     const existingUsers = await prisma.user.findMany({
       where: {
@@ -91,6 +101,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
       data: {
         email: normalizedEmail,
         username: normalizedUsername,
+        tenantId,
         password: await bcrypt.hash(password, 10),
         name: String(name).trim(),
         role,
@@ -109,7 +120,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
 export const updateAccountSettings = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params
-    const { email, username, password, name, professionalNames } = req.body
+    const { email, username, password, name, professionalNames, cabins } = req.body
 
     const existingUser = await prisma.user.findUnique({
       where: { id },
@@ -180,13 +191,16 @@ export const updateAccountSettings = async (req: AuthRequest, res: Response) => 
       return res.status(404).json({ error: 'User not found' })
     }
 
-    const nextProfessionalNames =
-      professionalNames !== undefined ? await saveProfessionalCatalog(professionalNames) : await getProfessionalCatalog()
+    const [nextProfessionalNames, nextCabins] = await Promise.all([
+      professionalNames !== undefined ? saveProfessionalCatalog(professionalNames) : getProfessionalCatalog(),
+      cabins !== undefined ? saveCabinCatalog(cabins) : getCabinCatalog()
+    ])
     const normalizedUserData = normalizeUser(user)
 
     res.json({
       ...normalizedUserData,
-      professionalNames: nextProfessionalNames
+      professionalNames: nextProfessionalNames,
+      cabins: nextCabins
     })
   } catch (error) {
     console.error('Update account settings error:', error)

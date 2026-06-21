@@ -5,6 +5,7 @@ import {
   toggleDashboardReminder
 } from '../controllers/reminder.controller'
 import { authMiddleware } from '../middleware/auth.middleware'
+import { requireSectionAccess } from '../middleware/permissions.middleware'
 import { validateRequest } from '../middleware/validation.middleware'
 import {
   createDashboardReminderBodySchema,
@@ -15,6 +16,7 @@ import {
 const router = Router()
 
 router.use(authMiddleware)
+router.use(requireSectionAccess('dashboard'))
 
 router.get('/', getDashboardReminders)
 router.post('/', validateRequest({ body: createDashboardReminderBodySchema }), createDashboardReminder)

@@ -13,6 +13,7 @@ import {
   importProductsFromExcel
 } from '../controllers/product.controller'
 import { adminMiddleware, authMiddleware } from '../middleware/auth.middleware'
+import { requireSectionAccess } from '../middleware/permissions.middleware'
 import { spreadsheetUpload, validateSpreadsheetUpload } from '../middleware/upload.middleware'
 import { validateRequest } from '../middleware/validation.middleware'
 import {
@@ -30,17 +31,6 @@ const router = Router()
 
 router.use(authMiddleware)
 
-router.get('/', validateRequest({ query: productsQuerySchema }), getProducts)
-router.patch('/categories', validateRequest({ body: renameProductCategoryBodySchema }), renameProductCategory)
-router.delete('/categories', validateRequest({ body: deleteProductCategoryBodySchema }), deleteProductCategory)
-router.delete(
-  '/categories/with-products',
-  validateRequest({ body: deleteProductCategoryWithProductsBodySchema }),
-  deleteProductCategoryWithProducts
-)
-router.get('/low-stock', getLowStockProducts)
-router.get('/:id', validateRequest({ params: productIdParamSchema }), getProductById)
-router.post('/', validateRequest({ body: createProductBodySchema }), createProduct)
 router.post(
   '/import',
   adminMiddleware,
@@ -48,6 +38,25 @@ router.post(
   validateSpreadsheetUpload(),
   importProductsFromExcel
 )
+router.get(
+  '/',
+  requireSectionAccess('products', 'sales', 'cash'),
+  validateRequest({ query: productsQuerySchema }),
+  getProducts
+)
+router.get('/low-stock', requireSectionAccess('products', 'dashboard'), getLowStockProducts)
+
+router.use(requireSectionAccess('products'))
+
+router.patch('/categories', validateRequest({ body: renameProductCategoryBodySchema }), renameProductCategory)
+router.delete('/categories', validateRequest({ body: deleteProductCategoryBodySchema }), deleteProductCategory)
+router.delete(
+  '/categories/with-products',
+  validateRequest({ body: deleteProductCategoryWithProductsBodySchema }),
+  deleteProductCategoryWithProducts
+)
+router.get('/:id', validateRequest({ params: productIdParamSchema }), getProductById)
+router.post('/', validateRequest({ body: createProductBodySchema }), createProduct)
 router.put(
   '/:id',
   validateRequest({ params: productIdParamSchema, body: updateProductBodySchema }),

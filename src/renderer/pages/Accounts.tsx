@@ -18,7 +18,11 @@ import toast from 'react-hot-toast'
 import Modal from '../components/Modal'
 import { useAuthStore } from '../stores/authStore'
 import type { UserPermissions } from '../stores/authStore'
-import { invalidateAppointmentProfessionalsCache } from '../utils/appointmentCatalogs'
+import {
+  invalidateAppointmentCabinsCache,
+  invalidateAppointmentProfessionalsCache,
+  type AppointmentCabinCatalogItem
+} from '../utils/appointmentCatalogs'
 import api from '../utils/api'
 
 type AccountRole = 'ADMIN' | 'EMPLOYEE'
@@ -36,6 +40,7 @@ type Account = {
 
 type AccountSettings = Account & {
   professionalNames: string[]
+  cabins: AppointmentCabinCatalogItem[]
 }
 
 const ALL_SECTION_KEYS = [
@@ -67,6 +72,15 @@ const formatCreatedAt = (value: string) =>
     dateStyle: 'medium',
     timeStyle: 'short'
   }).format(new Date(value))
+
+const toCabinKey = (label: string) =>
+  label
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^A-Z0-9_]/g, '')
 
 function SectionToggleGrid({
   sections,
@@ -220,6 +234,8 @@ export default function Accounts() {
   const [settingsPasswordConfirm, setSettingsPasswordConfirm] = useState('')
   const [settingsProfessionals, setSettingsProfessionals] = useState<string[]>([])
   const [professionalDraft, setProfessionalDraft] = useState('')
+  const [settingsCabins, setSettingsCabins] = useState<AppointmentCabinCatalogItem[]>([])
+  const [cabinDraft, setCabinDraft] = useState('')
 
   const summary = useMemo(() => {
     const active = accounts.filter((a) => a.isActive).length
@@ -395,7 +411,9 @@ export default function Accounts() {
       setSettingsPassword('')
       setSettingsPasswordConfirm('')
       setSettingsProfessionals(settings.professionalNames || [])
+      setSettingsCabins(settings.cabins || [])
       setProfessionalDraft('')
+      setCabinDraft('')
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'No se pudo cargar la configuración de la cuenta')
     } finally {
@@ -412,6 +430,8 @@ export default function Accounts() {
     setSettingsPasswordConfirm('')
     setSettingsProfessionals([])
     setProfessionalDraft('')
+    setSettingsCabins([])
+    setCabinDraft('')
   }
 
   const addProfessionalDraft = () => {
@@ -449,6 +469,41 @@ export default function Accounts() {
     })
   }
 
+  const addCabinDraft = () => {
+    const label = cabinDraft.trim()
+    if (!label) return
+    const key = toCabinKey(label)
+    if (!key) return
+    const alreadyExists = settingsCabins.some(
+      (cabin) =>
+        cabin.key === key ||
+        cabin.label.localeCompare(label, 'es', { sensitivity: 'base' }) === 0
+    )
+    if (alreadyExists) {
+      toast.error('Esa cabina ya está añadida')
+      return
+    }
+    setSettingsCabins((current) => [...current, { key, label }])
+    setCabinDraft('')
+  }
+
+  const removeCabin = (key: string) => {
+    setSettingsCabins((current) => current.filter((cabin) => cabin.key !== key))
+  }
+
+  const moveCabin = (key: string, direction: 'left' | 'right') => {
+    setSettingsCabins((current) => {
+      const idx = current.findIndex((cabin) => cabin.key === key)
+      if (idx === -1) return current
+      const targetIdx = direction === 'left' ? idx - 1 : idx + 1
+      if (targetIdx < 0 || targetIdx >= current.length) return current
+      const next = [...current]
+      const [moved] = next.splice(idx, 1)
+      next.splice(targetIdx, 0, moved)
+      return next
+    })
+  }
+
   const handleSaveAccountSettings = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!editingAccountId) return
@@ -465,19 +520,23 @@ export default function Accounts() {
           email: settingsEmail,
           username: settingsUsername.trim() || null,
           password: settingsPassword || undefined,
-          professionalNames: settingsProfessionals
+          professionalNames: settingsProfessionals,
+          cabins: settingsCabins
         }
       )
       const updatedAccount = response.data
       invalidateAppointmentProfessionalsCache()
+      invalidateAppointmentCabinsCache()
       await loadAccounts()
       if (updatedAccount.id === user?.id) {
         updateUser({
+          ...user,
           id: updatedAccount.id,
           email: updatedAccount.email,
           username: updatedAccount.username || null,
           name: updatedAccount.name,
-          role: updatedAccount.role
+          role: updatedAccount.role,
+          permissions: updatedAccount.permissions ?? user.permissions
         })
       }
       toast.success('Cuenta actualizada')
@@ -646,7 +705,7 @@ export default function Accounts() {
                 />
               </div>
               <div>
-                <label className="label">Usuario para login</label>
+                <label className="label">Alias</label>
                 <input
                   type="text"
                   value={wizardUsername}
@@ -943,7 +1002,7 @@ export default function Accounts() {
               />
             </div>
             <div>
-              <label className="label">Usuario para login</label>
+              <label className="label">Alias</label>
               <input
                 type="text"
                 value={settingsUsername}
@@ -1041,6 +1100,72 @@ export default function Accounts() {
                     <button
                       type="button"
                       onClick={() => removeProfessional(professional)}
+                      className="ml-1 text-primary-500 hover:text-primary-700"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-gray-200 p-4 dark:border-gray-700">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-base font-semibold text-gray-900 dark:text-white">
+                Cabinas del centro
+              </h3>
+              <span className="badge badge-primary">{settingsCabins.length}</span>
+            </div>
+            <div className="mt-4 flex gap-2">
+              <input
+                type="text"
+                value={cabinDraft}
+                onChange={(e) => setCabinDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    addCabinDraft()
+                  }
+                }}
+                className="input"
+                placeholder="Nombre de la cabina"
+              />
+              <button type="button" onClick={addCabinDraft} className="btn btn-secondary">
+                Añadir
+              </button>
+            </div>
+            {settingsCabins.length === 0 ? (
+              <div className="mt-4 rounded-xl border border-dashed border-gray-300 p-4 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                No hay cabinas configuradas todavía.
+              </div>
+            ) : (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {settingsCabins.map((cabin, index) => (
+                  <span
+                    key={cabin.key}
+                    className="inline-flex items-center rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-sm text-primary-700 dark:border-primary-700/40 dark:bg-primary-900/20 dark:text-primary-200"
+                  >
+                    {cabin.label}
+                    <button
+                      type="button"
+                      onClick={() => moveCabin(cabin.key, 'left')}
+                      className="ml-2 text-primary-500 hover:text-primary-700 disabled:cursor-not-allowed disabled:opacity-40"
+                      disabled={index === 0}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveCabin(cabin.key, 'right')}
+                      className="ml-1 text-primary-500 hover:text-primary-700 disabled:cursor-not-allowed disabled:opacity-40"
+                      disabled={index === settingsCabins.length - 1}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeCabin(cabin.key)}
                       className="ml-1 text-primary-500 hover:text-primary-700"
                     >
                       <X className="h-4 w-4" />

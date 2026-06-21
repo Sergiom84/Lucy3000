@@ -7,6 +7,7 @@ import {
   deleteQuote
 } from '../controllers/quote.controller'
 import { authMiddleware } from '../middleware/auth.middleware'
+import { requireSectionAccess } from '../middleware/permissions.middleware'
 import { validateRequest } from '../middleware/validation.middleware'
 import {
   createQuoteBodySchema,
@@ -18,6 +19,7 @@ import {
 const router = Router()
 
 router.use(authMiddleware)
+router.use(requireSectionAccess('clients', 'sales'))
 
 router.post('/', validateRequest({ body: createQuoteBodySchema }), createQuote)
 router.get('/client/:clientId', validateRequest({ params: quoteClientIdParamSchema }), getQuotesByClient)

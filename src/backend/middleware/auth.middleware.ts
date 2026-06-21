@@ -4,6 +4,7 @@ import { getServerNow, prisma } from '../db'
 import { runWithTenantContext } from '../tenant/context'
 import { evaluateTenantLicense } from '../tenant/license'
 import { getJwtSecret } from '../utils/jwt'
+import { parseUserPermissions } from '../utils/user-normalizer'
 
 export interface AuthRequest extends Request {
   user?: {
@@ -15,6 +16,7 @@ export interface AuthRequest extends Request {
     tenantName?: string
     isPlatformAdmin?: boolean
     licenseStatus?: string
+    permissions?: Record<string, unknown>
   }
 }
 
@@ -44,7 +46,8 @@ const getTestFallbackUser = (decoded: any) => {
     tenantId: String(decoded.tenantId || 'tenant-test'),
     tenantName: 'Test tenant',
     isPlatformAdmin: Boolean(decoded.isPlatformAdmin),
-    licenseStatus: 'ACTIVE'
+    licenseStatus: 'ACTIVE',
+    permissions: parseUserPermissions(decoded.permissions)
   }
 }
 
@@ -102,7 +105,8 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
       tenantId: user.tenantId,
       tenantName: user.tenant.name,
       isPlatformAdmin: user.isPlatformAdmin,
-      licenseStatus: licenseAccess.status
+      licenseStatus: licenseAccess.status,
+      permissions: parseUserPermissions(user.permissions)
     }
 
     if (!licenseAccess.allowed && !isLicenseBypassRequest(req)) {

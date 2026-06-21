@@ -1,13 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import type { UserPermissions } from '../utils/permissions'
 
-export interface UserPermissions {
-  sections?: string[]
-  cash?: {
-    showPaymentsByMethod?: boolean
-    showCurrentBalance?: boolean
-  }
-}
+export type { UserPermissions } from '../utils/permissions'
 
 interface User {
   id: string

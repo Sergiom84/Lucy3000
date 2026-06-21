@@ -48,6 +48,7 @@ export const updatePlatformDashboardRowBodySchema = z
     name: z.string().trim().min(1).max(120).optional(),
     tenantName: z.string().trim().min(1).max(120).optional(),
     email: z.string().trim().email().max(255).optional(),
+    username: z.union([z.string().trim().min(1).max(60), z.null()]).optional(),
     phone: z.string().trim().max(40).optional(),
     trialStarted: z.boolean().optional(),
     replyStatus: replyStatusSchema.optional(),

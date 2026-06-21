@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import multer from 'multer'
 import { authMiddleware } from '../middleware/auth.middleware'
+import { requireSectionAccess } from '../middleware/permissions.middleware'
 import {
   listClientAssets,
   uploadClientAsset,
@@ -17,6 +18,7 @@ const upload = multer({
 const router = Router({ mergeParams: true }) // access :id from parent
 
 router.use(authMiddleware)
+router.use(requireSectionAccess('clients'))
 
 router.get('/', listClientAssets)
 router.post('/', upload.single('file'), uploadClientAsset)

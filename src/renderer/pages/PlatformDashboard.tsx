@@ -12,6 +12,7 @@ type PlatformDashboardRow = {
   tenantName: string
   tenantCode: number | null
   userName: string
+  username: string | null
   email: string
   phone: string
   signedUpAt: string
@@ -43,6 +44,7 @@ type EditFormState = {
   name: string
   tenantName: string
   email: string
+  username: string
   phone: string
   status: string
 }
@@ -52,6 +54,7 @@ type AccessFormState = {
   businessName: string
   adminName: string
   adminEmail: string
+  adminUsername: string
   adminPhone: string
 }
 
@@ -156,6 +159,7 @@ export default function PlatformDashboard() {
     name: '',
     tenantName: '',
     email: '',
+    username: '',
     phone: '',
     status: ''
   })
@@ -186,6 +190,7 @@ export default function PlatformDashboard() {
       name: row.userName === '-' ? '' : row.userName,
       tenantName: row.tenantName,
       email: row.email === '-' ? '' : row.email,
+      username: row.username || '',
       phone: row.phone || '',
       status: row.source === 'tenant' ? normalizeTenantStatus(row.licenseStatus) : row.requestStatus || 'PENDING_REPLY'
     })
@@ -206,6 +211,7 @@ export default function PlatformDashboard() {
               name: editForm.name,
               tenantName: editForm.tenantName,
               email: editForm.email,
+              username: editForm.username.trim() || null,
               phone: editForm.phone,
               status: editForm.status
             }
@@ -299,6 +305,7 @@ export default function PlatformDashboard() {
       businessName: row && row.tenantName !== 'Solicitud web' ? row.tenantName : '',
       adminName: row?.userName === '-' ? '' : row?.userName || '',
       adminEmail: row?.email === '-' ? '' : row?.email || '',
+      adminUsername: row?.username || '',
       adminPhone: row?.phone || ''
     })
   }
@@ -317,6 +324,7 @@ export default function PlatformDashboard() {
         businessName: accessForm.businessName,
         adminName: accessForm.adminName,
         adminEmail: accessForm.adminEmail,
+        adminUsername: accessForm.adminUsername.trim() || undefined,
         adminPhone: accessForm.adminPhone || undefined
       })
 
@@ -462,6 +470,7 @@ export default function PlatformDashboard() {
 
                   <div className="mt-4 grid gap-4 sm:grid-cols-2">
                     <InfoBlock label="Correo" value={row.email} breakAll />
+                    <InfoBlock label="Alias" value={row.username || '-'} breakAll />
                     <InfoBlock label="Teléfono" value={row.phone || '-'} />
                     <InfoBlock label="Solicitud / alta" value={formatDate(row.requestedAt || row.signedUpAt)} note={row.requestedAt ? 'Solicitud recibida' : 'Alta creada'} />
                     <InfoBlock label="Confirmación" value={row.emailStatus} />
@@ -535,15 +544,16 @@ export default function PlatformDashboard() {
                   <thead className="bg-slate-900/90 text-left text-[11px] uppercase tracking-[0.08em] text-slate-400 xl:text-xs xl:tracking-[0.12em]">
                     <tr>
                       <th className="w-[5%] px-3 py-3 leading-tight">Acciones</th>
-                      <th className="w-[13%] px-3 py-3 leading-tight">Usuario</th>
-                      <th className="w-[17%] px-3 py-3 leading-tight">Correo</th>
+                      <th className="w-[12%] px-3 py-3 leading-tight">Usuario</th>
+                      <th className="w-[13%] px-3 py-3 leading-tight">Correo</th>
+                      <th className="w-[8%] px-3 py-3 leading-tight">Alias</th>
                       <th className="w-[7%] px-3 py-3 leading-tight">Teléfono</th>
                       <th className="w-[9%] px-3 py-3 leading-tight">Solicitud / alta</th>
-                      <th className="w-[12%] px-3 py-3 leading-tight">Confirmación</th>
-                      <th className="w-[16%] px-3 py-3 leading-tight">Contestación</th>
+                      <th className="w-[11%] px-3 py-3 leading-tight">Confirmación</th>
+                      <th className="w-[15%] px-3 py-3 leading-tight">Contestación</th>
                       <th className="w-[8%] px-3 py-3 leading-tight">Prueba</th>
-                      <th className="w-[7%] px-3 py-3 leading-tight">Pago</th>
-                      <th className="w-[11%] px-3 py-3 leading-tight">Estado</th>
+                      <th className="w-[6%] px-3 py-3 leading-tight">Pago</th>
+                      <th className="w-[6%] px-3 py-3 leading-tight">Estado</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800">
@@ -591,6 +601,7 @@ export default function PlatformDashboard() {
                           </div>
                         </td>
                         <td className="break-all px-3 py-3 text-[12px] leading-5 text-slate-200" title={row.email}>{row.email}</td>
+                        <td className="break-all px-3 py-3 text-[12px] leading-5 text-slate-200" title={row.username || ''}>{row.username || '-'}</td>
                         <td className="break-words px-3 py-3 text-slate-200">{row.phone || '-'}</td>
                         <td className="px-3 py-3 text-slate-300">
                           <div>{formatDate(row.requestedAt || row.signedUpAt)}</div>
@@ -710,6 +721,17 @@ export default function PlatformDashboard() {
                 />
               </Field>
 
+              {editingRow.source === 'tenant' ? (
+                <Field label="Alias">
+                  <input
+                    value={editForm.username}
+                    onChange={(event) => setEditForm((current) => ({ ...current, username: event.target.value }))}
+                    className="h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white outline-none focus:border-cyan-400"
+                    placeholder="Opcional"
+                  />
+                </Field>
+              ) : null}
+
               <Field label="Teléfono">
                 <input
                   value={editForm.phone}
@@ -783,7 +805,7 @@ export default function PlatformDashboard() {
             {generatedCredentials ? (
               <div className="space-y-3">
                 <InfoBlock label="ID cliente" value={String(generatedCredentials.tenantCode ?? '-')} />
-                <InfoBlock label="Usuario" value={generatedCredentials.username} breakAll />
+                <InfoBlock label="Alias" value={generatedCredentials.username} breakAll />
                 <InfoBlock label="Contraseña" value={generatedCredentials.password} breakAll />
               </div>
             ) : (
@@ -819,6 +841,17 @@ export default function PlatformDashboard() {
                       setAccessForm((current) => (current ? { ...current, adminEmail: event.target.value } : current))
                     }
                     className="h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white outline-none focus:border-cyan-400"
+                  />
+                </Field>
+
+                <Field label="Alias">
+                  <input
+                    value={accessForm.adminUsername}
+                    onChange={(event) =>
+                      setAccessForm((current) => (current ? { ...current, adminUsername: event.target.value } : current))
+                    }
+                    className="h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white outline-none focus:border-cyan-400"
+                    placeholder="Opcional"
                   />
                 </Field>
 

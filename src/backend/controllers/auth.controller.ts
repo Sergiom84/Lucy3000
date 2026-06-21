@@ -498,6 +498,7 @@ export const getCurrentUser = async (req: AuthRequest, res: Response) => {
 
     res.json({
       ...user,
+      permissions: parseUserPermissions(user.permissions),
       license: license
         ? {
             status: license.status,

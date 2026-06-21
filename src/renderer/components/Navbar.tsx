@@ -117,9 +117,11 @@ export default function Navbar({ onMenuClick }: NavbarProps = {}) {
               <p className="text-sm font-medium text-gray-900 dark:text-white">
                 {user?.name}
               </p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                {user?.role}
-              </p>
+              {user?.role === 'ADMIN' ? (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  ADMIN
+                </p>
+              ) : null}
             </div>
           </div>
 

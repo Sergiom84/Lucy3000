@@ -301,6 +301,7 @@ const buildPlatformDashboardPayload = async () => {
       tenantName: tenant.name,
       tenantCode: tenant.tenantCode ?? null,
       userName: admin?.name || '-',
+      username: admin?.username || null,
       email: admin?.email || '-',
       phone: admin?.phone || '',
       signedUpAt: admin?.createdAt || tenant.createdAt,
@@ -341,6 +342,7 @@ const buildPlatformDashboardPayload = async () => {
       tenantName: hasTenant ? 'Alta creada' : 'Solicitud web',
       tenantCode: null,
       userName: request.name,
+      username: null,
       email: request.email,
       phone: request.phone || '',
       signedUpAt: request.createdAt,
@@ -390,7 +392,8 @@ const updateTenantDashboardRow = async (tenantId: string, body: any) => {
 
   const admin = tenant.users.find((user) => user.role === 'ADMIN') || tenant.users[0] || null
   const hasTenantNameUpdate = body.tenantName !== undefined
-  const hasUserUpdate = body.name !== undefined || body.email !== undefined || body.phone !== undefined
+  const hasUserUpdate =
+    body.name !== undefined || body.email !== undefined || body.username !== undefined || body.phone !== undefined
   const hasLicenseUpdate = body.status !== undefined
   const hasTrialToggleUpdate = body.trialStarted !== undefined
   const hasReplyStatusUpdate = body.replyStatus !== undefined
@@ -423,6 +426,7 @@ const updateTenantDashboardRow = async (tenantId: string, body: any) => {
         data: {
           ...(body.name !== undefined ? { name: body.name } : {}),
           ...(body.email !== undefined ? { email: normalizeEmail(body.email) } : {}),
+          ...(body.username !== undefined ? { username: normalizeUsername(body.username) } : {}),
           ...(body.phone !== undefined ? { phone: String(body.phone || '').trim() || null } : {})
         }
       })

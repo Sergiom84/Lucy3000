@@ -1,8 +1,9 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import { useAuthStore } from './stores/authStore'
 import api, { setApiBaseUrl } from './utils/api'
+import { getFirstAccessiblePath, hasSectionAccess, type SectionKey } from './utils/permissions'
 import type { DatabaseConfigStatus } from '../shared/electron'
 
 const Layout = lazy(() => import('./components/Layout'))
@@ -39,7 +40,37 @@ function AdminOnlyRoute({ children }: { children: JSX.Element }) {
   const { user } = useAuthStore()
 
   if (user?.role !== 'ADMIN') {
-    return <Navigate to="/" replace />
+    return <Navigate to={getFirstAccessiblePath(user)} replace />
+  }
+
+  return children
+}
+
+function NoSectionAccess() {
+  return (
+    <div className="flex min-h-[60vh] items-center justify-center px-4">
+      <div className="max-w-md rounded-xl border border-gray-200 bg-white p-6 text-center shadow-sm dark:border-gray-700 dark:bg-gray-800">
+        <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Sin acceso asignado</h1>
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+          Tu cuenta no tiene ninguna sección activa. Pide al administrador que revise tus permisos.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function SectionRoute({ section, children }: { section: SectionKey; children: JSX.Element }) {
+  const { user } = useAuthStore()
+  const location = useLocation()
+
+  if (!hasSectionAccess(user, section)) {
+    const fallbackPath = getFirstAccessiblePath(user)
+
+    if (fallbackPath !== location.pathname) {
+      return <Navigate to={fallbackPath} replace />
+    }
+
+    return <NoSectionAccess />
   }
 
   return children
@@ -89,7 +120,7 @@ function AppToaster() {
 }
 
 function App() {
-  const { isAuthenticated, token, updateUser, logout } = useAuthStore()
+  const { isAuthenticated, token, user, updateUser, logout } = useAuthStore()
   const [authReady, setAuthReady] = useState(false)
   const [databaseStatus, setDatabaseStatus] = useState<DatabaseConfigStatus | null>(null)
   const [databaseStatusReady, setDatabaseStatusReady] = useState(false)
@@ -190,22 +221,79 @@ function App() {
 
       <Suspense fallback={<RouteLoader />}>
         <Routes>
-          <Route path="/" element={<Navigate to={isAuthenticated ? '/app/dashboard' : '/login'} replace />} />
+          <Route path="/" element={<Navigate to={isAuthenticated ? getFirstAccessiblePath(user) : '/login'} replace />} />
           <Route path="/promotion" element={<PublicAccess />} />
-          <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to="/app/dashboard" />} />
+          <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to={getFirstAccessiblePath(user)} />} />
           <Route path="/forgot-password" element={!isAuthenticated ? <ForgotPassword /> : <Navigate to="/login" />} />
           <Route path="/reset-password" element={!isAuthenticated ? <ResetPassword /> : <Navigate to="/login" />} />
           <Route path="/panel" element={<PlatformDashboard />} />
 
           <Route element={isAuthenticated ? <LicensedArea /> : <Navigate to="/login" />}>
-            <Route path="/app/dashboard" element={<Dashboard />} />
-            <Route path="/clients" element={<Clients />} />
-            <Route path="/clients/:id" element={<ClientDetail />} />
-            <Route path="/appointments" element={<Appointments />} />
-            <Route path="/services" element={<Services />} />
-            <Route path="/products" element={<Products />} />
-            <Route path="/sales" element={<Sales />} />
-            <Route path="/cash" element={<Cash />} />
+            <Route path="/no-access" element={<NoSectionAccess />} />
+            <Route
+              path="/app/dashboard"
+              element={
+                <SectionRoute section="dashboard">
+                  <Dashboard />
+                </SectionRoute>
+              }
+            />
+            <Route
+              path="/clients"
+              element={
+                <SectionRoute section="clients">
+                  <Clients />
+                </SectionRoute>
+              }
+            />
+            <Route
+              path="/clients/:id"
+              element={
+                <SectionRoute section="clients">
+                  <ClientDetail />
+                </SectionRoute>
+              }
+            />
+            <Route
+              path="/appointments"
+              element={
+                <SectionRoute section="appointments">
+                  <Appointments />
+                </SectionRoute>
+              }
+            />
+            <Route
+              path="/services"
+              element={
+                <SectionRoute section="services">
+                  <Services />
+                </SectionRoute>
+              }
+            />
+            <Route
+              path="/products"
+              element={
+                <SectionRoute section="products">
+                  <Products />
+                </SectionRoute>
+              }
+            />
+            <Route
+              path="/sales"
+              element={
+                <SectionRoute section="sales">
+                  <Sales />
+                </SectionRoute>
+              }
+            />
+            <Route
+              path="/cash"
+              element={
+                <SectionRoute section="cash">
+                  <Cash />
+                </SectionRoute>
+              }
+            />
             <Route
               path="/reports"
               element={
@@ -222,8 +310,22 @@ function App() {
                 </AdminOnlyRoute>
               }
             />
-            <Route path="/ranking" element={<ClientRanking />} />
-            <Route path="/settings" element={<Settings />} />
+            <Route
+              path="/ranking"
+              element={
+                <SectionRoute section="ranking">
+                  <ClientRanking />
+                </SectionRoute>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <SectionRoute section="settings">
+                  <Settings />
+                </SectionRoute>
+              }
+            />
             <Route
               path="/sql"
               element={

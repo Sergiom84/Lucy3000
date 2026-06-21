@@ -1,9 +1,20 @@
 import { z } from 'zod'
 
 const userRoleSchema = z.enum(['ADMIN', 'EMPLOYEE'])
+const userSectionPermissionSchema = z.enum([
+  'dashboard',
+  'clients',
+  'ranking',
+  'appointments',
+  'services',
+  'products',
+  'sales',
+  'cash',
+  'settings'
+])
 
 const userPermissionsSchema = z.object({
-  sections: z.array(z.string().max(50)).max(20).optional(),
+  sections: z.array(userSectionPermissionSchema).max(20).optional(),
   cash: z
     .object({
       showPaymentsByMethod: z.boolean().optional(),
@@ -59,6 +70,17 @@ export const updateAccountSettingsBodySchema = z
     professionalNames: z
       .array(z.string().trim().min(1, 'Professional name is required').max(120, 'Professional name is too long'))
       .max(100, 'Too many professionals')
+      .optional(),
+    cabins: z
+      .array(
+        z
+          .object({
+            key: z.string().trim().min(1, 'Cabin key is required').max(120, 'Cabin key is too long'),
+            label: z.string().trim().min(1, 'Cabin label is required').max(120, 'Cabin label is too long')
+          })
+          .strict()
+      )
+      .max(100, 'Too many cabins')
       .optional()
   })
   .strict()

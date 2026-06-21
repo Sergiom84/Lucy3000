@@ -32,10 +32,10 @@ const createPlatformAuthHeader = () => {
   return `Bearer ${token}`
 }
 
-const createEmployeeAuthHeader = () => {
+const createEmployeeAuthHeader = (permissions?: unknown) => {
   process.env.JWT_SECRET = 'test-jwt-secret'
   const token = jwt.sign(
-    { id: 'user-2', email: 'employee@lucy3000.com', role: 'EMPLOYEE' },
+    { id: 'user-2', email: 'employee@lucy3000.com', role: 'EMPLOYEE', permissions },
     process.env.JWT_SECRET,
     { expiresIn: '1h' }
   )
@@ -367,6 +367,8 @@ describe('API smoke tests', () => {
     prismaMock.sale.findMany.mockResolvedValue([])
     prismaMock.quote.findMany.mockResolvedValue([])
     prismaMock.user.findUnique.mockResolvedValue({ id: 'user-1', name: 'Lucy' })
+    prismaMock.trialRequest.create.mockResolvedValue({ id: 'trial-request-1' })
+    prismaMock.trialRequest.update.mockResolvedValue({ id: 'trial-request-1' })
     prismaMock.service.findMany.mockResolvedValue([
       {
         id: '3adf3ca8-c749-4f40-9f2e-54a8ff0f8f59',
@@ -739,6 +741,18 @@ describe('API smoke tests', () => {
     expect(response.status).toBe(403)
     expect(response.body.error).toBe('Admin access required')
     expect(prismaMock.tenantLicense.findUnique).not.toHaveBeenCalled()
+  })
+
+  it('GET /api/dashboard/stats rejects employees without dashboard permission', async () => {
+    const response = await request(app)
+      .get('/api/dashboard/stats')
+      .set('Authorization', createEmployeeAuthHeader({ sections: ['sales'] }))
+
+    expect(response.status).toBe(403)
+    expect(response.body).toEqual({
+      error: 'Section access required',
+      sections: ['dashboard']
+    })
   })
 
   it('POST /api/sales rejects invalid payload with 400', async () => {
