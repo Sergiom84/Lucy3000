@@ -1,7 +1,7 @@
 import { logError, logInfo, logWarn } from '../utils/logger'
 import type { CreateTrialRequestBody } from '../validators/trialRequest.schemas'
 
-const DEFAULT_TRIAL_REQUEST_TO = 'sergiohernandezlara07@gmail.com'
+const DEFAULT_TRIAL_REQUEST_TO = 'info@sohl.dev'
 const DEFAULT_TRIAL_REQUEST_FROM = 'Lucy3000 <Info@sohl.dev>'
 
 type ResendEmailResponse = {
