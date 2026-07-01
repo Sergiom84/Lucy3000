@@ -130,31 +130,72 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       take: 5
     })
 
-    // Gráfico de ventas de los últimos 7 días
-    const last7Days = []
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date(today)
-      date.setDate(date.getDate() - i)
-      const nextDay = new Date(date)
-      nextDay.setDate(nextDay.getDate() + 1)
+    // Gráfico de ingresos: ventana móvil anclada al último día con ventas.
+    // Si no hay ventas recientes, muestra el último periodo que sí tuvo actividad
+    // en lugar de una semana vacía.
+    const CHART_DAYS = 30
+    const dayKey = (value: Date) =>
+      `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
 
-      const daySales = await prisma.sale.findMany({
-        where: {
-          date: {
-            gte: date,
-            lt: nextDay
-          },
-          status: 'COMPLETED'
+    const latestSale = await prisma.sale.findFirst({
+      where: { status: 'COMPLETED' },
+      orderBy: { date: 'desc' },
+      select: { date: true }
+    })
+
+    const chartEnd = new Date(today)
+    if (latestSale?.date) {
+      const latest = new Date(latestSale.date)
+      latest.setHours(0, 0, 0, 0)
+      if (latest < chartEnd) {
+        chartEnd.setTime(latest.getTime())
+      }
+    }
+
+    const chartStart = new Date(chartEnd)
+    chartStart.setDate(chartStart.getDate() - (CHART_DAYS - 1))
+    const chartEndExclusive = new Date(chartEnd)
+    chartEndExclusive.setDate(chartEndExclusive.getDate() + 1)
+
+    const rangeSales = await prisma.sale.findMany({
+      where: {
+        status: 'COMPLETED',
+        date: {
+          gte: chartStart,
+          lt: chartEndExclusive
         }
-      })
+      },
+      select: { date: true, total: true }
+    })
 
-      const dayRevenue = daySales.reduce((sum, sale) => sum + Number(sale.total), 0)
+    const salesBuckets = new Map<string, { revenue: number; count: number }>()
+    for (const sale of rangeSales) {
+      const key = dayKey(new Date(sale.date))
+      const bucket = salesBuckets.get(key) ?? { revenue: 0, count: 0 }
+      bucket.revenue += Number(sale.total)
+      bucket.count += 1
+      salesBuckets.set(key, bucket)
+    }
 
+    const last7Days = []
+    for (let i = 0; i < CHART_DAYS; i++) {
+      const date = new Date(chartStart)
+      date.setDate(date.getDate() + i)
+      const key = dayKey(date)
+      const bucket = salesBuckets.get(key)
       last7Days.push({
-        date: date.toISOString().split('T')[0],
-        revenue: dayRevenue,
-        count: daySales.length
+        date: key,
+        revenue: bucket?.revenue ?? 0,
+        count: bucket?.count ?? 0
       })
+    }
+
+    const salesChartPeriod = {
+      start: dayKey(chartStart),
+      end: dayKey(chartEnd),
+      days: CHART_DAYS,
+      // true cuando el periodo termina antes de hoy (anclado a la última venta)
+      anchoredToLatest: chartEnd.getTime() < today.getTime()
     }
 
     res.json({
@@ -182,7 +223,8 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
         ...sale,
         displayName: getSaleDisplayName(sale)
       })),
-      salesChart: last7Days
+      salesChart: last7Days,
+      salesChartPeriod
     })
   } catch (error) {
     console.error('Get dashboard stats error:', error)

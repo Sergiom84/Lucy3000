@@ -48,6 +48,13 @@ type DashboardSalesPoint = {
   revenue: number
 }
 
+type DashboardSalesPeriod = {
+  start: string
+  end: string
+  days: number
+  anchoredToLatest: boolean
+}
+
 type DashboardStats = {
   today?: {
     appointments: number
@@ -60,6 +67,7 @@ type DashboardStats = {
   upcomingAppointments?: DashboardAppointment[]
   recentSales?: DashboardSale[]
   salesChart?: DashboardSalesPoint[]
+  salesChartPeriod?: DashboardSalesPeriod
 }
 
 const ACCENT = '#9a5a63'
@@ -143,6 +151,15 @@ export default function Dashboard() {
   const upcomingAppointments = stats?.upcomingAppointments ?? []
   const recentSales = stats?.recentSales ?? []
   const salesChart = stats?.salesChart ?? []
+  const salesChartPeriod = stats?.salesChartPeriod
+  const formatShortDate = (iso: string) => {
+    const [year, month, day] = iso.split('-').map(Number)
+    return new Date(year, month - 1, day).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })
+  }
+  const salesChartTitle =
+    salesChartPeriod?.anchoredToLatest && salesChartPeriod.start && salesChartPeriod.end
+      ? `${formatShortDate(salesChartPeriod.start)} – ${formatShortDate(salesChartPeriod.end)}`
+      : `Últimos ${salesChartPeriod?.days ?? 7} días`
   const tenantCode = user?.tenant?.tenantCode ? String(user.tenant.tenantCode) : ''
   const serifStyle = { fontFamily: '"Cormorant Garamond", ui-serif, Georgia, serif' }
 
@@ -252,8 +269,13 @@ export default function Dashboard() {
                 className="mt-1 text-2xl font-normal tracking-tight text-gray-900 dark:text-white sm:text-3xl"
                 style={serifStyle}
               >
-                Últimos 7 días
+                {salesChartTitle}
               </h2>
+              {salesChartPeriod?.anchoredToLatest ? (
+                <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                  Sin ventas recientes · último periodo con actividad
+                </p>
+              ) : null}
             </div>
             {todayRevenue !== null ? (
               <div className="text-xl font-normal text-gray-900 dark:text-white sm:text-2xl" style={serifStyle}>

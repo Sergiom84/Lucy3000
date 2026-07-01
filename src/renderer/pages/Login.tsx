@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Download, Hash, ShieldCheck, Sparkles, Mail, Lock, User } from 'lucide-react'
+import { Download, Hash, ShieldCheck, Sparkles, Mail, Lock, User, Eye, EyeOff } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import { usePwaInstallPrompt } from '../hooks/usePwaInstallPrompt'
 import api from '../utils/api'
@@ -9,9 +9,14 @@ import toast from 'react-hot-toast'
 export default function Login() {
   const navigate = useNavigate()
   const { login, bootstrapChecked, bootstrapRequired, setBootstrapStatus } = useAuthStore()
-  const [identifier, setIdentifier] = useState('')
-  const [tenantCode, setTenantCode] = useState('')
+  const [identifier, setIdentifier] = useState(
+    () => (typeof window !== 'undefined' && window.localStorage.getItem('lucy3000:lastIdentifier')) || ''
+  )
+  const [tenantCode, setTenantCode] = useState(
+    () => (typeof window !== 'undefined' && window.localStorage.getItem('lucy3000:lastTenantCode')) || ''
+  )
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [bootstrapBusinessName, setBootstrapBusinessName] = useState('')
   const [bootstrapName, setBootstrapName] = useState('')
   const [bootstrapUsername, setBootstrapUsername] = useState('')
@@ -63,6 +68,9 @@ export default function Login() {
         tenantCode: tenantCode.trim()
       })
       const { token, user } = response.data
+
+      window.localStorage.setItem('lucy3000:lastIdentifier', identifier)
+      window.localStorage.setItem('lucy3000:lastTenantCode', tenantCode.trim())
 
       login(user, token)
       if (user?.license?.status === 'TRIAL_EXPIRED' || user?.license?.status === 'BLOCKED') {
@@ -300,13 +308,24 @@ export default function Login() {
                   <Lock className="w-4 h-4 inline mr-2" />
                   Contraseña
                 </label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="input"
-                  required
-                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="input pr-11"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    aria-pressed={showPassword}
+                    className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-gray-200"
+                  >
+                    {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
+                </div>
               </div>
 
               <button
